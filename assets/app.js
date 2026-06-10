@@ -25,7 +25,14 @@ const BOOK = [
     ],
   },
   {
-    part: "Part III — Containers, From Scratch",
+    part: "Part III — IPC, Signals & Pipes",
+    chapters: [
+      { slug: "signals",              title: "Signals: The Kernel's Asynchronous Notifications" },
+      { slug: "ipc-pipes",            title: "Pipes, FIFOs & Unix Sockets" },
+    ],
+  },
+  {
+    part: "Part IV — Containers, From Scratch",
     chapters: [
       { slug: "containers-overview",  title: "What a Container Actually Is" },
       { slug: "namespaces",           title: "Namespaces" },
@@ -37,15 +44,28 @@ const BOOK = [
     ],
   },
   {
-    part: "Part IV — Modern Kernel Mechanisms",
+    part: "Part V — Modern Kernel Mechanisms",
     chapters: [
       { slug: "ebpf-internals",       title: "eBPF Internals" },
       { slug: "security-hardening",   title: "Linux Security & Confinement" },
       { slug: "modern-io",            title: "Modern I/O & io_uring" },
+      { slug: "rust-kernel",          title: "Rust in the Linux Kernel" },
     ],
   },
   {
-    part: "Part V — Tools & Going Deeper",
+    part: "Part VI — Inside the Kernel Codebase",
+    chapters: [
+      { slug: "kernel-sync",          title: "Kernel Synchronization: Locks, Atomics & RCU" },
+    ],
+  },
+  {
+    part: "Part VII — The Kernel Project",
+    chapters: [
+      { slug: "kernel-governance",    title: "How the Kernel Is Made: Process & Governance" },
+    ],
+  },
+  {
+    part: "Part VIII — Tools & Going Deeper",
     chapters: [
       { slug: "observability",        title: "/proc, strace, perf & eBPF" },
       { slug: "kernel-dev",           title: "Reading & Building the Kernel" },
@@ -122,7 +142,7 @@ async function loadChapter(slug) {
     document.title = `${ch.title} — The Linux Deep Dive`;
   } catch (err) {
     articleEl.innerHTML =
-      `<h1>Couldn’t load this page</h1>
+      `<h1>Couldn't load this page</h1>
        <p>Failed to fetch <code>content/${slug}.md</code> (${err.message}).</p>
        <p>If you opened <code>index.html</code> directly from disk, the browser
        blocks local <code>fetch()</code> calls. Serve the folder instead:</p>

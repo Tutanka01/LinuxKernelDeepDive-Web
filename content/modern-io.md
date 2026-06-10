@@ -388,6 +388,6 @@ results, and registered resources reduce repeated lookup/pinning overhead.
 
 ---
 
-**Next:** the toolbox chapter now lands differently: `/proc`, `strace`, `perf`,
-and eBPF are not isolated tools, but different windows into the same kernel
-machinery.
+**Next:** Rust in the Linux kernel — the first new language in 30 years. Why
+it matters, what's already been merged, how it coexists with C, and what it
+means for the future of kernel security and driver development.

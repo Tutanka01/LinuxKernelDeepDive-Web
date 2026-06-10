@@ -292,6 +292,7 @@ appropriately or use setsockopt(SO_RCVBUF/SO_SNDBUF).)*
 
 ---
 
-**Next:** Part III. We take everything so far — processes, mounts, cgroups
-hooks, virtual networking — and discover containers were hiding in plain
-sight all along.
+**Next:** Part III — a crucial piece missing from the picture. Processes are
+isolated, but they need to talk. Signals, pipes, and Unix domain sockets — the
+kernel's inter-process communication primitives that every shell pipeline and
+every daemon depends on.

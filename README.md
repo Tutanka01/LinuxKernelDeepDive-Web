@@ -37,17 +37,27 @@ content/*.md        the chapters — one Markdown file each
    (slug = filename without `.md`).
 3. Refresh. That's it.
 
-## Curriculum
+## Curriculum (26 chapters across 8 parts)
 
-- **Part I — Foundations:** what Linux is, the boot process, kernel vs user
-  space and system calls.
-- **Part II — Core Kernel Subsystems:** processes, scheduling, virtual
+- **Part I — Foundations (3):** what Linux is, the boot process, kernel vs
+  user space and system calls.
+- **Part II — Core Kernel Subsystems (6):** processes, scheduling, virtual
   memory, filesystems/VFS, devices & modules, networking.
-- **Part III — Containers, From Scratch:** what a container actually is,
+- **Part III — IPC, Signals & Pipes (2):** signals — the kernel's
+  asynchronous notification system; pipes, FIFOs, and Unix domain sockets
+  — the glue between processes.
+- **Part IV — Containers, From Scratch (7):** what a container actually is,
   namespaces, cgroups v2, images & OverlayFS, building a container by hand,
   the runtime stack (Docker/containerd/runc), container networking.
-- **Part IV — Tools & Going Deeper:** observability (/proc, strace, perf,
-  eBPF) and reading/building the kernel itself.
+- **Part V — Modern Kernel Mechanisms (4):** eBPF internals, security &
+  confinement, modern I/O & io_uring, Rust in the Linux kernel.
+- **Part VI — Inside the Kernel Codebase (1):** kernel synchronization —
+  spinlocks, mutexes, atomics, RCU, and memory ordering.
+- **Part VII — The Kernel Project (1):** how the kernel is made — the
+  maintainer hierarchy, the merge window cadence, stable/LTS releases,
+  testing infrastructure, and the culture of Linux development.
+- **Part VIII — Tools & Going Deeper (2):** observability (/proc, strace,
+  perf, eBPF) and reading/building the kernel itself.
 
 Rendering: [marked](https://github.com/markedjs/marked) +
 [highlight.js](https://highlightjs.org/) from CDN.
