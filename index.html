@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Linux Deep Dive — How Your System Really Works</title>
+  <meta name="description" content="A plain-spoken, in-depth guide to how Linux really works: the kernel, processes, memory, filesystems — and how containers are built from kernel primitives.">
+  <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
+</head>
+<body>
+  <div class="layout">
+
+    <button id="sidebar-toggle" aria-label="Toggle table of contents">☰ Contents</button>
+
+    <nav id="sidebar" class="sidebar">
+      <div class="site-title">
+        <a href="#/">The Linux<br>Deep Dive</a>
+        <p class="site-subtitle">how your system really works</p>
+      </div>
+      <div id="toc"><!-- table of contents injected by app.js --></div>
+      <div class="sidebar-footer">
+        <p>Written as plain Markdown,<br>rendered in your browser.</p>
+      </div>
+    </nav>
+
+    <main class="content">
+      <article id="article" class="article">
+        <p class="loading">Loading…</p>
+      </article>
+      <nav id="pager" class="pager"></nav>
+      <footer class="page-footer">
+        <p>The Linux Deep Dive — a personal field guide to Linux internals.</p>
+      </footer>
+    </main>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
