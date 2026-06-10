@@ -2,7 +2,8 @@
 
 > **Goal:** follow the machine from electricity to a usable shell, naming every
 > actor on the way: firmware → bootloader → kernel → init → your login. After
-> this chapter, `dmesg` and "PID 1" will mean something concrete.
+> this chapter, `dmesg` and "PID 1" will mean something concrete, and you'll
+> understand exactly what your bootloader is doing in those three seconds.
 
 Booting looks like magic because four completely different programs hand
 control to each other in under a few seconds. Let's slow it down.
@@ -44,6 +45,33 @@ The firmware:
 > the disk (the MBR); UEFI understands partitions and filesystems and runs a
 > proper executable. Same job, fewer dark rituals.
 
+### UEFI in slightly more detail
+
+The ESP contains EFI executables — PE/COFF binaries, not ELF. Your bootloader
+is one of them. UEFI hands the bootloader:
+
+- a **memory map** (which ranges are usable, reserved, ACPI, etc. — the kernel
+  needs this, and the bootloader passes it along);
+- access to UEFI **runtime services** (clock, NVRAM variables, capsule
+  updates) — the kernel can call these during boot before switching to its own
+  drivers;
+- the **GOP framebuffer** if you're booting graphically (what lets you see the
+  GRUB menu and the early kernel console).
+
+On most distributions you can inspect the boot entries:
+
+```bash
+sudo efibootmgr -v
+# Boot0000* ubuntu  HD(1,GPT,...)/File(\EFI\ubuntu\shimx64.efi)
+```
+
+That `shimx64.efi` is the UEFI shim (for Secure Boot compatibility) which
+then loads GRUB. The Secure Boot chain: firmware verifies shim's signature
+(using Microsoft's CA, which shim is signed with), shim verifies GRUB (using
+the distro's key), GRUB verifies the kernel (signatures embedded in the
+vmlinuz). If any link fails, boot halts — this is the "trusted boot" chain
+and why unsigned kernels/modules won't load under Secure Boot.
+
 ## Stage 2 — Bootloader (GRUB)
 
 The bootloader's job is small but vital:
@@ -57,7 +85,26 @@ The bootloader's job is small but vital:
    — see yours with `cat /proc/cmdline`);
 4. jump into the kernel's entry point. The bootloader's job is done forever.
 
-### Why does the initramfs exist?
+### The kernel command line, decoded
+
+```bash
+cat /proc/cmdline
+# BOOT_IMAGE=/boot/vmlinuz-6.8.0 root=UUID=abc123 ro quiet splash
+```
+
+Each parameter has a role:
+- `root=UUID=abc123` — which filesystem becomes `/`
+- `ro` — mount root read-only initially (initramfs remounts rw later)
+- `quiet` — suppress most kernel log messages at boot
+- `splash` — show a graphical splash screen
+- `init=/bin/bash` — override PID 1 (single-user recovery!)
+- `panic=5` — auto-reboot after 5 seconds if the kernel panics
+
+The kernel itself accepts hundreds of parameters (`modprobe.blacklist`,
+`cgroup_no_v1`, `mitigations=off`…). The `Documentation/admin-guide/kernel-parameters.txt`
+in the kernel source is the complete reference.
+
+### What's actually in the initramfs?
 
 A chicken-and-egg problem: to mount your real root filesystem, the kernel may
 need modules (disk drivers, filesystem drivers, RAID/LVM/encryption support) —
@@ -69,8 +116,20 @@ script from it which loads the right modules, assembles RAID/decrypts disks if
 needed, mounts the real root, and finally **switches root** onto it.
 
 ```bash
-# peek inside your own initramfs (Debian/Ubuntu):
 lsinitramfs /boot/initrd.img-$(uname -r) | head -30
+# lib/modules/6.8.0/kernel/drivers/nvme/host/nvme.ko.zst
+# lib/modules/6.8.0/kernel/fs/ext4/ext4.ko.zst
+# scripts/local-block/lvm2_scan
+# sbin/blkid
+# usr/sbin/cryptsetup
+```
+
+You can even unpack it and study the init script:
+
+```bash
+mkdir /tmp/initrd && cd /tmp/initrd
+zstdcat /boot/initrd.img-$(uname -r) | cpio -idmv 2>/dev/null
+cat init       # the script systemd/klibc-based initramfs runs
 ```
 
 ## Stage 3 — The kernel wakes up
@@ -80,16 +139,27 @@ order. You can watch a replay of it any time with `dmesg`:
 
 ```bash
 sudo dmesg | head -40
+sudo dmesg --human --level=err,warn  # just the trouble
+sudo dmesg -H -T                     # human timestamps
 ```
 
 Roughly, it:
 
 1. **CPU & memory setup** — builds page tables, enables virtual memory,
-   detects all RAM, brings up the other CPU cores (SMP).
-2. **Core subsystems** — scheduler, interrupt handlers, timers.
-3. **Device discovery** — walks PCIe/USB buses, matches each device to a
-   **driver**, creating entries in `/dev` and `/sys`.
-4. **Mounts the root filesystem** (via the initramfs dance above).
+   detects all RAM (from the UEFI memory map!), brings up the other CPU cores
+   via SMP. Each core gets its own stack, its own per-CPU data structures.
+2. **Core subsystems** — initializes the scheduler (so kernel threads can
+   run), interrupt handlers (so it can respond to hardware), the timer
+   subsystem (so preemption works), and the RCU subsystem (lock-free read
+   paths used everywhere in the kernel).
+3. **Device discovery** — walks PCIe/USB buses, populates the device model.
+   The kernel has a built-in table that maps PCI vendor/device IDs to drivers;
+   it matches each discovered device and calls `probe()`. `/dev` and `/sys`
+   entries appear.
+4. **Mounts the root filesystem** — via the initramfs. The initramfs `/init`
+   does the heavy lifting: loads needed modules (nvme, ext4, dm-crypt…),
+   assembles storage stacks (md-raid, LVM, LUKS unlock), mounts the real root,
+   runs `pivot_root` or `switch_root` to make it `/`, then cleans up.
 5. **Starts PID 1** — the kernel executes exactly one user-space program,
    traditionally `/sbin/init`, and from this moment the kernel becomes purely
    *reactive*: it only acts when interrupts fire or processes make syscalls.
@@ -97,6 +167,24 @@ Roughly, it:
 > That last point is worth repeating: **after boot, the kernel has no "main
 > loop" running on your behalf.** It's a library of services invoked by
 > hardware interrupts and system calls. The world is driven by user space.
+
+### The dmesg boot story decoded
+
+Here's what key lines in your dmesg actually mean:
+
+```text
+[0.000000] Linux version 6.8.0 (buildd@…)      ← kernel version and builder
+[0.000000] Command line: BOOT_IMAGE=...         ← the cmdline we discussed
+[0.000000] BIOS-provided physical RAM map:       ← what UEFI told the kernel
+[0.000000] e820: usable [mem 0x00000000-0x0009ffff]
+[0.012345] smpboot: Booting Node 0, CPUs: #1 #2 #3 … ← multi-core bringup
+[0.345678] pci_bus 0000:00: root bus resource    ← PCI enumeration begins
+[1.234567] EXT4-fs (sda2): mounted filesystem     ← the real root, mounted
+[2.345678] systemd[1]: Inserted module 'autofs4'   ← PID 1 now running
+```
+
+The timestamps in brackets are seconds since the kernel started (the `[0.000000]` at first log). Diagnose slow boots by looking at large gaps:
+`dmesg | awk '{print $1}' | sed 's/[][]//g' | sort -rn | head -1`.
 
 ## Stage 4 — PID 1: init (systemd)
 
@@ -116,7 +204,9 @@ timers) with full dependency tracking and parallelism.
 pstree -p | head -15        # everything descends from systemd(1)
 systemctl list-units --type=service --state=running
 systemd-analyze blame       # who's slow at boot?
-journalctl -b               # logs since this boot
+systemd-analyze critical-chain  # the longest dependency chain
+journalctl -b -0            # logs since THIS boot
+journalctl -b -1            # logs from the PREVIOUS boot (gold for crashes)
 ```
 
 Old-school `sysvinit` ran numbered shell scripts in sequence
@@ -131,6 +221,9 @@ After=network.target
 [Service]
 ExecStart=/usr/sbin/nginx -g 'daemon off;'
 Restart=on-failure
+PrivateTmp=true        ← private /tmp, via mount namespace!
+ProtectSystem=strict   ← read-only /usr, /etc
+ReadWritePaths=/var/log/nginx
 
 [Install]
 WantedBy=multi-user.target
@@ -142,24 +235,49 @@ container world and the init world are built on identical kernel primitives.
 
 ## Stage 5 — Login
 
-For a server: systemd starts `getty` on a terminal, which runs `login`,
-which checks your password against `/etc/shadow`, sets your UID/GID, and
-finally `exec`s your shell.
+For a server: systemd starts `getty` on a tty. `getty` opens the terminal,
+prints `/etc/issue`, runs `login`. `login` checks your password against
+`/etc/shadow` (or PAM), sets your UID/GID/home directory, and finally
+`exec`s your shell. At this point you have a session — the kernel doesn't
+know or care that you're "logged in"; it just knows the process tree changed.
 
 For a desktop: a **display manager** (GDM, SDDM) does the same dance
-graphically and starts your session.
+graphically: it owns the GPU/input, runs a login screen, authenticates, and
+starts your session — which is a regular process tree under systemd's
+`user@1000.service`.
 
 Either way the result is identical: a process tree rooted at PID 1, with your
 shell as a leaf, waiting for you to type. The boot is complete.
+
+## Boot performance: what slows things down
+
+If your machine boots slowly, here's where to look:
+
+```bash
+systemd-analyze                # total time: firmware (red) + loader + kernel + user
+systemd-analyze blame          # per-service startup times, descending
+systemd-analyze plot > boot.svg # swimlane chart
+dmesg -d                       # show delta timestamps between kernel messages
+```
+
+Common culprits, by stage:
+- **Firmware time** (5-15s) — UEFI POST, memory training, device enumeration. Hard to fix.
+- **Loader time** (1-5s) — GRUB's timeout, filesystem drivers loading the kernel image. Trim `GRUB_TIMEOUT` in `/etc/default/grub`.
+- **Kernel time** (2-10s) — device probing, firmware loading. Cached and parallelized by the kernel; usually not the problem.
+- **Userspace time** (5-30s) — the big one. systemd units waiting on slow services (network-online.target is a classic). `systemd-analyze critical-chain` names the choke point.
 
 ## Try it yourself
 
 ```bash
 cat /proc/cmdline            # what the bootloader told the kernel
 sudo dmesg --human | less    # the kernel's own boot diary
+sudo dmesg -d | sort -t'<' -k2 -rn | head -5  # where did the kernel spend time?
 systemd-analyze              # how long each boot stage took
+systemd-analyze critical-chain  # the longest dependency chain
 pstree -p | head             # the process tree growing from PID 1
-ls /boot                     # kernel images and initramfs archives
+ls -lh /boot                 # kernel images and initramfs archives
+lsinitramfs /boot/initrd.img-$(uname -r) | wc -l  # how many files in there?
+sudo efibootmgr -v           # UEFI boot entries
 ```
 
 ## Check your understanding
@@ -168,6 +286,21 @@ ls /boot                     # kernel images and initramfs archives
    initramfs working around?
 2. After boot is finished, what causes kernel code to execute at all?
 3. What's special about PID 1, and why will this matter for containers?
+4. You see a three-second gap in dmesg between PCI enumeration and the
+   "mounted filesystem" message. What was likely happening?
+5. What does `ro` on the kernel command line mean, and when does it get
+   changed?
+
+*(Answers, in order: the kernel may need modules (disk/filesystem drivers,
+encryption support) that live on the root filesystem it cannot yet mount —
+the initramfs is a small bootstrapping rootfs that provides those; interrupts
+and system calls — the kernel sleeps waiting for hardware events or process
+requests; PID 1 is the process tree root, orphan adopter, and its death causes
+a kernel panic — inside a container, your entrypoint IS PID 1 with those same
+responsibilities; the initramfs was loading modules and assembling storage
+stacks before it could mount the real root; the root filesystem is mounted
+read-only initially for safety (so fsck can run if needed), and the initramfs
+or init system remounts it read-write later in boot.)*
 
 ---
 

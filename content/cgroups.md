@@ -17,7 +17,10 @@ kernel attaches **controllers** that meter and limit resources:
 | `memory` | RAM + page cache usage, with limits and OOM behaviour |
 | `io` | Disk bandwidth and IOPS per device |
 | `pids` | Number of processes/threads (fork-bomb fence) |
-| plus | `cpuset` (pin to cores), `hugetlb`, `rdma`, `misc` |
+| `cpuset` | Pin processes to specific CPU cores and NUMA nodes |
+| `hugetlb` | Huge page usage limits |
+| `rdma` | RDMA/InfiniBand resource limits |
+| `misc` | Miscellaneous (e.g., seccomp userspace notifications, AMD SEV) |
 
 Two crucial properties:
 
@@ -25,7 +28,8 @@ Two crucial properties:
   exceed its parent's limit. This enables delegation: give a team 32 GB, let
   them subdivide.
 - **Inherited** — a forked process lands in its parent's cgroup
-  automatically. No process escapes accounting by forking.
+  automatically. No process escapes accounting by forking. (The exception:
+  `cgroup.threads` for threaded mode, but that's rare.)
 
 ## It's a filesystem (of course it is)
 
@@ -74,6 +78,11 @@ That `Killed` is exactly what happens inside `docker run -m 100m` — recall
 the memory chapter: cgroup OOM kill → exit code 137. You've now seen the
 machinery naked.
 
+```bash
+# Before the kill, watch memory pressure build:
+cat demo/memory.pressure    # some/full stall percentages
+```
+
 ## The control files that matter
 
 ### memory
@@ -81,18 +90,24 @@ machinery naked.
 ```text
 memory.max        hard limit → reclaim, then cgroup-local OOM kill
 memory.high       soft limit → heavy reclaim pressure, throttling, no kill
-memory.low        best-effort protection from reclaim
-memory.min        hard protection, dangerous if overcommitted
+memory.low        best-effort protection from reclaim (evict this last)
+memory.min        hard protection, dangerous if overcommitted (forces OOM elsewhere)
+memory.current    usage right now (this is the number for "how much RAM")
+memory.events     counts: how often limited (low/high/max/oom/oom_kill)
+memory.stat       breakdown: anon vs file (page cache!), kernel memory, slab
 memory.oom.group  kill the cgroup as a unit instead of one unlucky task
-memory.current    usage right now
-memory.events     counts: how often limited (high/max/oom/oom_kill)
-memory.stat       breakdown: anon vs file (page cache!), kernel memory
+memory.peak       high-water mark of memory.current — gold for capacity planning
+memory.swap.max   limit for swap usage by this cgroup
 ```
 
 Subtlety with production consequences: **page cache counts toward the
 limit**. A container reading large files "uses" memory in `memory.current`;
 the kernel reclaims cache before OOM-killing, but monitoring that alerts on
 `current` alone will lie to you. Read `memory.stat`'s anon vs file split.
+
+```bash
+grep -E 'anon|file|cache' /sys/fs/cgroup/<group>/memory.stat
+```
 
 The protection knobs are where cgroup v2 becomes more than "limits":
 
@@ -106,8 +121,7 @@ memory.min   stronger protection; can force OOM elsewhere if overpromised
 This is the shape used by serious multi-tenant systems: do not only cap the
 noisy neighbor; protect the latency-sensitive neighbor. A database with
 `memory.low` gets a reclaim shield for its working set while batch jobs absorb
-more cache eviction. `memory.min` is sharper: if every group is promised more
-minimum memory than the machine owns, the kernel cannot satisfy reality.
+more cache eviction.
 
 `memory.oom.group=1` is another production-grade detail. Without it, the OOM
 killer may kill one large worker and leave a half-broken service limping.
@@ -118,9 +132,11 @@ and the supervisor restarts it cleanly.
 
 ```text
 cpu.weight    1–10000 (default 100) — proportional share under contention
+cpu.weight.nice  read-only reflection of process nice values as weights
 cpu.max       "150000 100000" = 150ms CPU per 100ms period = 1.5 CPUs, hard cap
 cpu.max.burst optional burst budget above the hard period quota
-cpu.stat      usage + nr_throttled / throttled_usec ← the smoking gun
+cpu.stat      usage_usec + nr_throttled / throttled_usec ← the smoking gun
+cpu.pressure  PSI: % time tasks stalled on CPU
 ```
 
 The scheduling chapter explained the trap: `cpu.max` throttling freezes all
@@ -131,8 +147,7 @@ divides *contended* CPU and is invisible on an idle host; `cpu.max` (Docker's
 `--cpus`, Kubernetes *limits*) caps even an idle one.
 
 `cpu.max.burst` exists because real services are spiky. A strict quota can
-create 100 ms rhythm artifacts: request arrives, threads burn quota, group is
-throttled, tail latency jumps. Burst lets unused runtime accumulate within a
+create 100 ms rhythm artifacts. Burst lets unused runtime accumulate within a
 bounded budget so short spikes complete without permanently raising the CPU
 contract. It is not free CPU; it is a latency valve.
 
@@ -140,13 +155,14 @@ contract. It is not free CPU; it is a latency valve.
 
 ```text
 io.max     "8:0 rbps=10485760 wiops=1000"   per-device byte/IOPS caps
+io.stat    bytes and operations per device (read write, discard)
+io.pressure PSI: % time tasks stalled on I/O
 pids.max   fork-bomb ceiling — docker run --pids-limit
+pids.current current count
 ```
 
-The I/O controller is device-oriented because the kernel ultimately schedules
-requests against block devices. This matters on hosts with multiple disks:
-limiting `8:0` says nothing about `259:0`. Always map major:minor numbers back
-to real devices:
+The I/O controller is device-oriented. This matters on hosts with multiple
+disks. Always map major:minor numbers back to real devices:
 
 ```bash
 lsblk -o NAME,MAJ:MIN,SIZE,TYPE,MOUNTPOINTS
@@ -171,10 +187,15 @@ docker rm -f demo
 |---|---|
 | `docker run -m 512m` | `memory.max = 536870912` |
 | `docker run --cpus 1.5` | `cpu.max = "150000 100000"` |
-| `docker run --cpu-shares 512` | `cpu.weight ≈ 20` |
-| K8s `resources.requests.cpu` | `cpu.weight` (proportional) |
-| K8s `resources.limits.*` | `cpu.max` / `memory.max` (hard) |
-| K8s QoS classes | placement in the cgroup tree |
+| `docker run --cpu-shares 512` | `cpu.weight ≈ 39` (512/1024 × 100) |
+| `docker run --memory-swap 1g` | `memory.swap.max = 1073741824` |
+| K8s `resources.requests.cpu` | `cpu.weight` (proportional, 1000m = weight 100) |
+| K8s `resources.limits.cpu` | `cpu.max` (hard, "150000 100000" for 1.5 cores) |
+| K8s `resources.requests.memory` | OOM score adjustment + eviction ordering |
+| K8s `resources.limits.memory` | `memory.max` (hard) |
+| K8s QoS: Guaranteed | requests = limits (high priority eviction) |
+| K8s QoS: Burstable | requests < limits |
+| K8s QoS: BestEffort | no requests/limits (first to be evicted under pressure) |
 
 There is no other layer. The entire resource model of the container
 ecosystem is file writes into `/sys/fs/cgroup`.
@@ -209,28 +230,27 @@ PSI answers the real question — "is anything actually *suffering*?" — far
 better than utilization percentages. Modern autoscalers and OOM-avoiders
 (systemd-oomd) are built on it.
 
-The killer combination is:
+The killer monitoring combination:
 
 ```text
 cpu.stat nr_throttled rising       → quota is actively delaying execution
 memory.events high rising          → memory.high is applying pressure
+memory.events max rising           → memory.max was hit (even if no kill yet)
 memory.events oom_kill rising      → hard memory failure
 io.pressure full rising            → all useful work stalled behind I/O
 cpu.pressure some high             → runnable work waiting for CPU
 ```
 
 Utilization says "the resource is busy". PSI says "tasks are losing time".
-For capacity planning, SLOs, and noisy-neighbor debugging, the second signal
-is usually closer to user pain.
+For SLOs and noisy-neighbor debugging, the second signal is usually closer to
+user pain.
 
 ## Delegation and the no-internal-process rule
 
-cgroup v2 has a structural rule that surprises people building their own
-managers: domain controllers distribute resources from a parent to its
-children, so a non-root cgroup generally cannot both contain processes and
-enable domain controllers for child cgroups. Processes should live at leaves.
-
-The shape is:
+cgroup v2 has a structural rule: domain controllers distribute resources from
+a parent to its children, so a non-root cgroup generally cannot both contain
+processes and enable domain controllers for child cgroups. Processes should
+live at leaves:
 
 ```text
 service.slice/                  controllers enabled here
@@ -239,12 +259,15 @@ service.slice/                  controllers enabled here
     └── workers/                processes live here
 ```
 
-This avoids ambiguous competition between "the parent itself" and "the
-children". It is also why mature systems let systemd own the upper tree and
-delegate a subtree to a container manager or user session with carefully
-limited write access. Delegation is not just `chown -R`: the delegate must be
-able to create children and move its own processes, but not rewrite the
-parent's resource contract.
+This avoids ambiguous competition. It's also why mature systems let systemd
+own the upper tree and delegate a subtree to a container manager with limited
+write access. Delegation is not just `chown -R`:
+
+```bash
+# Enable delegation (systemd):
+systemctl set-property my.service Delegate=yes
+# Now my.service/ can create its own child cgroups
+```
 
 ## Try it yourself
 
@@ -254,6 +277,10 @@ cat /proc/self/cgroup                   # your own address in it
 systemd-run --scope -p MemoryMax=50M stress --vm 1 --vm-bytes 100M
                                         # systemd as a cgroup CLI — watch it die
 journalctl -u user@1000 | grep -i oom | tail -3
+# Explore Docker's cgroup layout:
+docker run -d -m 100m --cpus 0.5 --name test nginx
+find /sys/fs/cgroup -name "memory.max" -exec grep -H . {} + | grep docker
+docker rm -f test
 ```
 
 ## Check your understanding
@@ -265,6 +292,20 @@ journalctl -u user@1000 | grep -i oom | tail -3
    confirms the diagnosis, and which Docker flag caused it?
 4. What's the difference between Kubernetes CPU *requests* and *limits*, in
    cgroup file terms?
+5. Why does `memory.current` include page cache — and why is that important
+   for monitoring?
+
+*(Answers: children inherit their parent's cgroup membership automatically
+— the kernel tracks groups, not individual processes; not necessarily —
+check memory.stat for the anon vs file split: if most is file (page cache),
+the kernel will reclaim it before OOM; check cpu.stat for nr_throttled and
+throttled_usec — `--cpus` (cpu.max) sets a hard quota with 100ms period that
+creates sawtooth throttling; requests set cpu.weight (proportional share
+under contention only), limits set cpu.max (hard ceiling even on idle host);
+page cache is file data cached in RAM — it counts toward the cgroup limit
+because the kernel can't distinguish "this container's I/O cache" from "this
+container's memory usage", but it's reclaimable under pressure, so high
+memory.current with high file% in memory.stat is safe.)*
 
 ---
 

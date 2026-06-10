@@ -46,7 +46,7 @@ match.
 | **ipc** | System V/POSIX IPC objects | no shared-memory snooping |
 | **user** | UID/GID mappings | "root inside" ≠ root outside |
 | **cgroup** | the cgroup tree view | can't see/escape host hierarchy |
-| **time** | boot/monotonic clocks | rarely used (CRIU restore) |
+| **time** | boot/monotonic clocks | own view of uptime (CRIU restore) |
 
 The three syscalls that drive everything:
 
@@ -59,6 +59,14 @@ The three syscalls that drive everything:
 
 The `unshare(1)` and `nsenter(1)` CLI tools wrap these — our lab equipment
 for the rest of the chapter. (Everything below needs root or user namespaces.)
+
+### Namespace lifecycle
+
+A namespace exists as long as at least one process is in it (or a file
+descriptor points to its /proc/<pid>/ns/… entry). When the last process
+exits or releases the fd, the namespace is destroyed. Inside a PID namespace,
+when PID 1 exits, the kernel sends SIGKILL to all other processes in the
+namespace — the namespace vanishes cleanly.
 
 ## UTS: the warm-up
 
@@ -97,6 +105,13 @@ What's really going on:
 - You can't `unshare` your own PID namespace and stay — hence `--fork`:
   the *next child* enters it.
 
+```bash
+# See the layered PIDs from the host:
+PID=$(pgrep -f "unshare.*pid")
+cat /proc/$PID/status | grep -E 'Pid|NSpid'
+# NSpid: 48213  1   ← outer-inner PID mapping
+```
+
 ## Mount: your own filesystem tree
 
 ```bash
@@ -106,13 +121,18 @@ ls /mnt                        # visible here
 # other terminal: ls /mnt     → empty. Host never saw it.
 ```
 
-Each mnt namespace has its own mount table (the per-process mount idea from
-the filesystems chapter, realized). Combined with `pivot_root` — which swaps
-the namespace's `/` for a directory of your choosing — this gives containers
-their own root filesystem. One subtlety worth knowing exists: **mount
+Each mnt namespace has its own mount table. Combined with `pivot_root` — which
+swaps the namespace's `/` for a directory of your choosing — this gives
+containers their own root filesystem. One subtlety worth knowing: **mount
 propagation** (`shared`/`private`/`slave`) controls whether mount events
-cross namespace copies; container runtimes set everything `private` so
+cross namespace copies. Container runtimes set everything `private` so
 container mounts never leak to the host.
+
+```bash
+cat /proc/self/mountinfo | awk '{print $NF, $7}'  # see propagation flags
+# / private ← no propagation
+# /sys shared:1 ← shared with group 1
+```
 
 ## Net: your own network stack
 
@@ -122,6 +142,7 @@ interfaces, empty routes, empty firewall, **its own port space**:
 ```bash
 sudo unshare --net sh
 ip addr          # only lo, and it's DOWN. Total network silence.
+ip link set lo up  # bring loopback up first thing
 ```
 
 Two namespaces can both bind `0.0.0.0:80` without conflict — different port
@@ -142,7 +163,7 @@ touch /etc/test-file     # Permission denied — root powers stop at the border
 ```
 
 The mapping is just two files (`/proc/<pid>/uid_map`, `gid_map`):
-`0 100000 65536` = "inside UIDs 0-65535 are outside UIDs 100000-165535".
+`0 100000 65536` = "inside UIDs 0–65535 are outside UIDs 100000–165535".
 
 Why this is a big deal:
 
@@ -152,6 +173,13 @@ Why this is a big deal:
 - Capabilities (next chapters) are evaluated *relative to the user
   namespace*: "root inside" has full caps over namespaced resources but none
   over the host's. A container escape lands as UID 100000 — a nobody.
+- The `/etc/subuid` and `/etc/subgid` files configure the ranges for each
+  host user.
+
+```bash
+cat /etc/subuid
+# makhal:100000:65536    ← this user gets a block of 65536 UIDs for remapping
+```
 
 ## Watching real containers' namespaces
 
@@ -159,8 +187,8 @@ Why this is a big deal:
 docker run -d --name web nginx
 PID=$(docker inspect -f '{{.State.Pid}}' web)
 sudo ls -l /proc/$PID/ns/        # different inodes than your shell = isolated
-lsns | tail                      # system-wide namespace inventory
-sudo nsenter -t $PID -n ip addr  # enter JUST its net ns: see eth0@…, 172.17.x.x
+lsns -p $PID                     # dedicated ns tool: tree view with ownership
+sudo nsenter -t $PID -n ip addr  # enter JUST its net ns: see eth0, 172.17.x.x
 sudo nsenter -t $PID -a sh       # enter all → this is ~exactly docker exec
 docker rm -f web
 ```
@@ -168,6 +196,11 @@ docker rm -f web
 `nsenter -t <pid> -n <cmd>` is a superpower worth memorizing: run *host*
 tools (which the slim image lacks!) inside a container's *network* — the
 canonical way to debug a distroless container with no shell.
+
+```bash
+# Even more specific: enter just mnt and net, leave the rest alone
+sudo nsenter -t $PID -m -n -- ip addr
+```
 
 ## What namespaces do NOT cover
 
@@ -178,8 +211,8 @@ Honesty section. Things that remain shared and visible despite all eight:
   totals (the classic "my JVM sized its heap from host RAM" bug; runtimes
   paper over it with tricks like lxcfs, or apps read cgroup files instead).
 - The clock (time ns covers only boot/monotonic offsets, not wall time).
-- Kernel keyrings, some `/sys` content… — the long tail that seccomp and LSMs
-  exist to fence off.
+- Kernel keyrings, `/sys/kernel`, `/dev/kmsg` — the long tail that seccomp
+  and LSMs exist to fence off.
 
 Namespaces give the *view*; they don't limit *consumption* — a namespaced
 process can still eat all RAM and CPU. For that, the next chapter: cgroups.
@@ -192,6 +225,20 @@ process can still eat all RAM and CPU. For that, the next chapter: cgroups.
 3. Why are user namespaces the key to rootless containers?
 4. Two processes — how do you check, from the host, whether they're in the
    same "container"?
+5. A namespace is destroyed when its last process exits. How can you keep a
+   namespace alive for inspection?
+
+*(Answers: `ps` reads `/proc` which is host-mounted; the host's procfs shows
+the host's PID table — remounting proc in the PID namespace gives a procfs
+that shows only the namespace's PIDs; it open()s the target process's
+/proc/<pid>/ns/ files for each namespace type, calls setns() on each, then
+forks a child that exec()s the command inside the joined namespaces; user
+namespaces allow unprivileged users to create namespaces where they appear
+as root — the container's "root" is mapped to a non-zero UID on the host,
+making rootless containers possible with no daemon running as root; compare
+the inode numbers in /proc/<pid1>/ns/ and /proc/<pid2>/ns/ — matching inodes
+= same namespace; bind-mount /proc/<pid>/ns/<type> to a file — the fd keeps
+a reference, or use `unshare --mount=/run/my-ns mount` to persist.)*
 
 ---
 

@@ -31,7 +31,8 @@ Docker's default answer (the `bridge` network):
 
 Every part is a stock kernel object from the networking chapter: **veth
 pairs** (virtual patch cables crossing the namespace wall), a **bridge**
-(virtual switch), **routes**, **netfilter NAT**.
+(virtual switch that learns MAC addresses and forwards frames), **routes**
+(`ip route`), **netfilter NAT** (MASQUERADE rule in POSTROUTING).
 
 ## Build it by hand
 
@@ -54,9 +55,9 @@ ip link set veth-host master br0 && ip link set veth-host up
 ip link set veth-ctr netns ctr            # ← the magic move
 
 # 4. configure inside
+ip netns exec ctr ip link set lo up
 ip netns exec ctr ip addr add 172.18.0.2/24 dev veth-ctr
 ip netns exec ctr ip link set veth-ctr up
-ip netns exec ctr ip link set lo up
 ip netns exec ctr ip route add default via 172.18.0.1
 
 # 5. container ↔ host works already:
@@ -68,7 +69,10 @@ addresses must be *masqueraded* (both straight from the networking chapter):
 
 ```bash
 sysctl -w net.ipv4.ip_forward=1
-iptables -t nat -A POSTROUTING -s 172.18.0.0/24 ! -o br0 -j MASQUERADE
+nft add table nat
+nft add chain nat postrouting { type nat hook postrouting priority 100 \; }
+nft add rule nat postrouting ip saddr 172.18.0.0/24 oifname eth0 masquerade
+# (or iptables: iptables -t nat -A POSTROUTING -s 172.18.0.0/24 ! -o br0 -j MASQUERADE)
 
 ip netns exec ctr ping -c1 1.1.1.1        # the box talks to the world
 ```
@@ -76,27 +80,37 @@ ip netns exec ctr ping -c1 1.1.1.1        # the box talks to the world
 That's it. `docker network create` + container attach ≈ these commands with
 generated names. Run `ip link`, `bridge link`, and
 `iptables -t nat -L POSTROUTING -n` on a Docker host and you'll recognize
-every object (Docker is moving its rules to nftables, but the shape is
-identical). Cleanup: `ip netns del ctr; ip link del br0;` plus the iptables
+every object. Cleanup: `ip netns del ctr; ip link del br0;` plus the NAT
 rule.
 
 ## Port publishing = DNAT
 
 Containers can dial out, but inbound? 172.18.0.2 is invisible to the world.
 `docker run -p 8080:80` installs a **DNAT** rule — "TCP to host:8080 →
-rewrite destination to 172.17.0.2:80" — in PREROUTING (plus a userland
-helper, `docker-proxy`, for edge cases):
+rewrite destination to 172.17.0.2:80" — in PREROUTING:
 
 ```bash
 docker run -d -p 8080:80 nginx
-sudo iptables -t nat -L -n | grep -E 'DNAT|8080'
+sudo iptables -t nat -L PREROUTING -n | grep -E 'DNAT|8080'
 # DNAT tcp dpt:8080 to:172.17.0.2:80        ← there's your -p flag
 ```
 
-Connection tracking (networking chapter) un-rewrites the replies. Note the
-security folklore this explains: published ports bypass simple host
-firewalls, because DNAT happens in PREROUTING — *before* INPUT rules are
-consulted; the packets traverse FORWARD, where Docker manages its own chains.
+Connection tracking (networking chapter) un-rewrites the replies
+automatically — the container sees connections from the real client IP
+(transparent), and the client sees the host IP (SNAT/MASQUERADE on the
+outbound reply, also in POSTROUTING).
+
+Note the security folklore this explains: published ports bypass simple host
+firewalls, because DNAT happens in PREROUTING — *before* the INPUT chain
+is consulted; the packets traverse the FORWARD chain, where Docker manages
+its own rules (DOCKER and DOCKER-USER chains). To filter published ports,
+use rules in the FORWARD chain or the DOCKER-USER chain.
+
+```bash
+# Docker's NAT + filter rules:
+sudo iptables -t nat -L -n -v    # see DNAT rules and hit counters
+sudo iptables -L DOCKER-USER -n -v  # place your own rules here (persistent across restarts)
+```
 
 ## The menu of network modes
 
@@ -104,40 +118,71 @@ consulted; the packets traverse FORWARD, where Docker manages its own chains.
 |---|---|---|
 | `bridge` (default) | everything above | NAT cost; ports must be published |
 | `host` | **no net namespace at all** — host's stack | zero overhead, zero isolation; port clashes |
-| `none` | the sealed box, kept sealed | for paranoid batch jobs |
+| `none` | the sealed box, kept sealed — only loopback | for paranoid batch jobs |
 | `container:X` / pod | share another container's net ns | "localhost" between them — Kubernetes pods |
-| `macvlan/ipvlan` | container appears on the physical LAN with its own MAC/IP | no NAT, but needs a cooperative network |
-| rootless (slirp4netns/pasta) | user-space NAT relay | works without root; slower |
+| `macvlan/ipvlan` | container appears on the physical LAN with its own MAC/IP | no NAT, but needs a cooperative network (DHCP, VLAN) |
+| rootless (slirp4netns/pasta) | user-space NAT relay via TAP device | works without root; ~10× slower for high-throughput |
 
 `--network host` being literally "skip `CLONE_NEWNET`" is a nice reminder
 that every mode is just a different namespace/plumbing decision.
+
+### macvlan vs ipvlan
+
+- **macvlan**: each container gets its own MAC address on the physical
+  interface. Works with DHCP, looks like a separate physical machine. Most
+  cloud networks block multiple MACs per port (anti-spoofing).
+- **ipvlan**: containers share the host's MAC but get different IPs. The
+  kernel demuxes based on IP. Works where macvlan doesn't. L2 mode vs L3
+  mode (routed).
 
 ## DNS and service discovery
 
 How does container `web` reach container `db` *by name*?
 
-- Docker writes the container's `/etc/resolv.conf` to point at an embedded
-  DNS server (127.0.0.11, inside the container's netns), which answers with
-  container IPs on the same user-defined network and forwards the rest.
-  (Name resolution on the *default* bridge is legacy-limited — use a created
-  network: `docker network create mynet`.)
-- `/etc/hosts` and `/etc/hostname` are bind-mounted in, too — mnt namespace
-  tricks complementing net namespace plumbing.
+- Docker's embedded DNS server (127.0.0.11, inside the container's netns via
+  iptables redirect rules) answers with container IPs on user-defined
+  networks. It resolves container names (and service:alias names in Compose)
+  to the correct internal IP.
+- On the default `bridge` network, name resolution is via `/etc/hosts`
+  injection only — no DNS. Use a user-defined network (`docker network create
+  mynet`) for automatic DNS.
+- `/etc/resolv.conf` and `/etc/hosts` are bind-mounted into the container
+  (mount namespace + net namespace working together).
 
-Kubernetes scales the same idea: a cluster DNS (CoreDNS) names *Services*,
-and a Service's stable virtual IP is translated to pod IPs by — what else —
-netfilter/IPVS/eBPF rules programmed by kube-proxy on every node.
+```bash
+docker network create mynet
+docker run -d --net mynet --name db postgres
+docker run --net mynet alpine ping db     # resolved via internal DNS
+docker exec db cat /etc/resolv.conf       # nameserver 127.0.0.11
+```
+
+### Kubernetes DNS
+
+Kubernetes scales the same idea: CoreDNS (a cluster DNS service) resolves
+Service names to ClusterIPs (stable virtual IPs). kube-proxy (running on
+every node) translates the ClusterIP to a pod IP via iptables/IPVS/eBPF
+rules:
+
+```text
+app → service-name.namespace.svc.cluster.local
+  → CoreDNS → ClusterIP (10.96.0.10)
+  → iptables/IPVS DNAT → actual pod IP (10.244.1.5)
+```
 
 ## Sixty seconds of Kubernetes networking
 
-The K8s model removes the NAT-between-pods wrinkle: **every pod gets a real,
+The K8s model removes NAT-between-pods: **every pod gets a real,
 cluster-routable IP; all pods reach all pods without NAT.** How? A **CNI
 plugin** runs the veth dance on each node and then makes pod subnets
 routable between nodes:
 
-- **flannel** — VXLAN overlay (L2-over-UDP tunnels, networking chapter);
-- **Calico** — no tunnels, just routes (BGP);
-- **Cilium** — eBPF datapath, increasingly bypassing netfilter entirely.
+- **flannel** — simplest: VXLAN overlay (L2-over-UDP tunnels), or host-gw
+  mode (just route entries, needs L2 adjacency).
+- **Calico** — no tunnels, BGP routing between nodes. Pod IPs are real,
+  routable cluster-wide.
+- **Cilium** — eBPF datapath: replaces iptables with eBPF programs attached
+  to kernel hooks. Much faster at scale (thousands of services).
+- **Weave** — mesh overlay with a user-space router.
 
 Different transports, same endgame: namespaces + veths + routing, at fleet
 scale. Nothing you haven't already built by hand today.
@@ -150,14 +195,27 @@ The skills that solve 90% of "container can't reach X":
 PID=$(docker inspect -f '{{.State.Pid}}' ctr)
 sudo nsenter -t $PID -n ip addr          # host tools, container's network
 sudo nsenter -t $PID -n ss -tlnp         # who listens inside?
+sudo nsenter -t $PID -n ip route         # container's routing table
 sudo nsenter -t $PID -n ping 172.17.0.1  # can it reach its gateway?
-sudo tcpdump -i docker0 -n               # watch traffic at the bridge
-sudo iptables -t nat -L -n -v            # are the DNAT/MASQ rules there? hits?
+sudo nsenter -t $PID -n nslookup external.com  # DNS working?
+sudo tcpdump -i docker0 -n icmp          # watch traffic at the bridge
+sudo iptables -t nat -L -n -v            # DNAT/MASQ rules + hit counters
 docker exec ctr cat /etc/resolv.conf     # who answers its DNS?
+docker network inspect bridge            # configured subnet and containers
 ```
 
-`nsenter -n` (namespaces chapter) is the star: full host tooling, container
+`nsenter -t <pid> -n <cmd>` is the star: full host tooling, container
 viewpoint, no shell needed in the image.
+
+### Common failure modes
+
+| Symptom | Likely cause |
+|---|---|
+| Container can't reach internet | `ip_forward=0`, MASQUERADE rule missing, or FORWARD chain drops |
+| Published port not reachable | DNAT rule missing, or container not listening on 0.0.0.0 |
+| Containers can't reach each other by name | Not on a user-defined network (default bridge = /etc/hosts only) |
+| Intermittent DNS failures | DNS embedded server overloaded, or DNAT rule conflict |
+| Container IP reused after restart | The bridge recycles IPs quickly — use a defined subnet |
 
 ## Check your understanding
 
@@ -168,6 +226,20 @@ viewpoint, no shell needed in the image.
 3. Why might a host firewall rule on INPUT fail to block a published port?
 4. What does `--network host` change at container-creation time, in
    clone-flag terms?
+5. Why does a container see `nameserver 127.0.0.11` in /etc/resolv.conf?
+
+*(Answers: net namespace, veth pair (one end inside, one outside), bridge,
+route (default via bridge gateway), NAT MASQUERADE (SNAT outbound); each
+container has its own network namespace — port 80 in one namespace is
+independent of port 80 in another (different port spaces), and port
+publishing via DNAT maps a host port to a specific container's
+<IP:port>; published ports are DNAT'd in PREROUTING before the INPUT chain
+— the packet traverses FORWARD, not INPUT, so INPUT rules don't apply (use
+FORWARD or DOCKER-USER chain); --network host skips CLONE_NEWNET entirely —
+the container runs in the host's network namespace with no isolation; Docker
+runs an embedded DNS server inside the container's network namespace on
+127.0.0.11, and iptables redirects DNS queries to it — this provides
+automatic service discovery on user-defined networks.)*
 
 ---
 
