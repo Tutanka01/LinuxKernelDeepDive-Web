@@ -171,5 +171,6 @@ viewpoint, no shell needed in the image.
 
 ---
 
-**Next:** Part IV — the observability toolbox: /proc, strace, perf and eBPF,
-i.e. how to *see* everything this site described, live.
+**Next:** Part IV — modern kernel mechanisms. We start with eBPF: the
+programmable substrate underneath observability, networking, and runtime
+security.

@@ -17,6 +17,36 @@
 
 Rule of thumb: start at the top; descend only as far as the question requires.
 
+## The observability cost model
+
+Every observation mechanism perturbs the system differently. The mature move
+is not "use the most powerful tool"; it is choosing the cheapest probe that
+can falsify the hypothesis.
+
+| Mechanism | Strength | Cost/risk |
+|---|---|---|
+| `/proc`, `/sys` | exact kernel counters and state snapshots | polling can miss short events |
+| `ps`, `ss`, `free` | fast summaries | hides source and interpretation |
+| `strace` | complete syscall narrative for one process | ptrace stop/resume overhead, very invasive |
+| `perf stat` | hardware/kernel counters | interpretation requires care |
+| `perf record` | CPU stack profiles | sampling bias, symbols/unwind quality matter |
+| tracepoints | stable event stream | event volume can be high |
+| kprobes | almost arbitrary kernel functions | unstable internals, can be too hot |
+| eBPF maps | in-kernel aggregation | verifier and map design complexity |
+
+The practical hierarchy:
+
+```text
+counter first
+trace second
+profile third
+instrument hot paths only when the cheaper signals cannot answer
+```
+
+If you can answer the question with `cpu.stat`, do not kprobe the scheduler.
+If `strace -c` says 90% of time is in `futex`, then a CPU flame graph alone
+will lie by omission: the process is waiting, not burning CPU.
+
 ## /proc: the primary source
 
 Everything `top` shows you came from here. The per-process directories are
@@ -36,6 +66,19 @@ cat  /proc/$$/stack       # where in the KERNEL it's sleeping (root)
 System-wide: `/proc/meminfo`, `/proc/loadavg`, `/proc/pressure/*` (PSI!),
 `/proc/interrupts`, `/proc/net/*. ` When a metric in some dashboard looks
 absurd, find which file it came from and read the source of truth.
+
+Some high-signal files deserve muscle memory:
+
+| Question | File |
+|---|---|
+| Why did memory alerts fire? | `/proc/meminfo`, `/proc/vmstat`, cgroup `memory.stat` |
+| Is the machine suffering or merely busy? | `/proc/pressure/{cpu,memory,io}` |
+| Is this process stuck in kernel I/O? | `/proc/<pid>/stack` |
+| Which namespaces is it in? | `/proc/<pid>/ns/*` |
+| Which cgroup owns it? | `/proc/<pid>/cgroup` |
+| What fd is leaking? | `/proc/<pid>/fd`, `/proc/<pid>/fdinfo/*` |
+| Is TCP state exploding? | `/proc/net/sockstat`, `ss -s` |
+| Are interrupts imbalanced? | `/proc/interrupts`, `/proc/softirqs` |
 
 ## strace: the syscall narrative
 
@@ -93,6 +136,26 @@ mispredictions) and hooks **tracepoints** — stable instrumentation points
 maintained inside kernel code (`perf list | grep sched:` — every scheduler
 event from the scheduling chapter is observable).
 
+The most useful `perf stat` output is often not "cycles"; it is ratios:
+
+```bash
+sudo perf stat -d -p 1234 -- sleep 10
+```
+
+Signals to read carefully:
+
+```text
+low IPC + high cache misses      memory-bound or pointer-chasing
+high context switches            blocking, lock contention, or scheduler churn
+high migrations                  cache locality may be poor
+high branch misses               unpredictable branches, parser/state-machine pain
+low CPU utilization + latency    probably off-CPU: I/O, locks, throttling
+```
+
+CPU profiles show where time runs. They do not show where time is lost while a
+task is asleep. For that you need off-CPU profiling, scheduler tracepoints,
+`offcputime`, PSI, or direct wait analysis.
+
 ## eBPF: programmable kernel observability
 
 The endgame. **eBPF** lets you load small, *verified* programs into the
@@ -131,6 +194,24 @@ sudo apt install bpfcc-tools
 sudo execsnoop-bpfcc        # leave it running; be amazed what your box runs
 ```
 
+For long-running agents, the production design is almost always:
+
+```text
+stable hook
+  ↓
+cheap predicate
+  ↓
+per-CPU map aggregation
+  ↓
+bounded event emission
+  ↓
+user-space renderer/exporter
+```
+
+The anti-pattern is printing every event from a hot hook. That turns
+observability into the workload. The deeper eBPF chapter explains why maps,
+BTF/CO-RE, verifier constraints, and hook choice matter.
+
 ## Observing containers specifically
 
 Everything above works on containers — they're processes (the site's
@@ -164,6 +245,24 @@ When something is wrong and you don't know where:
 
 The tools matter less than the habit: **the kernel will tell you exactly
 what's happening if you ask precisely.**
+
+## A signal map for real incidents
+
+| Symptom | First useful signals |
+|---|---|
+| p99 latency spikes every 100 ms | cgroup `cpu.stat`, `cpu.pressure`, scheduler tracepoints |
+| container OOM with free host RAM | cgroup `memory.events`, `memory.stat`, exit code 137 |
+| high load but low CPU | `ps` states, `iostat -x`, `/proc/pressure/io`, blocked stacks |
+| memory "used" keeps growing | page cache vs anon in `/proc/meminfo` and `memory.stat` |
+| service accepts slowly | `ss -ltn`, SYN backlog, `softirqs`, eBPF TCP tools |
+| process burns CPU | `perf top`, `perf record -g`, flame graph |
+| process does nothing | `strace -p`, `/proc/<pid>/stack`, off-CPU profile |
+| disk latency | `iostat -x`, `biolatency`, block tracepoints |
+| DNS weirdness | `strace -e trace=%network,openat`, `/etc/nsswitch.conf`, resolver traffic |
+
+Good incident work converges. Several independent kernel signals should point
+to the same mechanism. If `perf` says CPU, PSI says no CPU pressure, and
+`strace` says long `poll()` sleeps, one of your interpretations is wrong.
 
 ## Check your understanding
 

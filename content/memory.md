@@ -128,6 +128,87 @@ swapping (thrashing) is the pathology, not swap usage per se.
 swapon --show; vmstat 1 5     # si/so columns = swap in/out per second
 ```
 
+## Physical memory: zones, NUMA, and allocators
+
+Virtual memory is the interface processes see; physical memory is the machine
+the kernel must actually manage. RAM is divided into **page frames**, and each
+frame has a `struct page` describing its state: mapped, free, dirty, under
+writeback, part of the page cache, anonymous, slab, compound, pinned, and so
+on.
+
+Physical pages are grouped by constraints:
+
+```text
+node 0                         node 1              ← NUMA locality
+├── DMA / DMA32 zones           ├── DMA / DMA32
+├── Normal zone                 ├── Normal
+└── Movable / device zones      └── Movable / device
+```
+
+The **buddy allocator** manages free physical pages in power-of-two blocks.
+It is excellent for page-sized and multi-page allocations, but kernel objects
+are usually smaller: dentries, inodes, sockets, `task_struct`, VMAs. Those
+come from **SLUB**, the slab allocator used by modern Linux, which keeps
+caches of pre-initialized objects to avoid constantly carving tiny pieces out
+of whole pages.
+
+You can see this world directly:
+
+```bash
+cat /proc/buddyinfo             # fragmentation by zone/order
+cat /proc/pagetypeinfo          # movable/unmovable/reclaimable split
+sudo slabtop                    # kernel object caches
+numactl --hardware              # NUMA nodes and distances
+```
+
+This is where some "mysterious" memory usage lives. Kernel memory is not a
+process RSS, but it is real RAM. Millions of sockets, dentries, inodes,
+iptables/nftables state entries, or BPF maps can consume memory outside the
+simple application heap story.
+
+## Transparent Huge Pages and TLB pressure
+
+The page size you meet first is 4 KB. The CPU, however, translates virtual
+addresses through the TLB, and TLB reach matters. Mapping 1 GB with 4 KB pages
+requires 262,144 translations; mapping it with 2 MB huge pages requires 512.
+
+**Transparent Huge Pages** try to promote suitable anonymous memory regions
+into huge pages automatically:
+
+```bash
+cat /sys/kernel/mm/transparent_hugepage/enabled
+grep -E 'AnonHugePages|FilePmdMapped|ShmemPmdMapped' /proc/meminfo
+```
+
+Huge pages can improve throughput for large memory-working sets by reducing
+TLB misses. They can also hurt latency when the kernel spends time compacting
+memory or when copy-on-write splits huge pages. Databases, JVMs, and latency
+sensitive services often have strong opinions here because their memory
+access patterns are not generic.
+
+The production rule is boring and important: THP is not "on good/off bad".
+Measure TLB misses, compaction stalls, and tail latency for the workload.
+
+## Reclaim is policy, not panic
+
+Reclaim is not a single emergency path. It is continuous policy. The kernel
+tracks active/inactive LRU lists, separates anonymous memory from file-backed
+cache, balances per-zone watermarks, and decides whether to scan, shrink slab,
+write dirty pages, swap anonymous memory, compact memory, or throttle
+allocators.
+
+The signals worth knowing:
+
+```bash
+grep -E 'pgscan|pgsteal|pgfault|pgmajfault|compact|oom' /proc/vmstat
+cat /proc/pressure/memory
+grep -E 'Dirty|Writeback|Slab|SReclaimable|SUnreclaim' /proc/meminfo
+```
+
+High memory utilization is normal. Sustained major faults, rising memory
+pressure, direct reclaim on allocation paths, dirty writeback congestion, or
+OOM events are the things that mean the machine is suffering.
+
 ## The OOM killer
 
 If reclaim fails — every page squeezed and still not enough — the kernel must

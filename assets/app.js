@@ -37,7 +37,15 @@ const BOOK = [
     ],
   },
   {
-    part: "Part IV — Tools & Going Deeper",
+    part: "Part IV — Modern Kernel Mechanisms",
+    chapters: [
+      { slug: "ebpf-internals",       title: "eBPF Internals" },
+      { slug: "security-hardening",   title: "Linux Security & Confinement" },
+      { slug: "modern-io",            title: "Modern I/O & io_uring" },
+    ],
+  },
+  {
+    part: "Part V — Tools & Going Deeper",
     chapters: [
       { slug: "observability",        title: "/proc, strace, perf & eBPF" },
       { slug: "kernel-dev",           title: "Reading & Building the Kernel" },
