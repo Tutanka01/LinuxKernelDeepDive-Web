@@ -123,15 +123,19 @@ podman:  CLI ──────────────────────�
 ```
 
 - No daemon: containers are children of *your* command (or of a tiny
-  per-user service for `-d`/`--restart`); systemd integrates naturally
-  (`podman generate systemd`, Quadlet).
+  per-user service for `-d`/`--restart`). Podman does **not** require
+  systemd — it works perfectly well standalone — but when systemd is
+  available, the modern integration path is **Quadlet**, which generates
+  systemd unit files declaratively from container descriptions. The older
+  `podman generate systemd` command still works but is deprecated in
+  favour of Quadlet.
 - **Rootless**: leaning on user namespaces (namespaces chapter): container
   UID 0 = your UID, unprivileged on the host; networking via a user-space
   packet relay (slirp4netns or pasta) since you can't create veths as
   non-root. The CLI is intentionally identical (`alias docker=podman` mostly
   works).
-- Podman's "containers" are regular systemd services under the hood
-  (`systemctl --user status <container>`).
+- When systemd is present, containers managed via Quadlet become regular
+  systemd services (`systemctl --user status <container>`).
 
 Docker has rootless mode too (dockerd-rootless-setuptool.sh), these days.
 The architectural lesson matters more than the brand: *the daemon was never

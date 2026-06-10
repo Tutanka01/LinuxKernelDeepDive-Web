@@ -284,5 +284,4 @@ just invisible to path lookups.)*
 
 ---
 
-**Next:** devices, drivers and modules — how the kernel talks to actual
-hardware, and why everything shows up in `/dev`.
+**Next:** beneath every filesystem sits the storage stack — the page cache, the bio, the block layer with blk-mq, the I/O scheduler, the device mapper, and the queue architecture that decides what hits the disk first and when.

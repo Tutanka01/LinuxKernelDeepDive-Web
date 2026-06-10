@@ -292,7 +292,4 @@ appropriately or use setsockopt(SO_RCVBUF/SO_SNDBUF).)*
 
 ---
 
-**Next:** Part III — a crucial piece missing from the picture. Processes are
-isolated, but they need to talk. Signals, pipes, and Unix domain sockets — the
-kernel's inter-process communication primitives that every shell pipeline and
-every daemon depends on.
+**Next:** TCP creates the connection, but congestion control decides how fast it sends. CUBIC, BBR, ECN, pacing, bufferbloat, and the tuning knobs that transform network performance from acceptable to extraordinary.

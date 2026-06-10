@@ -161,12 +161,23 @@ Roughly, it:
    assembles storage stacks (md-raid, LVM, LUKS unlock), mounts the real root,
    runs `pivot_root` or `switch_root` to make it `/`, then cleans up.
 5. **Starts PID 1** — the kernel executes exactly one user-space program,
-   traditionally `/sbin/init`, and from this moment the kernel becomes purely
-   *reactive*: it only acts when interrupts fire or processes make syscalls.
+   traditionally `/sbin/init`. From this moment, the kernel is largely
+   *reactive*: most kernel code executes when interrupts fire or processes
+   make syscalls.
 
-> That last point is worth repeating: **after boot, the kernel has no "main
-> loop" running on your behalf.** It's a library of services invoked by
-> hardware interrupts and system calls. The world is driven by user space.
+> **Simplified model:** after boot, the kernel has no single permanent "main
+> loop" comparable to a user-space application. It is a library of services
+> invoked by hardware interrupts and system calls, and user space drives the
+> machine.
+>
+> **Important nuance:** the kernel is not purely reactive in every sense. It
+> also runs **kernel threads** (visible as `[kthreadd]`, `[ksoftirqd/*]`,
+> `[kworker/*]` — workqueues handling deferred work, writeback flushing page
+> cache, and many others), executes **softirqs** and **timer-driven deferred
+> processing**, and wakes itself periodically for housekeeping. The kernel
+> is *event-driven* more than it is *passive*, driven by hardware events,
+> timer events, and user-space requests rather than by a single blocking main
+> loop.
 
 ### The dmesg boot story decoded
 
@@ -192,9 +203,13 @@ The first process gets PID 1 and special status:
 
 - it is the **ancestor of every other process** on the system;
 - it **adopts orphans** (when a parent dies before its children);
-- if PID 1 dies, the kernel **panics**. (Remember this for containers: the
-  process you start in a container becomes that container's PID 1, with the
-  same responsibilities and quirks.)
+- if PID 1 of the **initial PID namespace** dies, the kernel **panics** —
+  the system is dead at that point. (Remember this for containers: the
+  process you start in a container becomes that namespace's PID 1,
+  inheriting orphan reaping duties and signal specialness — but its death
+  triggers a **SIGKILL cascade to all processes in that PID namespace**,
+  not a host panic. Only PID 1 in the initial namespace can panic the
+  machine.)
 
 On virtually all modern distros, init is **systemd**. Its job: bring the
 system to a desired state by starting **units** (services, mounts, sockets,
@@ -293,14 +308,17 @@ sudo efibootmgr -v           # UEFI boot entries
 
 *(Answers, in order: the kernel may need modules (disk/filesystem drivers,
 encryption support) that live on the root filesystem it cannot yet mount —
-the initramfs is a small bootstrapping rootfs that provides those; interrupts
-and system calls — the kernel sleeps waiting for hardware events or process
-requests; PID 1 is the process tree root, orphan adopter, and its death causes
-a kernel panic — inside a container, your entrypoint IS PID 1 with those same
-responsibilities; the initramfs was loading modules and assembling storage
-stacks before it could mount the real root; the root filesystem is mounted
-read-only initially for safety (so fsck can run if needed), and the initramfs
-or init system remounts it read-write later in boot.)*
+the initramfs is a small bootstrapping rootfs that provides those; interrupts,
+system calls, kernel threads, workqueues, softirqs, and timer-driven deferred
+work — the kernel is event-driven rather than having a single main loop, but
+it is not purely passive; PID 1 is the process tree root and orphan adopter —
+its death panics the machine if it is PID 1 of the initial PID namespace, but
+inside a container PID namespace, PID 1's death sends SIGKILL to all other
+processes in that namespace rather than panicking the host; the initramfs
+was loading modules and assembling storage stacks before it could mount the
+real root; the root filesystem is mounted read-only initially for safety (so
+fsck can run if needed), and the initramfs or init system remounts it
+read-write later in boot.)*
 
 ---
 

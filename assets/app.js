@@ -20,8 +20,10 @@ const BOOK = [
       { slug: "scheduling",           title: "CPU Scheduling" },
       { slug: "memory",               title: "Virtual Memory" },
       { slug: "filesystems",          title: "Files, Filesystems & the VFS" },
+      { slug: "storage-stack",        title: "The Linux Storage Stack" },
       { slug: "devices-modules",      title: "Devices, Drivers & Modules" },
       { slug: "networking",           title: "The Networking Stack" },
+      { slug: "tcp-congestion",       title: "TCP Congestion Control & Tuning" },
     ],
   },
   {
@@ -44,28 +46,40 @@ const BOOK = [
     ],
   },
   {
-    part: "Part V — Modern Kernel Mechanisms",
+    part: "Part V — Hardware & Platform",
+    chapters: [
+      { slug: "power-management",     title: "Power Management: Governors, C-States & ACPI" },
+      { slug: "numa-deep-dive",       title: "NUMA Deep Dive" },
+      { slug: "cpu-isolation",        title: "CPU Isolation, NO_HZ & Real-Time" },
+      { slug: "cpu-mitigations",      title: "CPU Vulnerability Mitigations" },
+    ],
+  },
+  {
+    part: "Part VI — Modern Kernel",
     chapters: [
       { slug: "ebpf-internals",       title: "eBPF Internals" },
       { slug: "security-hardening",   title: "Linux Security & Confinement" },
+      { slug: "trusted-computing",    title: "Trusted Computing: Secure Boot, TPM & IMA" },
       { slug: "modern-io",            title: "Modern I/O & io_uring" },
       { slug: "rust-kernel",          title: "Rust in the Linux Kernel" },
     ],
   },
   {
-    part: "Part VI — Inside the Kernel Codebase",
+    part: "Part VII — Virtualization",
+    chapters: [
+      { slug: "kvm-internals",        title: "KVM & Virtualization Internals" },
+    ],
+  },
+  {
+    part: "Part VIII — Kernel Engineering",
     chapters: [
       { slug: "kernel-sync",          title: "Kernel Synchronization: Locks, Atomics & RCU" },
-    ],
-  },
-  {
-    part: "Part VII — The Kernel Project",
-    chapters: [
       { slug: "kernel-governance",    title: "How the Kernel Is Made: Process & Governance" },
+      { slug: "perf-methodology",     title: "Performance Analysis Methodology" },
     ],
   },
   {
-    part: "Part VIII — Tools & Going Deeper",
+    part: "Part IX — Tools & Going Deeper",
     chapters: [
       { slug: "observability",        title: "/proc, strace, perf & eBPF" },
       { slug: "kernel-dev",           title: "Reading & Building the Kernel" },
@@ -82,6 +96,12 @@ const articleEl = document.getElementById("article");
 const pagerEl   = document.getElementById("pager");
 const sidebarEl = document.getElementById("sidebar");
 const toggleEl  = document.getElementById("sidebar-toggle");
+const progressEl = document.getElementById("progress-bar");
+
+window.addEventListener("scroll", () => {
+  const h = document.documentElement.scrollHeight - window.innerHeight;
+  progressEl.style.width = h > 0 ? (scrollY / h) * 100 + "%" : "0%";
+}, { passive: true });
 
 marked.setOptions({
   highlight: (code, lang) => {
@@ -134,7 +154,10 @@ async function loadChapter(slug) {
     const res = await fetch(`content/${slug}.md`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const md = await res.text();
+    articleEl.classList.remove("fade-in");
     articleEl.innerHTML = marked.parse(md);
+    void articleEl.offsetWidth;
+    articleEl.classList.add("fade-in");
     articleEl.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
     renderPager(slug);
     window.scrollTo(0, 0);

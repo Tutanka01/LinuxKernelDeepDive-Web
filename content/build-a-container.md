@@ -153,10 +153,11 @@ syscall boundary "a perfect choke point"; **seccomp-BPF** is the filter
 installed on it. A process declares: "from now on, for me and all my
 children, only these syscalls" — irrevocably.
 
-Docker's default profile allows ~350 of ~450 syscalls, denying the exotic
-and dangerous: `mount`, `reboot`, `init_module`, `kexec_load`, `ptrace`
-(old kernels), `open_by_handle_at` (the 2014 "Shocker" container escape
-used it), `bpf` (load eBPF programs), `unshare` to create new namespaces…
+Docker's default profile disables ~44 syscalls out of more than 300,
+denying the exotic and dangerous: `mount`, `reboot`, `init_module`,
+`kexec_load`, `ptrace` (old kernels), `open_by_handle_at` (the 2014
+"Shocker" container escape used it), `bpf` (load eBPF programs), `unshare`
+to create new namespaces…
 
 See it working with off-the-shelf tools:
 
@@ -176,7 +177,7 @@ scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ERRNO(EPERM)); // default: deny
 seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
 seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
 seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(openat), 0);
-/* … ~350 allowed syscalls … */
+/* … allow the ~300+ safe syscalls, block the ~44 dangerous ones … */
 seccomp_load(ctx);          // point of no return
 execve(entrypoint, …);
 ```

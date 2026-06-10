@@ -390,5 +390,4 @@ gain privilege through exec.
 
 ---
 
-**Next:** performance at the syscall boundary: classic blocking I/O, readiness
-APIs, async I/O, and why `io_uring` exists.
+**Next:** security isn't just about blocking attacks — it's about being able to *prove* what ran. Trusted computing: Secure Boot verifies signatures, the TPM measures every boot stage into tamper-proof hardware, and IMA extends measurement into runtime. The plumbing beneath confidential computing.

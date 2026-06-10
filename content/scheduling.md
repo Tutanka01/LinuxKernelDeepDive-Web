@@ -284,4 +284,4 @@ everything, so that CPU is frozen forever until the task blocks or is killed.)*
 
 ---
 
-**Next:** the grandest illusion the kernel performs — virtual memory.
+**Next:** the grandest illusion the kernel performs — virtual memory. Every process believes it has a private, contiguous address space gigabytes wide. How the MMU, page tables, TLB, page cache, and swap conspire to make that true.

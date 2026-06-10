@@ -346,5 +346,4 @@ presume.)*
 
 ---
 
-**Next:** how a pile of disk blocks becomes `/home/you/notes.txt` — the VFS
-and filesystems.
+**Next:** how a pile of disk blocks becomes `/home/you/notes.txt` — the VFS and filesystems. Inodes, dentries, hard links, symlinks, journaling, and how the kernel makes ext4, xfs, and btrfs all look the same from above.

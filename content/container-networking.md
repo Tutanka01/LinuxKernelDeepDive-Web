@@ -243,6 +243,4 @@ automatic service discovery on user-defined networks.)*
 
 ---
 
-**Next:** Part IV — modern kernel mechanisms. We start with eBPF: the
-programmable substrate underneath observability, networking, and runtime
-security.
+**Next:** Part V — the kernel and the physical machine. We start with power management: how Linux decides when to slow down, sleep, or shut off hardware. CPU frequency governors, C-states, ACPI, and the idle loop that keeps your laptop alive and your datacenter power bill down.

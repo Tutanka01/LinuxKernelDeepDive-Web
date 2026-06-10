@@ -197,18 +197,27 @@ the kernel).
 RCU is Linux's most unique synchronization mechanism and one that defines how
 the kernel achieves performance at scale. The insight:
 
-> If readers never block and never acquire locks, and writers make a copy
-> before modifying, then read-side overhead is literally zero instructions
-> (after the hardware barrier) — no cacheline contention, no lock acquire.
+> **Simplified model:** if readers never block and never acquire locks, and
+> writers make a copy before modifying, then read-side overhead is extremely
+> low — no atomic operations, no cacheline contention, no lock acquire.
+>
+> **Important nuance:** exactly how low depends on kernel configuration and
+> RCU variant. In `CONFIG_PREEMPT_NONE` (non-preemptible kernel), `rcu_read_lock()`
+> and `rcu_read_unlock()` may indeed compile to zero instructions. In a
+> preemptible kernel (`CONFIG_PREEMPT`), RCU read-side primitives must
+> disable/enable preemption, and the cost is real though still low — the
+> official kernel documentation notes that there is no single "correct" way
+> to summarize RCU because the details vary with configuration.
 
 The RCU API has three parts:
 
 ```c
 // Reader:
-rcu_read_lock();                   // = preempt_disable() — that's it, no lock!
+rcu_read_lock();                   // disables preemption on PREEMPT kernels;
+                                   // compiles to nothing on PREEMPT_NONE
 p = rcu_dereference(shared_ptr);   // read the pointer (compiler barrier)
 // ... use p — no lock, no atomic, nothing ...
-rcu_read_unlock();                 // = preempt_enable()
+rcu_read_unlock();                 // re-enables preemption (or nothing)
 
 // Writer (update):
 new = kmalloc(sizeof(*new));        // create a new version
@@ -224,12 +233,16 @@ kfree(old);                           // now safe — nobody was looking at 'old
 // This guarantees all pre-existing rcu_read_lock() sections have ended.
 ```
 
-The magic of `rcu_read_lock()` being free: it only disables preemption.
-Preemption ensures the reader doesn't get context-switched out, and
-`synchronize_rcu()` waits for all CPUs to context-switch (proving no one is
-still in the read-side). The read path pays zero atomic operations, zero
-cacheline contention. This is why Linux can route millions of packets per
-second while simultaneously updating the routing table.
+The key trade-off: `rcu_read_lock()` is cheap because it only disables
+preemption (and on `CONFIG_PREEMPT_NONE` kernels, it compiles away entirely).
+Preemption is prevented so that the reader cannot be context-switched out
+while holding a reference to RCU-protected data. `synchronize_rcu()` then
+waits for all CPUs to pass through a quiescent state (context switch, return
+to user space, or idle), proving no pre-existing readers remain. The read
+path pays at most a preempt disable/enable pair with no atomic operations and
+no cacheline contention on the shared pointer. This is why Linux can route
+millions of packets per second while simultaneously updating the routing
+table.
 
 RCU is used in:
 - The **dentry cache** (path lookup reads dentries under RCU — `open()` on a
@@ -248,11 +261,17 @@ RCU variants for different use cases:
 - `SRCU` (Sleepable RCU) — readers may sleep (used in KVM).
 - `Tasks RCU` — tracks voluntary context switches (used for trampoline cleanup).
 
-## Memory ordering: when locking isn't enough
+## Memory ordering: when explicit barriers are needed
 
-On weak-memory-model architectures (ARM, PowerPC), even a spinlock doesn't
-guarantee that stores made inside the critical section are visible to the next
-lock acquirer *in the right order*. The kernel provides explicit barriers:
+On weak-memory-model architectures (ARM, PowerPC), the CPU may reorder memory
+accesses. For classical critical sections protected by correctly paired
+`spin_lock()` / `spin_unlock()`, the lock itself provides the necessary
+acquire and release semantics — the lock already guarantees that stores inside
+the critical section are visible to the next lock acquirer.
+
+Explicit barriers become critical for **lockless algorithms** and more complex
+ordering relationships that aren't covered by a single lock acquire/release
+pair. The kernel provides:
 
 ```c
 smp_mb();          // full memory barrier: all prior stores visible before any later loads
@@ -264,9 +283,14 @@ smp_load_acquire(&x);         // load x, all subsequent loads see updated values
 
 On x86, most of these are nearly free (x86 has a strong memory model — stores
 are not reordered past stores, loads past loads). On ARM, they become `dmb`
-instructions. The kernel abstracts this away: spin_lock() already contains the
-necessary acquire/release semantics. If you're not writing a new lock type,
-you almost never write explicit barriers.
+instructions. The kernel abstracts this away: standard locks (`spin_lock`,
+`mutex_lock`, etc.) already contain the necessary acquire/release semantics
+for the data they protect. Explicit barriers are needed only when you're
+writing lockless data structures (like RCU-protected lists, ring buffers, or
+novel synchronization primitives). In practice, most kernel developers use
+them rarely — sufficiently rarely that the kernel provides the `WRITE_ONCE()`
+and `READ_ONCE()` macros as a gentle reminder when volatile-like access
+patterns matter.
 
 ## Choosing the right lock: a decision tree
 
@@ -350,13 +374,13 @@ schedule() while another thread holds it — this is safe because the waiter
 gives up the CPU; spin_lock() busy-waits — calling schedule() while holding a
 spinlock leaves the lock held forever on that CPU and any other CPU trying to
 acquire it will spin indefinitely, essentially deadlocking that core;
-rcu_read_lock() only disables preemption (sets a per-CPU flag) — no atomic
-operation, no lock, no cacheline bouncing — the cost is amortized in
-synchronize_rcu() which must wait for every CPU to pass through a context
-switch, which can take tens of milliseconds depending on HZ.)*
+rcu_read_lock() disables preemption on preemptible kernels and compiles to
+nothing on CONFIG_PREEMPT_NONE — in either case, no atomic operations, no
+lock, no cacheline bouncing on the shared pointer; the cost is amortized in
+synchronize_rcu() which must wait for every CPU to pass through a quiescent
+state (context switch, return to userspace, or idle), which can take tens
+of milliseconds depending on HZ and workload.)*
 
 ---
 
-**Next:** the first truly modern addition to the kernel — Rust. Why it
-matters, what's already merged, and how it fits alongside the C codebase
-you've been reading.
+**Next:** the human side — how the kernel project actually works. The maintainers, the mailing lists, the merge window cadence, the 15,000 contributors, and the unwritten rules that govern the largest software project in history.

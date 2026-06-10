@@ -302,5 +302,4 @@ Origin compliance.)*
 
 ---
 
-**Next:** the tools chapter — `/proc`, `strace`, `perf`, and eBPF. Everything
-you've learned across this entire site, now observable on a live system.
+**Next:** you've learned every subsystem in isolation. Now we consolidate everything into a systematic performance methodology — USE, RED, the 60-second checklist, flame graphs, and the investigation pattern that finds what's slow in five minutes or less.

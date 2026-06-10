@@ -243,6 +243,4 @@ the bindings layer; driver code should be mostly safe Rust.)*
 
 ---
 
-**Next:** the human side — how the kernel project actually works. The
-maintainers, the mailing lists, the merge window cadence, and the unwritten
-rules that govern the largest software project in history.
+**Next:** Part VII — the kernel as hypervisor. KVM turns Linux into the platform that runs every cloud VM on earth. The vCPU execution loop, VM exits, EPT page tables, virtio paravirtualized I/O, and why steal time matters.
