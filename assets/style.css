@@ -372,7 +372,11 @@ body {
   font-style: italic;
 }
 
-/* ---------------- Mobile ---------------- */
+/* ---------------- Images ---------------- */
+
+.article img { max-width: 100%; height: auto; }
+
+/* ---------------- Responsive: Tablet & below (< 900px) ---------------- */
 
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
@@ -388,35 +392,138 @@ body {
     color: var(--accent);
     border: none;
     border-bottom: 1px solid var(--rule);
-    padding: 0.8rem 1.2rem;
+    padding: 1rem 1.2rem;
     font-family: var(--serif);
     font-size: 1rem;
     cursor: pointer;
-    transition: background 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
   }
 
-  #sidebar-toggle:hover { background: rgba(217, 160, 91, 0.06); }
+  #sidebar-toggle:active { background: rgba(217, 160, 91, 0.1); }
 
   .sidebar {
     width: 100%;
     height: auto;
     max-height: 0;
-    opacity: 0;
+    visibility: hidden;
     overflow: hidden;
     position: static;
     border-right: none;
     border-bottom: 1px solid transparent;
     padding: 0 1.5rem;
-    transition: max-height 0.4s ease, opacity 0.3s ease, padding 0.3s ease, border-color 0.3s ease;
+    transition: max-height 0.35s ease, visibility 0s 0.35s, padding 0.3s ease, border-color 0.3s ease;
   }
 
   .sidebar.open {
-    max-height: 4000px;
-    opacity: 1;
-    padding: 2rem 1.5rem 2rem 2rem;
+    max-height: 5000px;
+    visibility: visible;
+    padding: 1.5rem 1.5rem 2rem 1.8rem;
     border-bottom-color: var(--rule);
+    transition: max-height 0.35s ease, visibility 0s 0s, padding 0.3s ease, border-color 0.3s ease;
   }
 
-  .article { padding: 2rem 1.3rem; }
-  .pager, .page-footer { padding-left: 1.3rem; padding-right: 1.3rem; }
+  .toc-list a {
+    padding: 0.55rem 0.6rem;
+  }
+
+  .article {
+    padding: 2rem 1.5rem 1.5rem;
+  }
+
+  .pager, .page-footer {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  body { font-size: 16px; }
+
+  .article h1 { font-size: 1.85rem; }
+  .article h2 { font-size: 1.35rem; margin-top: 2rem; }
+  .article h3 { font-size: 1.1rem; }
+}
+
+/* ---------------- Responsive: Phone (< 600px) ---------------- */
+
+@media (max-width: 600px) {
+  body { font-size: 15px; }
+
+  .article {
+    padding: 1.5rem 1rem 1rem;
+  }
+
+  .article h1 {
+    font-size: 1.55rem;
+  }
+
+  .article h1::after {
+    content: "· · ──────── · ·";
+    font-size: 0.75rem;
+    margin-top: 0.7rem;
+  }
+
+  .article h2 {
+    font-size: 1.2rem;
+    margin-top: 1.8rem;
+  }
+
+  .article h3 { font-size: 1rem; }
+
+  .article pre {
+    padding: 0.8rem 0.9rem;
+    font-size: 0.78rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .article pre code { font-size: 0.75rem; }
+
+  .article blockquote {
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+  }
+
+  .article table {
+    font-size: 0.78rem;
+  }
+
+  .article th, .article td {
+    padding: 0.35rem 0.5rem;
+  }
+
+  .pager {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.8rem 1rem 0;
+  }
+
+  .pager a { max-width: 100%; padding: 0.5rem 0; }
+
+  .pager .next { text-align: right; }
+
+  .page-footer { padding: 1rem 1rem 2rem; }
+
+  .sidebar.open { padding: 1rem 1rem 1.5rem 1.3rem; }
+
+  #sidebar-toggle { padding: 0.9rem 1rem; font-size: 0.95rem; }
+
+  .toc-part { font-size: 0.68rem; }
+  .toc-list a { font-size: 0.9rem; }
+}
+
+/* ---------------- Responsive: Small phone (< 420px) ---------------- */
+
+@media (max-width: 420px) {
+  body { font-size: 14px; }
+
+  .article h1 { font-size: 1.4rem; }
+  .article h1::after { font-size: 0.7rem; }
+
+  .article h2 { font-size: 1.1rem; }
+  .article h3 { font-size: 0.95rem; }
+
+  .article pre code { font-size: 0.7rem; }
+
+  .article th, .article td {
+    padding: 0.3rem 0.4rem;
+  }
 }
