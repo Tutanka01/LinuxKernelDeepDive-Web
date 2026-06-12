@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distributed Systems — A Guided Course</title>
+  <meta name="description" content="A self-paced, carefully sequenced course on distributed systems: from 'what is a distributed system' all the way to consensus, transactions, CRDTs and real-world architectures.">
+  <link rel="stylesheet" href="assets/ds.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+
+    <button id="sidebar-toggle" aria-label="Toggle course outline">☰ Course outline</button>
+
+    <nav id="sidebar" class="sidebar">
+      <div class="site-title">
+        <a href="#/" id="home-link">Distributed<br>Systems</a>
+        <p class="site-subtitle">a guided course, node by node</p>
+      </div>
+
+      <div class="sidebar-progress">
+        <div class="sidebar-progress-track"><div id="sidebar-progress-fill"></div></div>
+        <p id="sidebar-progress-label">0% complete</p>
+      </div>
+
+      <div id="toc"><!-- course outline injected by ds.js --></div>
+
+      <a class="side-course" href="../index.html">
+        <span class="side-course-kicker">Back to the main guide</span>
+        <span class="side-course-title">&larr; The Linux Deep Dive</span>
+        <span class="side-course-desc">How your system really works — kernel, processes, containers.</span>
+      </a>
+
+      <div class="sidebar-footer">
+        <p>Your progress is saved locally<br>in this browser.</p>
+      </div>
+    </nav>
+
+    <main class="content">
+      <div id="view">
+        <p class="loading">Loading…</p>
+      </div>
+    </main>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="assets/ds.js"></script>
+</body>
+</html>
