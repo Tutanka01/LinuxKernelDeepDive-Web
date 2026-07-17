@@ -1,305 +1,580 @@
-# How the Kernel Is Made: Process, Governance & Culture
+---
+level: core
+kernel: 6.12
+verified: 2026-07
+minutes: 21
+requires: what-is-linux
+---
+
+# How the Kernel Is Made: Process & Governance
 
 > **Goal:** understand how the largest collaborative software project in
 > history actually works — the people, the process, the mailing lists, the
 > merge window, the stable/LTS release model, and the unwritten rules that
 > define Linux kernel development culture.
 
+Everything else in this book describes what the kernel *does*. This chapter
+describes how the kernel *becomes*: the machine that turns 15,000 strangers,
+2,000 competing companies, and one opinionated Finn into a new release every
+nine to ten weeks, on schedule, for two decades. There is no product manager,
+no roadmap, no sprint. There is a mailing list, a git tree, and a chain of
+trust. It works better than almost any corporate process, and understanding
+why is worth as much as understanding any subsystem.
+
 ## The scale, in numbers
 
-Before the process, the scale:
+Before the process, the scale (kernel 6.x era, per release):
 
-- **~40 million lines** of code (C, assembly, Rust, Makefiles, scripts).
-- **~15,000 individual contributors** per release (kernel 6.x era).
-- **~2,000 companies** appear in `Signed-off-by` lines.
-- A new release every **9–10 weeks** without fail, since 2005 (git era).
-- ~3,500 patches accepted per week during the merge window.
-- ~400 subsystems, each with at least one maintainer.
-- **1 person** makes the final decision: Linus Torvalds.
+- **~40 million lines** of source (C, some assembly, growing Rust, plus
+  Makefiles, Kconfig, and scripts). Roughly **two-thirds is drivers**.
+- **~13,000–15,000 changesets** merged, from **~1,700–2,000 developers**,
+  employed by **~200+ companies** that appear in `Signed-off-by` lines.
+- A tagged release every **9–10 weeks**, without a single miss since git
+  adoption in **2005**.
+- **~10,000–14,000 patches** land in the ~2-week merge window alone.
+- **~2,900 entries** in the `MAINTAINERS` file — subsystems, each with one or
+  more maintainers.
+- **1 person** signs the final tag: Linus Torvalds.
 
-The kernel is not governed by a foundation (unlike Python/Go/Kubernetes).
-It's governed by **maintainer hierarchy** — a human chain of trust where
-each maintainer decides what enters their subsystem, and Linus decides what
-enters mainline.
+The kernel is *not* governed by a foundation the way Python (PSF), Go
+(Google), or Kubernetes (CNCF) are. The Linux Foundation pays some salaries
+and hosts infrastructure, but it has **zero authority over what enters the
+tree**. Governance is a **maintainer hierarchy** — a human chain of trust
+where each maintainer decides what enters their subsystem, and Linus decides
+what enters mainline. It is closer to a guild than a company.
+
+```bash
+# Reproduce the scale on your own clone (needs a full git history):
+git shortlog -sne v6.11..v6.12 | wc -l   # distinct authors in one release
+git log --oneline v6.11..v6.12 | wc -l    # total commits
+wc -l MAINTAINERS                          # size of the map of who owns what
+```
 
 ## The release cycle: merge window + stabilization
 
-The kernel follows a strict two-week-merge, seven-week-stabilize cadence:
+The kernel runs a strict **two-week-merge, seven-week-stabilize** cadence:
 
 ```text
-Week 1-2:  MERGE WINDOW — Linus accepts pull requests from subsystem
-           maintainers. All new features land here. ~12,000 patches.
-           Linus releases -rc1 at the end.
+Week 0:    Previous release ships (e.g. v6.12). Merge window opens.
 
-Week 3-9:  STABILIZATION — one -rc release per week (rc2, rc3... rc7).
-           Only bug fixes, documentation, and small cleanups accepted.
-           -rc7 is usually the last; occasionally -rc8 if regressions.
+Week 1-2:  MERGE WINDOW — Linus pulls signed tags from subsystem
+           maintainers. ALL new features land here, nowhere else.
+           ~10,000-14,000 patches. Linus tags -rc1 and the window SLAMS shut.
 
-Week 10:   FINAL RELEASE — Linus tags v6.X and the cycle restarts.
+Week 3-9:  STABILIZATION — one -rc per week (rc2, rc3, ... rc7).
+           Only bug fixes, regressions, docs, and small cleanups accepted.
+           Each -rc should have fewer changes than the last.
+           -rc7 is the usual last stop; -rc8 (rarely -rc9) if regressions linger.
+
+Week 9-10: FINAL RELEASE — Linus tags v6.13. The next merge window opens
+           the same day. The wheel never stops.
 ```
 
-If a patch misses the merge window, it waits ~10 weeks for the next one.
-The rhythm is relentless — the kernel hasn't missed a release since 2005.
+The asymmetry is the whole point. **The merge window is the only door for new
+work.** Miss it and your feature waits for the *next* one — roughly seven weeks
+of stabilization plus the two-week window, so **~9–10 weeks minimum**, often
+longer if a subsystem maintainer wants another review round. This forces
+developers to have code *ready and reviewed* before the window, not scrambling
+during it. Most patches actually spend their real life on mailing lists weeks
+or months earlier; the merge window is just the moment of formal entry.
 
-The cycle is visible live:
+The cycle is visible live in any full clone:
 
 ```bash
-git log --oneline v6.8..v6.9 --merges | wc -l  # pull requests accepted
-git log --oneline v6.9-rc1..v6.9 | wc -l        # total patches in a release
+git log --oneline --merges v6.11..v6.12 | wc -l   # pull requests Linus accepted
+git log --oneline v6.12-rc1..v6.12 | wc -l          # bug fixes during stabilization
+git log --oneline v6.11..v6.12-rc1 | wc -l          # the merge-window flood
 ```
+
+That last number will dwarf the middle one — usually 10:1 or worse. That ratio
+*is* the release model: a burst of features, then a long tail of fixes.
 
 ### Stable and LTS kernels
 
-After each mainline release, the **stable team** (Greg Kroah-Hartman and
-Sasha Levin) maintains a parallel track:
+Linus tags mainline and moves on; he does not maintain old releases. That job
+belongs to the **stable team**, led by **Greg Kroah-Hartman** with **Sasha
+Levin**, running a parallel track:
 
-- **Stable kernels** — v6.9.1, v6.9.2, … receive bug fixes backported from
-  mainline for the life of that series (~3 months, until the next mainline).
-- **LTS (Long-Term Support)** — designated versions supported for 2, 4, or
-  6 years. Current LTS: 6.6, 6.12. Used by Android, embedded, enterprise
-  distros.
+- **Stable kernels** — `v6.12.1`, `v6.12.2`, … receive bug fixes *backported
+  from mainline* for the life of the series. A normal (non-LTS) series is
+  maintained only until the next mainline release supersedes it (~2–3 months).
+- **LTS (Long-Term Support)** — one release per year is designated LTS. As of
+  July 2026 the actively maintained LTS lines include **6.1, 6.6, and 6.12**
+  (6.12 is the newest, tagged November 2024), alongside older survivors like
+  5.15 and 5.10. In September 2023 Greg KH announced that new LTS kernels
+  default to **2 years** of support rather than the old 6, because almost
+  nobody was testing the 5–6 year-old trees — support gets *extended* only
+  where there is real demand (Android, major distros). LTS is what Android,
+  embedded devices, and enterprise distros ride, because they cannot reboot
+  the planet onto a new kernel every 10 weeks.
 
 ```bash
-# See your kernel's stream:
-uname -r                 # 6.8.0-52-generic = stable (distro's version)
-git tag -l "v6.6*"       # LTS 6.6: v6.6, v6.6.1, v6.6.2...
+uname -r                 # e.g. 6.8.0-52-generic — a distro's patched stable
+cat /proc/version        # full build string, compiler, build date
+git tag -l "v6.12.*" | sort -V   # the 6.12 LTS point releases
 ```
 
-**Stable rules are strict:** patches must be in mainline first (no
-"stable-only" fixes), must be small and obvious, must fix a real bug, and
-must have a proper `Cc: stable@vger.kernel.org` tag or `Fixes:` tag linking
-to the commit that introduced the bug.
+**Stable rules are deliberately strict** (see
+`Documentation/process/stable-kernel-rules.rst`): a fix must already be in
+Linus's tree first (**no stable-only patches, ever**), must be small and
+obviously correct, must fix a real bug users hit, and should carry either a
+`Cc: stable@vger.kernel.org` tag or a `Fixes:` tag naming the commit that
+introduced the bug. The `Fixes:` tag is what lets Sasha Levin's tooling — and
+increasingly an ML classifier — auto-select candidates for backport.
 
-### Kernel security
+### Kernel security and CVEs
 
-Security fixes follow a different path. The **security team**
-(`security@kernel.org`) handles embargoed vulnerabilities. Once fixed,
-the patch is fast-tracked to stable. The kernel doesn't do CVE numbering
-itself (the CVE system is external). The philosophy: fix the bug, ship
-the fix, coordinate disclosure — no marketing.
+Security fixes take a different path. The **security team**
+(`security@kernel.org`) handles embargoed vulnerabilities under coordinated
+disclosure, with a hard cap on embargo length (typically **≤7 days**, rarely
+up to ~5 weeks) — the kernel refuses long embargoes on principle.
+
+Here the old folklore is now **wrong, and worth correcting**: since **13
+February 2024 the Linux kernel project is an official CVE Numbering Authority
+(CNA)** and assigns its own CVE identifiers. The philosophy Greg KH articulated
+is blunt: because *any* bug can turn out to be a security bug, the project
+assigns CVEs liberally to fixed commits rather than trying to divine intent in
+advance. This produces a large volume of CVEs — deliberately — and pushes the
+industry away from treating a CVE number as a reliable severity signal. The
+kernel does **not** assign scores; downstream consumers decide what matters.
+See the [Linux Security & Confinement](#/security-hardening) and
+[Trusted Computing](#/trusted-computing) chapters for the defensive side.
 
 ## The chain of trust: maintainer hierarchy
 
-The kernel is organized as a tree of git repositories:
+The kernel is a **tree of git repositories**, not one repo everyone pushes to.
+Each maintainer runs their own tree; trust flows upward through people, not
+through commit access.
 
 ```text
-Linus Torvalds  —  torvalds/linux.git  (mainline)
+Linus Torvalds  —  torvalds/linux.git  (mainline; the only "real" tree)
   │
-  ├── Greg KH      — stable, driver core, USB
-  ├── Andrew Morton — mm tree (memory management patches land here)
-  ├── David Miller — networking
-  ├── Jens Axboe   — block layer, io_uring
-  ├── Christian Brauner — VFS, mounts
-  ├── Tejun Heo     — cgroups, workqueues
-  ├── Ingo Molnar   — scheduler, locking
-  ├── Thomas Gleixner — timers, x86, interrupt handling
+  ├── Greg KH            — stable, driver core, USB, char/misc
+  ├── Andrew Morton      — mm (memory management funnels through -mm / mm-next)
+  ├── Jakub Kicinski,    — networking (netdev); David S. Miller and
+  │   Paolo Abeni          Eric Dumazet remain co-maintainers
+  ├── Jens Axboe         — block layer, io_uring
+  ├── Christian Brauner  — VFS, mounts, namespaces
+  ├── Tejun Heo          — cgroups, workqueues
+  ├── Peter Zijlstra,    — scheduler, locking
+  │   Ingo Molnar
+  ├── Thomas Gleixner    — x86, timers, interrupt/IRQ core
   ├── ...
-  └── ~400 subsystem maintainers
-        └── reviewers, sub-maintainers
+  └── ~2,900 MAINTAINERS entries
+        └── sub-maintainers, reviewers, per-driver owners
 ```
 
-A patch's journey:
-1. Developer writes patch, runs `scripts/checkpatch.pl`, sends to the
-   appropriate mailing list + maintainer (via `scripts/get_maintainer.pl`).
-2. Reviewers comment on the list. Developer revises. Repeat.
-3. Maintainer applies the patch to their subsystem tree.
-4. During the merge window, maintainer sends a **pull request** (a signed git
-   tag) to Linus.
-5. Linus pulls, merges, and (if it passes his review) the code is in mainline.
+Networking illustrates the reality: **David S. Miller** ran `netdev` for years,
+but as of 6.12 day-to-day networking is co-maintained by **Jakub Kicinski** and
+**Paolo Abeni**, with Eric Dumazet on the hot paths — maintainership is a
+living arrangement, not a title carved in stone. The scheduler tells the same
+story: the fair-class scheduler that lands your threads on CPUs was **CFS until
+kernel 6.6, when EEVDF replaced it** — a change shepherded by Peter Zijlstra
+through the `tip` tree (see [CPU Scheduling](#/scheduling)).
 
-The point of no return: once Linus pulls a change, it cannot be reverted
-except by an emergency fix in the -rc cycle. "Don't break userspace" means
-— among other things — once an API ships, it stays forever.
+The map of who owns what is a file in the tree:
+
+```bash
+# Who do I send an ext4 patch to, and which lists?
+./scripts/get_maintainer.pl -f fs/ext4/inode.c
+# Reads MAINTAINERS + git history to compute maintainers, reviewers, and lists.
+```
+
+### A patch's journey
+
+1. Developer writes the patch, runs `scripts/checkpatch.pl` for style/coding
+   violations, and mails it (inline, plain text) to the maintainer + list that
+   `get_maintainer.pl` named. Modern workflow often uses **`b4`** (by
+   Konstantin Ryabitsev) to format, send, and later collect review tags.
+2. Reviewers reply on-list. The developer sends a **v2, v3, …** revision,
+   each a fresh thread, incorporating feedback. This can take many rounds.
+3. The maintainer applies the accepted patch to *their* subsystem tree.
+4. That tree spends time in **`linux-next`**, the daily integration tree
+   maintained by **Stephen Rothwell**, which merges ~200 subsystem trees so
+   cross-subsystem conflicts surface *before* they reach Linus.
+5. During the merge window, the maintainer sends Linus a **pull request** — a
+   **signed git tag** with a summary message. Linus pulls, and if it survives
+   his review, the code is in mainline.
+
+The **point of no return** is step 5. Once Linus pulls, a change can only be
+undone by a follow-up fix in the -rc cycle or later — never a clean rewind of
+history. This is why the merge message and the DCO chain matter so much: they
+are the permanent record.
 
 ### The merge window ritual
 
-The two weeks before the merge window, subsystem trees are in `linux-next`
-(a daily integration tree maintained by Stephen Rothwell). This catches merge
-conflicts between subsystems *before* they hit Linus's tree. During the merge
-window:
-- Linus reviews every pull request message. He will NAK changes that lack
-  justification, break existing systems, or add complexity without value.
-- Famous Linus NAK quotes are part of kernel culture ("WE DO NOT BREAK
-  USERSPACE!" is real, capitalized, and immutable).
+By the time the window opens, everything Linus pulls has already been sitting
+in `linux-next` for weeks. That is what makes a two-week window survivable:
+Linus is mostly ratifying integration that has already been tested together,
+not discovering conflicts live. During the window he reads every pull-request
+message and will **NAK** (reject) anything that lacks justification, breaks
+existing systems, or adds complexity without payoff. The all-caps "**WE DO NOT
+BREAK USERSPACE!**" is a real, recurring, and load-bearing part of that review.
 
 ## How patches become kernel law
 
-A patch is a raw email with inline diff:
+A patch is not a pull request in a web UI. It is an **email with an inline
+unified diff**, formatted by `git format-patch`:
 
 ```text
 From: Developer <dev@example.com>
-Subject: [PATCH] fs/ext4: fix use-after-free in extent status tree
+Subject: [PATCH v2] ext4: fix use-after-free in extent status tree
 
-The extent status tree can race with truncate under heavy writeback load.
-Fixes: a1b2c3d4 ("ext4: add extent status tree")
+The extent status tree can race with truncate under heavy writeback,
+freeing an es entry while another thread still holds a pointer to it.
+Reorder the drop under i_es_lock so the lookup and free are atomic.
+
+Fixes: a1b2c3d4e5f6 ("ext4: add extent status tree")
+Reported-by: syzbot+deadbeef@syzkaller.appspotmail.com
 Signed-off-by: Developer <dev@example.com>
 ---
  fs/ext4/extents_status.c | 4 ++++
  1 file changed, 4 insertions(+)
 ```
 
-The tags that matter:
+The tags carry legal and review meaning:
 
 | Tag | Meaning |
 |---|---|
-| `Signed-off-by` | "I wrote this, or I'm passing it upstream, and I have the right to contribute it" (Developer Certificate of Origin). Mandatory. |
-| `Reviewed-by` | A reviewer has looked at it and approves. |
-| `Acked-by` | A maintainer or domain expert approves (may not be the direct maintainer). |
-| `Tested-by` | Someone tested it and it works. |
-| `Reported-by` | Credits the bug reporter. |
-| `Fixes: <commit>` | Identifies which commit introduced the bug. Critical for stable backports. |
-| `Cc: stable@vger.kernel.org` | Mark this for stable kernel inclusion. |
+| `Signed-off-by` | The **Developer Certificate of Origin** (DCO 1.1): "I wrote this or have the right to submit it under the open-source license indicated." **Mandatory** — no sign-off, no merge. |
+| `Reviewed-by` | A reviewer read the code carefully and vouches for it. |
+| `Acked-by` | A maintainer or domain expert approves, often for a change that goes through *another* subsystem's tree. |
+| `Tested-by` | Someone ran it and it works. |
+| `Reported-by` | Credits the bug reporter (often `syzbot`). |
+| `Fixes: <12+hex> ("subject")` | Names the commit that introduced the bug. Drives stable backport selection. |
+| `Cc: stable@vger.kernel.org` | Requests inclusion in the stable trees. |
 
-The `Signed-off-by` chain traces the patch from author to Linus:
+The DCO is **not a CLA**. There is no copyright assignment, no lawyer, no
+signup — you certify origin by adding one line. It is defined in
+`Documentation/process/submitting-patches.rst`. That low friction is a
+deliberate governance choice: it keeps the barrier to a first contribution as
+close to "write a good patch" as possible.
+
+The `Signed-off-by` chain traces custody from author to mainline:
 
 ```text
-Signed-off-by: Developer <dev@example.com>
-Signed-off-by: Ext4 Maintainer <ext4@kernel.org>
-Signed-off-by: Linus Torvalds <torvalds@...>
+Signed-off-by: Developer <dev@example.com>          # author
+Signed-off-by: Ext4 Maintainer <tytso@mit.edu>      # subsystem maintainer
+Signed-off-by: Linus Torvalds <torvalds@linux-...>  # mainline
 ```
 
-In a single release, this chain might have 8-10 links for a patch originating
-from a driver vendor.
+For a patch that originates at a hardware vendor and passes through a driver
+sub-maintainer, a subsystem maintainer, and Linus, that chain can be 4–6 links
+deep — each a person who took responsibility for passing it upward.
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant List as Mailing list
+    participant Maint as Maintainer tree
+    participant Next as linux-next
+    participant Linus as Mainline
+    Dev->>List: PATCH v1 (Signed-off-by)
+    List-->>Dev: review comments
+    Dev->>List: PATCH v2, v3...
+    List->>Maint: maintainer applies
+    Maint->>Next: daily integration test
+    Maint->>Linus: signed pull request
+    Linus->>Linus: merge or NAK
+```
 
 ## The testing infrastructure (the invisible machinery)
 
-The kernel's quality doesn't come from Linus's review — it comes from
-automated testing at scale:
+The kernel's reliability does **not** come from Linus reading 14,000 patches —
+it comes from automation running continuously at a scale no human can match:
 
 | System | What it does |
 |---|---|
-| **0-day / Kernel Test Robot** (Intel) | Builds and boots every patch on hundreds of configs/architectures, reports build failures and boot regressions within hours. Tests >200 trees. |
-| **syzbot** (Google) | The kernel fuzzer: continuously generates random syscall sequences looking for crashes, use-after-frees, and kernel panics. Files ~500 bugs/month. Reports are public and tracked. |
-| **KernelCI** | Builds and boots mainline + stable + next on real hardware across arm, arm64, x86, riscv. |
-| **CKI** (Red Hat) | Enterprise-oriented testing of stable and RHEL kernels. |
-| **Linaro / ARM testing** | ARM ecosystem hardware testing. |
-| **linux-next** integration | Catches subsystem merge conflicts before the merge window. |
+| **Kernel Test Robot / 0-Day** (Intel) | Builds and boots posted patches across hundreds of configs and architectures; emails build/boot/perf regressions, often within hours of a patch hitting a list. |
+| **syzbot** (Google, driven by `syzkaller`) | A coverage-guided syscall fuzzer running nonstop, finding use-after-frees, deadlocks, and panics. Files reports publicly and even bisects and proposes fixes. Thousands of bugs found and fixed to date. |
+| **KernelCI** | Builds and boots mainline/stable/next on **real hardware** across arm, arm64, x86, riscv; a LF-hosted, cross-vendor lab. |
+| **CKI** (Red Hat) | Enterprise-oriented CI for stable and distro kernels. |
+| **linux-next** | Human-plus-machine integration testing that catches cross-subsystem breakage before the merge window. |
 
-A random example of the scale: syzbot has found over 7,600 bugs since 2017,
-and roughly half have been fixed. The kernel development model works because
-automated testing catches what humans can't, *and* because maintainers act on
-reports.
+The sanitizers these systems lean on ship *in the kernel itself*: **KASAN**
+(Kernel Address Sanitizer) catches out-of-bounds and use-after-free; **KCSAN**
+catches data races; **UBSAN** catches undefined behavior; **kmemleak** finds
+leaks. They connect this chapter to real debugging — see
+[/proc, strace, perf & eBPF](#/observability) and
+[Reading & Building the Kernel](#/kernel-dev).
 
 ```bash
-# The syzbot dashboard:
-# syzkaller.appspot.com/upstream  ← real-time, public bug tracking
-git log --grep="syzbot" --oneline | wc -l  # patches fixing syzbot-found bugs
+# See how much of the tree is bug-fix churn driven by the fuzzer:
+git log --grep="syzbot" --oneline v6.11..v6.12 | wc -l
+# The live dashboard (public): syzkaller.appspot.com/upstream
 ```
+
+## Follow the code (kernel v6.12)
+
+Governance is usually social, but a piece of it is **compiled into the
+kernel**: the GPLv2 boundary between the kernel and proprietary code is
+enforced by real functions, not just etiquette. Trace what happens when you
+load a module — the machinery lives in `kernel/module/main.c`.
+
+1. Your driver exports and imports symbols through
+   [EXPORT_SYMBOL](https://elixir.bootlin.com/linux/v6.12/C/ident/EXPORT_SYMBOL)
+   and
+   [EXPORT_SYMBOL_GPL](https://elixir.bootlin.com/linux/v6.12/C/ident/EXPORT_SYMBOL_GPL).
+   The GPL variant marks a symbol as available **only to GPL-compatible
+   modules**. Thousands of core interfaces (many scheduler, cgroup, and mm
+   hooks) are `_GPL`-only, which is a governance decision expressed in C.
+
+2. `insmod` calls the `init_module`/`finit_module` syscall, which lands in the
+   loader. The kernel parses your module's `.modinfo` section — populated by
+   the [MODULE_LICENSE](https://elixir.bootlin.com/linux/v6.12/C/ident/MODULE_LICENSE)
+   macro — via
+   [check_modinfo](https://elixir.bootlin.com/linux/v6.12/C/ident/check_modinfo).
+   The declared license string ("GPL", "GPL v2", "Dual BSD/GPL", "Proprietary",
+   …) is checked by
+   [license_is_gpl_compatible](https://elixir.bootlin.com/linux/v6.12/C/ident/license_is_gpl_compatible).
+
+3. If the license is not GPL-compatible, the loader calls
+   [add_taint](https://elixir.bootlin.com/linux/v6.12/C/ident/add_taint)
+   with `TAINT_PROPRIETARY_MODULE`, permanently flagging the kernel. That taint
+   flag shows up in every oops and in `/proc/sys/kernel/tainted`, and it tells
+   maintainers "this crash may not be our code" — which is exactly why bug
+   reports from tainted kernels get triaged differently.
+
+4. When the loader resolves your module's imported symbols in
+   [resolve_symbol](https://elixir.bootlin.com/linux/v6.12/C/ident/resolve_symbol),
+   it looks each name up with
+   [find_symbol](https://elixir.bootlin.com/linux/v6.12/C/ident/find_symbol).
+   For a `_GPL` symbol, resolution **fails** for a non-GPL-compatible module,
+   and `insmod` returns `-ENOEXEC`. The `struct module` that results carries a
+   `taints` field and a `state` field (`MODULE_STATE_COMING` → `LIVE`) tracking
+   exactly this lifecycle.
+
+So "in-tree, GPLv2, and no stable module API" is not only culture — the fields
+`license`, `taints`, and the `_GPL` symbol table make the social contract
+executable. This is the same module machinery you exercise by hand in
+[Devices, Drivers & Modules](#/devices-modules) and the
+[kernel module lab](#/lab-kernel-module).
+
+A second, smaller thread worth knowing: the version you see from `uname` comes
+from the build-time `UTS_RELEASE` string surfaced through the kernel's
+`utsname()` and the
+[uts_namespace](https://elixir.bootlin.com/linux/v6.12/C/ident/uts_namespace)
+— which is *also* why containers can present a different `uname` per namespace
+(see [Namespaces](#/namespaces)) without changing the running kernel.
 
 ## The culture: unwritten rules
 
 ### "Don't break userspace"
 
-The cardinal rule. If your kernel upgrade breaks a working program, the kernel
-is at fault — even if the program was doing something "wrong" by the spec.
-Linus' famous rant from 2012 after a `-rc` broke `pulseaudio`:
+The cardinal rule. If a kernel upgrade breaks a program that worked before, the
+**kernel** is at fault — even if the program relied on undocumented or
+technically-wrong behavior. Linus's canonical formulation:
+
 > "We do not break userspace. The whole *point* of the kernel is to run
 > userspace. If we break userspace, we are a BUG."
-This is why `uname` gives back-compat info, why `/proc` entries never move,
-and why ioctl numbers are permanent.
+
+The practical consequences are severe and permanent: a syscall number, a
+`/proc` or `/sys` field's format, an `ioctl` number, or a stable `sysfs`
+attribute, once shipped, is effectively **forever**. Developers can *add* new
+syscalls (x86-64 is past **450**), wrap old paths in compatibility shims, or
+gate new behavior behind flags — but they almost never remove anything. This
+rule is why syscall interfaces are designed so cautiously and why the UAPI
+headers (`include/uapi/`) are treated as a contract, not code.
 
 ### "No regressions"
 
-A new kernel must work at least as well as the old kernel on all hardware.
-If a Wi-Fi driver works on 6.9 and breaks on 6.10, that's a regression bug
-and it blocks the release.
+A new kernel must work **at least as well** as the old one on the hardware
+people actually run. If a Wi-Fi adapter worked on 6.11 and breaks on 6.12,
+that is a regression bug that can hold up the release, and bisection
+(`git bisect`) is the standard tool for pinning the guilty commit. Regressions
+are tracked formally (the `regzbot` bot follows them across threads).
 
 ### "Show me the code"
 
-Ideas without patches are worth little. Kernel development is
-patch-driven — discussions happen around *proposed changes*, not abstract
-design documents. This is simultaneously productive (concrete, testable)
-and exclusionary (you must know C well enough to write a working patch to
-participate meaningfully).
+Ideas without patches carry little weight. Design happens *around concrete,
+testable diffs*, not abstract proposals. This is productive — arguments are
+grounded in real code — and exclusionary: you must be able to write a working C
+(or increasingly Rust) patch to participate meaningfully.
 
-### "Performance matters; latency is sacred"
+### "Latency is sacred"
 
-The merge window is the time for adding features. The -rc cycle is for
-ensuring none of them regressed performance. The kernel carries an enormous
-burden: every change must not slow down the millions of systems already
-running. The `perf` and latency measurement infrastructure exists because
-regressions here are treated as seriously as crashes.
+The merge window is for features; the -rc cycle guards against performance and
+latency regressions. Every change must not slow down the millions of systems
+already deployed, which is why the kernel carries such heavy `perf`, tracing,
+and benchmark infrastructure (see
+[Performance Analysis Methodology](#/perf-methodology)).
 
 ### Linus as benevolent dictator
 
-Linus' role: final arbiter of taste, complexity, and the kernel's design
-direction. He doesn't review most patches (impossible at scale) — but he
-sets the standards through his rejections, his merge messages, and the
-culture he's built over 30+ years. His LKML posts are public, archived, and
-worth reading — they're the kernel's constitutional debates.
+Linus is the final arbiter of taste, complexity, and design direction. He
+cannot and does not review most patches — the maintainer hierarchy exists
+precisely so he doesn't have to. He sets standards through **which pull
+requests he rejects, how he words merge messages, and the culture built over
+30+ years**. His LKML posts are public and archived; they function as the
+project's constitutional debates. The **Code of Conduct** (added 2018,
+`Documentation/process/code-of-conduct.rst`) and the "gentler" tone since
+Linus's 2018 break are themselves governance changes worth noting.
+
+### Rust joins the language set
+
+Since kernel **6.1 (December 2022)**, the tree accepts **Rust** for new code,
+gated behind `CONFIG_RUST`. As of 6.12 it remains experimental and optional —
+core subsystems are still C — but real Rust abstractions and drivers are
+landing (networking PHY, DRM/GPU work, filesystem experiments). It is the first
+new implementation language admitted in the kernel's history, and the debate
+around it is a live example of governance in motion (see
+[Rust in the Linux Kernel](#/rust-kernel)).
 
 ## Comparison: Linux vs other kernels
 
-Understanding what makes Linux *Linux* requires seeing what other kernels
-do differently:
+Seeing what other kernels do differently sharpens what makes Linux *Linux*:
 
 | Dimension | Linux | FreeBSD | Windows NT | XNU (macOS/iOS) |
 |---|---|---|---|---|
-| **Architecture** | Monolithic + loadable modules | Monolithic + modules (kld) | Hybrid (kernel + user-space services) | Hybrid (Mach microkernel + BSD kernel) |
-| **Governance** | Linus + maintainer hierarchy | Core Team election | Microsoft (single company) | Apple (single company, partially open) |
+| **Architecture** | Monolithic + loadable modules | Monolithic + modules (kld) | Hybrid (kernel + user-mode services) | Hybrid (Mach microkernel + BSD) |
+| **Governance** | Linus + maintainer hierarchy | Elected Core Team | Microsoft (single company) | Apple (single company, partly open) |
 | **Release model** | Time-based (~10 weeks), stable/LTS | Time-based + stable branches | Feature updates ~biannual | Tied to OS releases |
-| **Driver model** | In-tree preferred, stable API not guaranteed | In-tree, stable KPI | Stable driver API (WHQL) | In-tree, limited third-party (DriverKit) |
+| **Driver model** | In-tree preferred, **no** stable in-kernel API | In-tree, stable KPI within a major | Stable driver ABI (WHQL) | In-tree; DriverKit for 3rd party |
 | **License** | GPLv2 | BSD 2-clause | Proprietary | APSL + proprietary |
-| **Philosophy** | "We don't break userspace" | "Principle of least astonishment" | "Backward compatibility at all costs" | "Security + performance for Apple hardware" |
-| **Rust support** | In progress (6.1+) | No (exploratory) | Yes (kernel-mode Rust drivers) | No |
-| **Key strength** | Hardware support, flexibility, ecosystem | Stability, ZFS, network stack | Driver compatibility, enterprise integration | Power efficiency, security model |
-| **Key weakness** | Driver quality variance, monolithic risk | Smaller ecosystem, less corporate backing | Closed source, slower innovation | Closed source, limited to Apple hardware |
+| **Philosophy** | "We don't break userspace" | "Least astonishment" | "Backward compat at all costs" | "Security + perf for Apple HW" |
+| **Rust support** | Yes, since 6.1 (experimental) | Exploratory | Kernel-mode Rust drivers (in progress) | No |
+| **Key strength** | Hardware breadth, flexibility, ecosystem | Stability, ZFS, network stack | Driver compatibility, enterprise | Power efficiency, security model |
 
-Why Linux won servers and Android: open source + GPLv2 forced contributions
-back (you can't ship a modified kernel without releasing source), creating a
-virtuous cycle of hardware support. FreeBSD's permissive license meant
-companies (Sony, Netflix, WhatsApp) contributed less back. Windows NT won
-desktop enterprise through backward compatibility. XNU won mobile through
-vertical integration.
+The **no stable in-kernel API** row is the sharpest contrast and a direct
+consequence of governance. Windows guarantees a driver ABI so vendors can ship
+binaries forever; Linux deliberately refuses to, so that internal interfaces
+can be refactored freely — the cost of an out-of-tree driver is *yours* to bear
+at every release, which is precisely the pressure that pushes vendors to
+upstream. The GPLv2 completes the loop: you cannot ship a modified kernel
+binary without offering source, so improvements flow back. FreeBSD's permissive
+BSD license let companies (Sony, Netflix, WhatsApp historically) contribute
+less back; that is a large part of why Linux, not BSD, won servers and Android.
 
 ## The mailing list is the town square
 
-Almost everything happens on email:
+Almost everything of consequence happens over **plain-text email**:
 
-- **LKML** (linux-kernel@vger.kernel.org) — the high-traffic main list.
-  Too much for one human. Subsystem lists are where real work happens.
-- **Subsystem lists** — `linux-mm@`, `linux-fsdevel@`, `netdev@`, `linux-btrfs@`...
-  Each has its own conventions, its own regulars.
-- **lore.kernel.org** — public archive of every list, with threads,
-  search, and downloadable mbox.
-- **patchwork.kernel.org** — patch tracking, shows what's pending, accepted,
-  or rejected per subsystem.
+- **LKML** (`linux-kernel@vger.kernel.org`) — the firehose main list, too much
+  for any human to follow fully. Real work happens on subsystem lists.
+- **Subsystem lists** — `linux-mm@`, `linux-fsdevel@`, `netdev@`,
+  `linux-block@`, `linux-btrfs@`, each with its own regulars and conventions.
+- **lore.kernel.org** — the public, searchable archive of every list, with
+  full threads and downloadable mbox (feeds the `b4` workflow).
+- **patchwork.kernel.org** — per-subsystem patch tracking: what is pending,
+  accepted, changes-requested, or rejected.
 
 How to follow along without drowning:
-- `lwn.net` (Linux Weekly News) — the weekly kernel development summary.
-  Subscribe. It's the single best English-language source.
-- `kernelnewbies.org/LinuxChanges` — human-readable summaries of each release.
+
+- **lwn.net** (Linux Weekly News) — the best English-language summary of kernel
+  development. The weekly "kernel page" is the single most efficient way to
+  stay current.
+- **kernelnewbies.org/LinuxChanges** — human-readable per-release changelogs.
+
+```bash
+# Configure git to send patches the kernel way (SMTP, inline):
+git config sendemail.smtpserver smtp.example.com
+git format-patch -1 --cover-letter -o /tmp/patches
+# git send-email /tmp/patches/*.patch --to=... --cc=...
+```
 
 ## Check your understanding
 
-1. Why does a patch that misses the merge window have to wait 10 weeks?
-2. What's the difference between a stable kernel and an LTS kernel?
-3. Why does the kernel have a "no regressions" rule — what would happen
-   without it?
-4. "Don't break userspace" means a kernel upgrade must still run programs
-   compiled in 2005. What practical consequences does this have for kernel
-   developers?
-5. What's the significance of `Signed-off-by` chains in a kernel commit?
+1. Why does a patch that misses the merge window typically wait ~10 weeks?
 
-*(Answers: the merge window is the only time new features are accepted —
-outside it, only bug fixes enter, so a patch that's "new work" rather than
-"fix" must wait for the next cycle 7-8 weeks of stabilization + 2 weeks until
-the next merge window opens; stable is the short-term bug-fix stream for
-current releases (~3 months), LTS is a designated long-term release supported
-for 2-6 years with backported fixes — essential for Android, embedded systems,
-and enterprise distros that can't reboot onto a new kernel every 10 weeks;
-without it, upgrading the kernel would risk breaking production workloads on
-unknown hardware/driver combinations — no one would upgrade, the kernel would
-fragment into frozen versions, and the continuous testing infrastructure would
-lose relevance; kernel developers can never remove or rename a syscall,
-/proc file, or ioctl number — they can only add new ones, wrap the old one
-in a compatibility shim, or wait until literally zero users exist (which
-takes decades) — this is why Linux has ~450 syscalls and almost no removals;
-it's the chain of legal and review custody — each person who handles the
-patch signs it, tracing it from original author through subsystem maintainers
-to Linus, establishing provenance and confirming Developer Certificate of
-Origin compliance.)*
+<details><summary>Show answer</summary>
+
+The merge window (weeks 1–2) is the *only* time new features are accepted.
+After it closes, ~7 weeks of stabilization (-rc2…-rc7/rc8) allow only bug
+fixes. So genuinely new work must wait out the rest of this cycle plus the
+next window opening — roughly 9–10 weeks minimum, often more if a maintainer
+wants another review round.
+
+</details>
+
+2. What is the difference between a *stable* kernel and an *LTS* kernel?
+
+<details><summary>Show answer</summary>
+
+Both are maintained by the stable team via backports from mainline. A normal
+stable series (e.g. 6.12.x) is maintained only until the next mainline release
+supersedes it (~2–3 months). An **LTS** release is one designated version per
+year kept alive far longer — since 2023 the default is ~2 years, extended on
+demand — for Android, embedded, and enterprise distros. As of mid-2026,
+6.1/6.6/6.12 are active LTS lines.
+
+</details>
+
+3. The old belief that "the kernel doesn't issue its own CVEs" is outdated.
+   What changed, and what is the project's philosophy?
+
+<details><summary>Show answer</summary>
+
+Since 13 February 2024 the Linux kernel is an official **CVE Numbering
+Authority (CNA)** and assigns its own CVE IDs. Because almost any bug can turn
+out to be exploitable, the project assigns CVEs **liberally** to fixed commits
+rather than judging severity up front, and it assigns no scores — pushing
+consumers to evaluate risk for their own configuration instead of trusting a
+CVE count.
+
+</details>
+
+4. "Don't break userspace" — what concrete, permanent consequences does it
+   impose on kernel developers?
+
+<details><summary>Show answer</summary>
+
+Once shipped, a syscall number, `ioctl` number, or the format of a stable
+`/proc`, `/sys`, or UAPI field is effectively permanent. Developers can *add*
+new interfaces (x86-64 has 450+ syscalls) or wrap old ones in compatibility
+shims, but essentially never remove them. UAPI headers are treated as a binding
+contract, and interface design is correspondingly cautious.
+
+</details>
+
+5. What does the `Signed-off-by` chain establish, and what is it *not*?
+
+<details><summary>Show answer</summary>
+
+It is the chain of **custody and provenance** under the Developer Certificate
+of Origin: each person who handled the patch certifies they had the right to
+pass it on, tracing it from author through sub-maintainers and maintainers to
+Linus. It is **not** a copyright assignment or a CLA — there is no legal
+transfer, just a one-line certification that keeps the contribution barrier low.
+
+</details>
+
+6. Why does the kernel deliberately refuse to guarantee a stable in-kernel
+   driver API, and how does that interact with GPLv2?
+
+<details><summary>Show answer</summary>
+
+No stable internal API means maintainers can refactor freely; out-of-tree
+drivers break at every release, so the cost of staying out-of-tree is high.
+GPLv2 means you cannot ship a modified kernel binary without offering source.
+Together they pressure vendors to **upstream** their drivers, which is why
+Linux has such broad in-tree hardware support. See the module-license
+enforcement in "Follow the code" for the compiled-in half of this.
+
+</details>
+
+7. What role does `linux-next` play, and why does it make a two-week merge
+   window survivable?
+
+<details><summary>Show answer</summary>
+
+`linux-next` (maintained by Stephen Rothwell) merges ~200 subsystem trees
+daily, surfacing cross-subsystem conflicts and build/boot breakage *weeks
+before* the merge window. By the time Linus pulls, the code has already been
+integration-tested together, so the window is mostly ratification rather than
+live conflict resolution.
+
+</details>
+
+## Sources & further reading
+
+- Kernel documentation: [A guide to the Kernel Development Process](https://docs.kernel.org/process/development-process.html) and the [Submitting Patches guide](https://docs.kernel.org/process/submitting-patches.html) (DCO, `Signed-off-by`, tags).
+- [Stable kernel rules](https://docs.kernel.org/process/stable-kernel-rules.html) — what qualifies for the stable and LTS trees.
+- [The kernel CVE process](https://docs.kernel.org/process/cve.html) — the project's own explanation of becoming a CNA in February 2024.
+- [The MAINTAINERS file](https://elixir.bootlin.com/linux/v6.12/source/MAINTAINERS) — the machine-readable map of who owns what, consumed by `get_maintainer.pl`.
+- Module loading and license enforcement source: [kernel/module/main.c](https://elixir.bootlin.com/linux/v6.12/source/kernel/module/main.c).
+- Greg Kroah-Hartman's talks and LWN's weekly kernel coverage at **lwn.net** — the best ongoing English-language record of kernel development (cited by publication; browse LWN's kernel index).
+- **kernelnewbies.org/LinuxChanges** for human-readable per-release changelogs, and **b4** documentation (b4.docs.kernel.org) for the modern patch-submission workflow.
 
 ---
 
-**Next:** you've learned every subsystem in isolation. Now we consolidate everything into a systematic performance methodology — USE, RED, the 60-second checklist, flame graphs, and the investigation pattern that finds what's slow in five minutes or less.
+**Next:** you've learned every subsystem in isolation. Now we consolidate everything into a systematic performance methodology — USE, RED, the 60-second checklist, flame graphs, and the investigation pattern that finds what's slow in five minutes or less. Continue to [Performance Analysis Methodology](#/perf-methodology).

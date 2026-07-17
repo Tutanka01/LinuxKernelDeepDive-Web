@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Linux Deep Dive — How Your System Really Works</title>
-  <meta name="description" content="A plain-spoken, in-depth guide to how Linux really works: the kernel, processes, memory, filesystems — and how containers are built from kernel primitives.">
+  <meta name="description" content="A plain-spoken, in-depth guide to how Linux really works: the kernel, processes, memory, filesystems — down to the source code — and how containers are built from kernel primitives.">
   <link rel="stylesheet" href="assets/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
@@ -19,6 +19,10 @@
         <a href="#/">The Linux<br>Deep Dive</a>
         <p class="site-subtitle">how your system really works</p>
       </div>
+      <button id="search-open" class="search-open" type="button">
+        <span class="search-open-icon">⌕</span> Search
+        <kbd class="search-kbd">/</kbd>
+      </button>
       <div id="toc"><!-- table of contents injected by app.js --></div>
       <a class="side-course" href="distributed/index.html">
         <span class="side-course-kicker">Standalone course</span>
@@ -26,6 +30,7 @@
         <span class="side-course-desc">A guided journey from first principles to Raft, Spanner &amp; CRDTs.</span>
       </a>
       <div class="sidebar-footer">
+        <p id="progress-summary"></p>
         <p>Written as plain Markdown,<br>rendered in your browser.</p>
       </div>
     </nav>
@@ -40,10 +45,22 @@
       </footer>
     </main>
 
+    <aside id="page-toc" class="page-toc" aria-label="On this page"></aside>
+
+  </div>
+
+  <div id="search-modal" class="search-modal" role="dialog" aria-label="Search">
+    <div class="search-box">
+      <input id="search-input" type="text" placeholder="Search all chapters…"
+             autocomplete="off" spellcheck="false">
+      <ul id="search-results"></ul>
+      <p class="search-footer">↑↓ navigate · Enter open · Esc close</p>
+    </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>
