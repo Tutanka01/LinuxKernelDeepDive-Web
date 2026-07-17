@@ -430,4 +430,4 @@ They add a **hardware isolation boundary** (VT-x/AMD-V, a separate guest kernel)
 
 ---
 
-**Next:** Part VIII — how the kernel codebase itself is engineered. Inside the synchronization arsenal that keeps tens of millions of lines of concurrent code correct: spinlocks, mutexes, RCU, seqlocks, atomics, memory barriers, and the lockdep debugger that catches deadlocks before they ship — [Kernel Synchronization](#/kernel-sync).
+**Next:** Part IX — how the kernel codebase itself is engineered. Inside the synchronization arsenal that keeps tens of millions of lines of concurrent code correct: spinlocks, mutexes, RCU, seqlocks, atomics, memory barriers, and the lockdep debugger that catches deadlocks before they ship — [Kernel Synchronization](#/kernel-sync).

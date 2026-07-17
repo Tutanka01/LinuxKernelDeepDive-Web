@@ -335,6 +335,46 @@ crictl pods                                    # list pods (via CRI)
 crictl inspect <pod-id> | jq '.status.linux.namespaces'
 ```
 
+## Where checkpoint/restore plugs in
+
+The creation path ends in `execve()`, but the same runtime boundary also
+exposes a way to serialize a task that is already running. `runc checkpoint`
+does not contain a second checkpoint implementation: libcontainer starts CRIU
+as a service worker and sends it a protobuf RPC describing the container and
+the requested options. CRIU freezes and dumps the process tree; runc supplies
+the container context CRIU cannot infer safely on its own, such as external
+mounts, namespace relationships, and cgroup handling.
+
+The higher layers add progressively wider state:
+
+```text
+kubelet checkpoint API / podman checkpoint
+    → containerd or CRI-O: container metadata, writable layer, network setup
+        → runc or crun: OCI bundle, namespaces, cgroups, external mounts
+            → CRIU: tasks, VMAs/pages, fds, sockets, timers, credentials
+```
+
+That division is the important idea. A **process checkpoint** is mostly Linux
+kernel state; a **container checkpoint** also needs the engine's filesystem
+and configuration state. This is why copying a CRIU image directory alone is
+not automatically a portable container migration.
+
+The interfaces mirror the ordinary start path:
+
+- `runc checkpoint` / `runc restore` are the low-level OCI-runtime commands.
+- podman provides the mature operator workflow, including
+  `podman container checkpoint --export` and cross-host import.
+- the kubelet exposes `POST /checkpoint/{namespace}/{pod}/{container}` and
+  forwards the request through CRI to a runtime that implements the checkpoint
+  RPC. It creates a runtime-defined checkpoint archive; Kubernetes does not
+  offer a symmetric restore endpoint.
+
+Do not memorize the product commands yet. [The Anatomy of Process
+State](#/process-state) first defines what must be captured; the CRIU dump and
+restore chapters explain the mechanism; [The Snapshot
+Taxonomy](#/snapshot-taxonomy) then returns to this integration chain and
+compares it with gVisor, microVM, and application-level snapshots.
+
 ## Follow the code (kernel v6.12)
 
 Two paths turn a runtime's intentions into kernel state: **creating** fresh
@@ -523,6 +563,20 @@ left the path.
 
 </details>
 
+8. Where does CRIU sit in the container checkpoint stack, and why is its image
+directory not sufficient by itself for cross-host container migration?
+
+<details><summary>Show answer</summary>
+
+runc or crun invokes CRIU at the bottom of the stack. CRIU serializes the
+process tree's kernel state: memory, fds, sockets, timers, credentials, and so
+on. The container engine must additionally preserve or reconstruct the OCI
+configuration, writable rootfs layer, external mounts, namespaces, cgroups,
+and network identity. A portable container checkpoint therefore wraps CRIU's
+images with engine-owned state.
+
+</details>
+
 ## Sources & further reading
 
 - OCI Runtime Specification — <https://github.com/opencontainers/runtime-spec>
@@ -530,6 +584,9 @@ left the path.
 - runc (the reference OCI runtime) — <https://github.com/opencontainers/runc>
 - containerd architecture docs — <https://github.com/containerd/containerd/tree/main/docs>
 - Kubernetes CRI overview — <https://kubernetes.io/docs/concepts/architecture/cri/>
+- Kubernetes Kubelet Checkpoint API — <https://kubernetes.io/docs/reference/node/kubelet-checkpoint-api/>
+- CRIU integration in runc — <https://github.com/opencontainers/runc/blob/main/libcontainer/criu_linux.go>
+- Podman checkpoint/restore — <https://docs.podman.io/en/latest/markdown/podman-container-checkpoint.1.html>
 - `setns(2)` man page — <https://man7.org/linux/man-pages/man2/setns.2.html>
 - `pivot_root(2)` man page — <https://man7.org/linux/man-pages/man2/pivot_root.2.html>
 - `seccomp(2)` man page — <https://man7.org/linux/man-pages/man2/seccomp.2.html>

@@ -577,4 +577,6 @@ live conflict resolution.
 
 ---
 
-**Next:** you've learned every subsystem in isolation. Now we consolidate everything into a systematic performance methodology — USE, RED, the 60-second checklist, flame graphs, and the investigation pattern that finds what's slow in five minutes or less. Continue to [Performance Analysis Methodology](#/perf-methodology).
+**Next:** before applying a performance methodology, learn the instruments that
+produce trustworthy evidence: `/proc`, `strace`, `perf`, and eBPF. Continue to
+[/proc, strace, perf & eBPF](#/observability).

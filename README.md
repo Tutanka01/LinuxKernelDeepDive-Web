@@ -3,7 +3,8 @@
 A personal, book-style website that teaches how Linux really works — from the
 boot process and kernel subsystems all the way down to the source code, and
 up to how containers are assembled from kernel primitives (namespaces,
-cgroups, OverlayFS, seccomp).
+cgroups, OverlayFS, seccomp), how CRIU checkpoints and migrates their process
+state, and why GPU state needs driver cooperation.
 
 All content is written in plain **Markdown** (`content/*.md`) and rendered
 client-side. No build step, no framework, no dependencies to install.
@@ -36,8 +37,9 @@ Then open <http://localhost:8000>.
 - **Follow the code** — chapters trace real code paths with links into the
   kernel source ([elixir.bootlin.com](https://elixir.bootlin.com)), pinned to
   **kernel v6.12 (LTS)**.
-- **Hands-on labs** — Part X breaks things on purpose (OOM killer, page
-  cache, cgroup throttling, your first kernel module) in a disposable VM.
+- **Hands-on labs** — Part XI breaks things on purpose (OOM killer, page
+  cache, cgroup throttling, CRIU, userfaultfd, your first kernel module) in a
+  disposable VM.
 - **Mermaid diagrams**, keyboard navigation (`←`/`→` between chapters).
 
 ## Structure
@@ -75,11 +77,12 @@ blocks (blank lines around the answer body); kernel identifiers link to
 `https://elixir.bootlin.com/linux/v6.12/C/ident/<name>`; cross-chapter links
 use `[Title](#/slug)`.
 
-## Curriculum (43 chapters)
+## Curriculum (51 chapters)
 
-- **Start Here (1):** how to use this book — levels, prerequisites, and five
+- **Start Here (1):** how to use this book — levels, prerequisites, and six
   guided paths (understand your machine · containers & cloud · performance &
-  SRE · security · future kernel contributor).
+  SRE · security · future kernel contributor · runtime internals,
+  checkpoint/restore & GPU).
 - **Part I — Foundations (3):** what Linux is, the boot process, kernel vs
   user space and system calls.
 - **Part II — Core Kernel Subsystems (10):** processes, scheduling, virtual
@@ -90,18 +93,21 @@ use `[Title](#/slug)`.
 - **Part IV — Containers, From Scratch (7):** what a container actually is,
   namespaces, cgroups v2, images & OverlayFS, building a container by hand,
   the runtime stack (Docker/containerd/runc), container networking.
-- **Part V — Hardware & Platform (4):** power management, NUMA, CPU
+- **Part V — Checkpoint/Restore (6):** process-state anatomy, CRIU dump and
+  restore, iterative/lazy live migration and TCP repair, snapshot taxonomy,
+  and GPU checkpointing with CUDA/AMDGPU plugins.
+- **Part VI — Hardware & Platform (4):** power management, NUMA, CPU
   isolation & real-time, CPU vulnerability mitigations.
-- **Part VI — Modern Kernel (5):** eBPF internals, security & confinement,
+- **Part VII — Modern Kernel (5):** eBPF internals, security & confinement,
   trusted computing, io_uring, Rust in the kernel.
-- **Part VII — Virtualization (1):** KVM internals.
-- **Part VIII — Kernel Engineering (3):** synchronization (locks, atomics,
-  RCU), how the kernel is made, performance analysis methodology.
-- **Part IX — Tools & Going Deeper (2):** observability, reading & building
-  the kernel.
-- **Part X — Hands-On Labs (4):** trigger & autopsy the OOM killer, watch
+- **Part VIII — Virtualization (1):** KVM internals.
+- **Part IX — Kernel Engineering (4):** synchronization (locks, atomics,
+  RCU), how the kernel is made, observability, and performance methodology.
+- **Part X — Tools & Going Deeper (1):** reading & building the kernel.
+- **Part XI — Hands-On Labs (6):** trigger & autopsy the OOM killer, watch
   the page cache work, throttle a process with cgroup v2, write & load a
-  kernel module.
+  kernel module, checkpoint/restore a process with CRIU, and serve page faults
+  with userfaultfd.
 - **Reference (1):** glossary.
 
 Rendering: [marked](https://github.com/markedjs/marked) +

@@ -2,13 +2,13 @@
 level: core
 kernel: 6.12
 verified: 2026-07
-minutes: 15
-requires: 
+minutes: 17
+requires:
 ---
 
 # Glossary
 
-> **Goal:** one place to look up the ~100 terms this book leans on, each defined
+> **Goal:** one place to look up the ~110 terms this book leans on, each defined
 > in a sentence or two and linked to the chapter that treats it properly. Read
 > it front to back once to build a mental index, or jump in when a word in
 > another chapter stops you cold.
@@ -63,6 +63,11 @@ or caps their resources (CPU, memory, I/O, PIDs). cgroup v2 uses a single
 unified hierarchy and is what every container runtime drives. See
 [Control Groups (cgroup v2)](#/cgroups).
 
+**Checkpoint/restore** — capturing a running workload's complete execution
+state and later reconstructing it so execution resumes from the saved
+instruction, rather than restarting the program. See
+[The Anatomy of Process State](#/process-state).
+
 **Context switch** — the act of saving one task's CPU state and loading
 another's: register file, and for a different process the `mm` (a CR3 write on
 x86-64). Cheaper between threads of one process. See
@@ -71,6 +76,12 @@ x86-64). Cheaper between threads of one process. See
 **COW (copy-on-write)** — sharing a page read-only between two mappings and only
 duplicating it when one side writes. Powers `fork()`, `MAP_PRIVATE`, and overlay
 filesystems. See [Virtual Memory](#/memory).
+
+**CRIU (Checkpoint/Restore In Userspace)** — the userspace tool that freezes a
+Linux process tree, serializes its memory and kernel-visible resources into
+image files, then rebuilds them on restore. See
+[CRIU: Dumping a Live Process](#/criu-dump) and
+[CRIU: The Restore](#/criu-restore).
 
 **C-state** — a CPU idle power state (C0 = running, C1/C2/C6… = progressively
 deeper sleep with higher wake latency). The idle governor picks how deep to go.
@@ -225,6 +236,11 @@ I/O flows through it, and unused RAM fills with it. See
 currently mapped. Minor faults just wire up an existing page; major faults must
 fetch it from disk or swap. See [Virtual Memory](#/memory).
 
+**Parasite** — CRIU's small position-independent code blob injected into a
+frozen target and executed in that process's context to collect state that
+cannot be read correctly from the outside. See
+[CRIU: Dumping a Live Process](#/criu-dump).
+
 **PID (Process ID)** — the integer identifying a process (really a thread-group
 leader's `tgid`). Inside a PID namespace it's remapped, so PID 1 in a container
 isn't PID 1 on the host. See [Processes & Threads](#/processes).
@@ -233,6 +249,10 @@ isn't PID 1 on the host. See [Processes & Threads](#/processes).
 it to another. Kernel preemption models (none/voluntary/full, plus lazy
 preemption maturing in 6.12) control when this can happen in kernel code. See
 [CPU Scheduling](#/scheduling).
+
+**Pre-copy migration** — repeatedly copying memory while the workload still
+runs, using dirty-page tracking to send only changes on later passes, then
+freezing briefly for a final delta. See [Live Migration](#/live-migration).
 
 ## R
 
@@ -267,6 +287,10 @@ runtime applies a seccomp profile. See [Linux Security & Confinement](#/security
 `task_struct`s, dentries), built on top of the buddy allocator. SLUB is the
 default implementation. See [Virtual Memory](#/memory).
 
+**Snapshot** — saved state at a chosen abstraction boundary: process (CRIU),
+userspace kernel (gVisor), virtual machine (Firecracker), or application
+(for example vLLM sleep). See [The Snapshot Taxonomy](#/snapshot-taxonomy).
+
 **Socket** — the endpoint abstraction for network (and local `AF_UNIX`)
 communication, presented to userspace as a file descriptor. See
 [The Networking Stack](#/networking).
@@ -290,6 +314,11 @@ scheduling info, credentials, files, `mm`, and signal state. One per thread. See
 translations, so hot addresses skip the page-table walk. A context switch may
 flush it unless PCID/ASID tags avoid that. See [Virtual Memory](#/memory).
 
+**TCP_REPAIR** — a Linux socket mode that pauses normal TCP behavior and lets a
+privileged userspace tool read or restore sequence numbers and queue state,
+making established-connection migration possible. See
+[Live Migration](#/live-migration).
+
 **Tracepoint** — a stable, statically-placed hook in kernel code that tools (ftrace,
 perf, BPF) can attach to with low overhead and a documented format. See
 [/proc, strace, perf & eBPF](#/observability).
@@ -297,6 +326,13 @@ perf, BPF) can attach to with low overhead and a documented format. See
 **TPM (Trusted Platform Module)** — a hardware chip that stores keys and
 measurement hashes (PCRs), used by Secure Boot and IMA to attest boot integrity.
 See [Trusted Computing](#/trusted-computing).
+
+## U
+
+**userfaultfd** — a file-descriptor API that delivers selected page faults to
+userspace and lets a manager resolve them with ioctls such as `UFFDIO_COPY`;
+the basis of lazy/post-copy restore. See [Virtual Memory](#/memory) and
+[Lab: Serve Page Faults from Userspace](#/lab-userfaultfd).
 
 ## V
 

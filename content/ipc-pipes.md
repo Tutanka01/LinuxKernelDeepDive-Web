@@ -84,8 +84,68 @@ end that `grep` itself still holds open. This "who still holds the write end?"
 question is the single most common pipe bug in real programs. The kernel tracks
 it with two plain reference counts (`pipe->readers`, `pipe->writers`) that are
 decremented in [pipe_release()](https://elixir.bootlin.com/linux/v6.12/C/ident/pipe_release)
-each time a fd for that end is closed; EOF and `SIGPIPE` fire when a count hits
-zero.
+when the *last fd referring to one open file description* for that end is
+closed; EOF and `SIGPIPE` fire when the corresponding count hits zero. A
+`dup()` or `fork()` adds fd references to the same description, so closing one
+of those aliases cannot decrement the pipe-end count yet.
+
+### File descriptors vs open file descriptions
+
+The `dup2(4, 1)` above hides a distinction that the rest of this chapter — and
+every checkpoint/restore tool — leans on. There are *two* kernel objects here,
+not one:
+
+- A **file descriptor** is a per-process small integer: an index into that
+  process's `files_struct` fd table (see [Processes & Threads](#/processes)).
+  Closing it, or the process exiting, affects only that one row of that one
+  table.
+- An **open file description** is the kernel-side
+  [struct file](https://elixir.bootlin.com/linux/v6.12/C/ident/file) the fd
+  points at. It holds the shared, mutable state:
+
+```c
+struct file {
+    ...
+    fmode_t             f_mode;   // FMODE_READ / FMODE_WRITE / ...
+    loff_t              f_pos;    // the current read/write OFFSET
+    unsigned int        f_flags;  // O_NONBLOCK, O_APPEND, ...
+    atomic_long_t       f_count;  // reference count (how many fds point here)
+    const struct file_operations *f_op; // the dispatch table (pipefifo_fops, etc.)
+    void                *private_data;   // e.g. the pipe_inode_info
+    ...
+};
+```
+
+The offset lives in the *description*, not the descriptor — and that is the
+whole game. `dup()`, `dup2()`, and the fd-table copy that `fork()` performs all
+create new *descriptors* pointing at the *same* description: they share `f_pos`
+and `f_flags`. Two independent `open()` calls on the same path create two
+*separate* descriptions with independent offsets, even though the bytes on disk
+are identical. Several processes that inherited one ordinary writable fd share
+one offset, so each completed write advances the position seen by all of them;
+separate `open()` calls without `O_APPEND` start with independent positions and
+can overwrite the same bytes. `O_APPEND` is an important exception: even with
+separate open file descriptions, each `write()` is positioned at end-of-file
+atomically by the kernel, so independently executing `cmd >> log` does not
+clobber earlier data (although the order of concurrent writes is unspecified).
+
+`f_count` is why `close()` on one of several dup'd fds does not tear down the
+description: only the *last* close, when `f_count` hits zero, runs the release
+path — and for a pipe end that release is what decrements
+`pipe->writers`/`pipe->readers` and can finally fire EOF. The reference counts
+compose: fds against a description, descriptions (as ends) against the pipe.
+
+From outside a process you cannot recover this sharing by comparing fd numbers
+— fd 3 in one process and fd 7 in another may or may not name the same
+description. The kernel exposes the answer through
+[kcmp(2)](https://man7.org/linux/man-pages/man2/kcmp.2.html): `kcmp(pid1, pid2,
+KCMP_FILE, fd1, fd2)` returns 0 iff the two descriptors refer to the *same*
+open file description. `kcmp` was added in kernel 3.5 for exactly one customer
+— checkpoint/restore in user space (CRIU) — and until 5.12 it was gated behind
+`CONFIG_CHECKPOINT_RESTORE`. Its very existence is a tell: "which fds secretly
+share a description?" is a question so specific to snapshotting a process tree
+that the kernel grew a syscall to answer it. Why that question is unavoidable
+is the subject of [The Anatomy of Process State](#/process-state).
 
 ### Inside the pipe: `struct pipe_inode_info`
 
@@ -161,6 +221,34 @@ The blocking semantics, precisely:
   records to one FIFO without producing garbled half-lines. Larger writes may
   be split, and a blocked large write can interleave with others at page
   boundaries.
+
+### Checkpoint lens: the bytes in flight are state
+
+A pipe cannot be restored by merely calling `pipe2()` and handing the new fds
+back to the processes. At the instant of a checkpoint, its ring may contain
+unread bytes; a reader or writer may be blocked; and several fd numbers across
+several processes may alias the same open file descriptions. All of those
+relationships affect what the program observes after resume.
+
+The required order follows directly from the structures above:
+
+1. freeze every task that can read or write the pipe, so `head`, `tail`, and
+   the endpoint graph stop changing;
+2. save the unread byte stream and relevant pipe properties without letting a
+   consumer advance `tail`;
+3. on restore, create the pipe once, restore its capacity, and inject the saved
+   bytes before any task can run;
+4. distribute the two endpoint descriptions to their owning tasks, recreating
+   `dup()`/`fork()` aliases as aliases rather than independent opens;
+5. only then release the tasks, allowing blocked reads or writes to restart
+   against the same logical ring.
+
+This is the fd problem in miniature: **object identity, contents, and sharing
+are separate state**. CRIU records the pipe object and its queued data in
+separate image families, then the restore-side fd graph makes every descriptor
+point back to the right reconstructed endpoint. See [The Anatomy of Process
+State](#/process-state) for the complete inventory and [CRIU: The
+Restore](#/criu-restore) for the dependency ordering.
 
 ### Waking up: poll, epoll, and the empty→non-empty edge
 

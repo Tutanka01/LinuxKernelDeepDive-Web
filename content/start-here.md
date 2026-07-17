@@ -2,8 +2,8 @@
 level: core
 kernel: 6.12
 verified: 2026-07
-minutes: 9
-requires: 
+minutes: 12
+requires:
 ---
 
 # How to Use This Book: Paths & Prerequisites
@@ -18,7 +18,9 @@ This is a field guide to how Linux works underneath the programs you run. Not
 a distro tutorial, not a sysadmin cookbook, not API reference. The subject is
 the **kernel** and the machinery around it: how a process becomes a running
 thing, where your RAM went, what a container actually is, why a syscall is
-expensive, how packets move, how the scheduler decides who runs next.
+expensive, how packets move, how the scheduler decides who runs next, and how
+a live process can be frozen, serialized, migrated, and resumed — including
+when part of its state lives on a GPU.
 
 Every technical claim here was checked against **Linux kernel 6.12** — the
 struct names, the function names, the default values, the sysctl knobs. Where a
@@ -39,8 +41,9 @@ recall a paragraph.
 
 The book is split into parts that roughly climb in depth: what Linux is and how
 it boots; the core kernel subsystems (processes, scheduling, memory, interrupts,
-filesystems, networking); containers and virtualization; performance,
-observability, and security; and finally the kernel's own development process.
+filesystems, networking); containers; checkpoint/restore and live migration;
+hardware and virtualization; performance, observability, and security; and
+finally the kernel's own development process.
 You do not have to read them in order. The **paths** near the end of this
 chapter are the recommended reading orders for specific goals — start there.
 
@@ -103,7 +106,8 @@ knowing about:
 - **Hands-on labs** — chapters whose title starts with *Lab:* are guided
   exercises where you make the kernel do something observable: fill the page
   cache, get a process killed by the OOM killer, throttle a task with a cgroup,
-  load a kernel module you compiled. They are the difference between knowing and
+  checkpoint and resurrect a process, serve page faults from userspace, or load
+  a kernel module you compiled. They are the difference between knowing and
   having seen.
 - **Reading-progress checkmarks** — the table of contents remembers which
   chapters you have finished and shows a checkmark. It is a private progress
@@ -155,9 +159,9 @@ make sure losing it costs you nothing.** Snapshot before the scary labs.
 > a footnote, it is the whole story of what a container is. [What a Container
 > Actually Is](#/containers-overview) unpacks it.
 
-## Five guided paths
+## Six guided paths
 
-Here are ordered reading lists for five common goals. Each ends with a
+Here are ordered reading lists for six common goals. Each ends with a
 **capstone lab** so you finish by doing, not just reading. Pick the one that
 matches why you are here; you can always run another path afterward.
 
@@ -195,7 +199,60 @@ up to real runtimes.
 **Capstone:** [Lab: Throttle a Process with cgroup v2](#/lab-cgroup-limits) — put
 a real resource limit on a real process and watch it bite.
 
-### 3. Performance & SRE
+### 3. Runtime internals, checkpoint/restore & GPU
+
+The specialist track: start with the Linux objects a checkpointer must
+reconstruct, climb through container isolation and runtimes, then study CRIU
+from dump to restore before reaching live migration and GPU state. The order is
+deliberate — if a frontier chapter feels mysterious, descend one phase and fill
+the missing mechanism instead of memorizing around it.
+
+**Phase A — the process as kernel state**
+
+1. [Kernel, User Space & Syscalls](#/kernel-vs-userspace)
+2. [Processes & Threads](#/processes)
+3. [CPU Scheduling](#/scheduling)
+4. [Virtual Memory](#/memory)
+5. [Files, Filesystems & the VFS](#/filesystems)
+6. [Pipes, FIFOs & Unix Sockets](#/ipc-pipes)
+7. [Interrupts, Exceptions & Softirqs](#/interrupts)
+8. [The Networking Stack](#/networking)
+
+**Phase B — the container as assembled isolation**
+
+9. [What a Container Actually Is](#/containers-overview)
+10. [Namespaces](#/namespaces)
+11. [Control Groups (cgroup v2)](#/cgroups)
+12. [Images & OverlayFS](#/overlayfs)
+13. [Build a Container by Hand](#/build-a-container)
+14. [Docker, containerd, runc](#/container-runtimes)
+15. [Container Networking](#/container-networking)
+
+**Phase C — checkpoint/restore, then the frontier**
+
+16. [The Anatomy of Process State](#/process-state)
+17. [CRIU: Dumping a Live Process](#/criu-dump)
+18. [CRIU: The Restore](#/criu-restore)
+
+**Milestone 1:** [Lab: Checkpoint & Restore a Real Process](#/lab-criu).
+Do it now, while the dump and restore image families are fresh.
+
+19. [Live Migration: Iterative, Lazy & TCP Repair](#/live-migration)
+
+**Milestone 2:** [Lab: Serve Page Faults from Userspace](#/lab-userfaultfd).
+It turns lazy restore's central mechanism into a program you can trace.
+
+20. [The Snapshot Taxonomy: CRIU, gVisor & microVMs](#/snapshot-taxonomy)
+21. [Devices, Drivers & Modules](#/devices-modules)
+22. [GPU Checkpointing: cuda-checkpoint & CRIU Plugins](#/gpu-checkpoint)
+
+The first milestone makes CRIU's images tangible; the second makes lazy
+migration's page-fault path yours. Learn
+[/proc, strace, perf & eBPF](#/observability) and [eBPF
+Internals](#/ebpf-internals) in parallel once Phase A is comfortable: they are
+the instruments you will use to measure every later phase.
+
+### 4. Performance & SRE
 
 For the people who get paged. Build the subsystem models first, then the
 methodology that turns them into diagnoses.
@@ -204,14 +261,14 @@ methodology that turns them into diagnoses.
 2. [Virtual Memory](#/memory)
 3. [The Linux Storage Stack](#/storage-stack)
 4. [The Networking Stack](#/networking)
-5. [Performance Analysis Methodology](#/perf-methodology)
-6. [/proc, strace, perf & eBPF](#/observability)
+5. [/proc, strace, perf & eBPF](#/observability)
+6. [Performance Analysis Methodology](#/perf-methodology)
 
 **Capstones (do both):** [Lab: Watch the Page Cache Work](#/lab-page-cache) and
 [Lab: Trigger & Autopsy the OOM Killer](#/lab-oom-killer) — the two memory
 behaviours behind a large share of production incidents.
 
-### 4. Security
+### 5. Security
 
 How Linux draws its trust boundaries, and where they hold or leak — from the
 syscall boundary down to CPU silicon.
@@ -226,7 +283,7 @@ syscall boundary down to CPU silicon.
 with a confinement mindset — resource limits are a denial-of-service boundary as
 much as a fairness one.
 
-### 5. Future kernel contributor
+### 6. Future kernel contributor
 
 If the goal is to send a patch someday, learn how the kernel keeps itself
 correct, how it is governed, and how to build and modify it.
@@ -242,14 +299,16 @@ your first real code running in kernel space. (Do this one in a VM.)
 graph TD
   A[Start here] --> B[Understand your machine]
   A --> C[Containers and cloud]
-  A --> D[Performance and SRE]
-  A --> E[Security]
-  A --> F[Kernel contributor]
-  B --> G[Pick a deeper path]
-  C --> G
-  D --> G
-  E --> G
-  F --> G
+  A --> D[Runtime internals and C/R]
+  A --> E[Performance and SRE]
+  A --> F[Security]
+  A --> G[Kernel contributor]
+  B --> H[Pick a deeper path]
+  C --> H
+  D --> H
+  E --> H
+  F --> H
+  G --> H
 ```
 
 ## How to read a chapter well

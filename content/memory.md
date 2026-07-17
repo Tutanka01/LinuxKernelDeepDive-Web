@@ -2,7 +2,7 @@
 level: mechanism
 kernel: 6.12
 verified: 2026-07
-minutes: 25
+minutes: 33
 requires: processes
 ---
 
@@ -236,6 +236,13 @@ the kernel keeps a single page of zeroes, and a *read* fault on untouched
 anonymous memory just maps that shared zero page read-only. Your 8 GB
 `malloc` that was only read costs almost nothing physical.
 
+The PTE machinery that makes COW possible also gives checkpoint tools a cheap
+way to notice writes. Linux can clear a page's **soft-dirty** PTE bit and
+temporarily remove write permission; the next write takes a minor fault that
+marks the page soft-dirty and makes it writable again. No COW copy is required
+for an exclusively owned page — the fault is just the observation point. That
+distinction is what makes iterative pre-copy practical.
+
 This laziness has a famous consequence, **overcommit**: Linux happily promises
 more memory than physically exists (`malloc` virtually never fails), betting
 that most promises aren't fully used. Mostly the bet pays. When it doesn't…
@@ -253,6 +260,100 @@ The `vm.overcommit_memory` sysctl controls this:
 cat /proc/sys/vm/overcommit_memory
 grep -E 'CommitLimit|Committed_AS' /proc/meminfo   # the running total of promises
 ```
+
+## Memory through a checkpointer's eyes
+
+The normal memory question is: *can this address be accessed now?* A
+checkpointer asks three more precise questions:
+
+1. Which virtual ranges must exist again?
+2. Which pages currently have meaningful contents?
+3. Which pages changed after an earlier copy?
+
+Linux exposes one mechanism for each layer of that inventory.
+
+### VMAs describe shape; pagemap describes pages
+
+`/proc/<pid>/maps` and `smaps` describe the address-space **shape**: each VMA's
+range, permissions, file offset, and backing file. They do not say whether an
+individual 4 KiB page is resident, swapped out, shared, or never touched. A
+1 TiB sparse mapping can therefore occupy one line in `maps` and almost no
+physical memory.
+
+`/proc/<pid>/pagemap` supplies the page-granular view. It is a binary array of
+64-bit entries, one per virtual page. In kernel 6.12 the important high bits
+include present (63), swapped (62), file-backed/shared-anonymous (61),
+exclusive (56), and soft-dirty (55). A dumper walks the VMAs, indexes pagemap
+by virtual page number, and copies the pages that actually need bytes in the
+image. Clean file-backed pages usually need only a reference to the file; an
+anonymous dirty page has no other source and must be saved.
+
+Do not try to `cat` pagemap: offsets and entries are binary, and exposing raw
+physical frame numbers would create security side channels. Modern kernels
+zero the PFN field unless the reader has the required privilege. The useful
+exercise is to inspect the decoded result through CRIU's own images in
+[Lab: Checkpoint & Restore a Real Process](#/lab-criu), then write a small
+pagemap decoder when you want to study the ABI itself.
+
+### Soft-dirty answers “what changed?”
+
+For iterative migration, copying every resident page on every pass would gain
+nothing. Linux therefore lets a privileged observer reset the soft-dirty bit
+for an address space:
+
+```bash
+pid=48213
+echo 4 | sudo tee /proc/$pid/clear_refs >/dev/null
+# let the process run, then decode bit 55 in /proc/$pid/pagemap
+```
+
+Writing `4` clears the soft-dirty PTEs and write-protects writable mappings.
+On each page's first subsequent write, the page-fault path sets bit 55 and
+restores write permission; later writes run normally. A pre-copy loop can now
+copy the full resident set once, clear the tracker, and copy only soft-dirty
+pages on later passes. CRIU's `pre-dump` and `--track-mem` automate that loop.
+New or expanded VMAs are treated as soft-dirty too, so a mapping created
+between passes cannot silently escape the next delta.
+
+Soft-dirty is a change detector, not a transaction log. It tells you that a
+page changed at least once, not how many times or which bytes changed. A
+workload that dirties memory faster than the network can copy it may never
+converge; [Live Migration](#/live-migration) develops that dirty-rate equation
+and the switch from pre-copy to the final freeze.
+
+### userfaultfd answers “what if the page is not here yet?”
+
+Restore normally installs every saved page before the task runs. With
+**userfaultfd**, userspace can register a virtual range and receive selected
+page faults as messages on a file descriptor. A manager thread or separate
+daemon then resolves each fault with an ioctl:
+
+```text
+target touches a missing page
+    → kernel parks the faulting thread
+    → manager reads UFFD_EVENT_PAGEFAULT from the userfaultfd
+    → manager fetches or constructs the page
+    → UFFDIO_COPY installs it and wakes the target
+```
+
+This reverses the usual relationship: the kernel still detects and blocks the
+fault, but userspace chooses the bytes. CRIU uses the mechanism for **lazy
+restore** — rebuild the task's metadata, let it resume early, and fetch saved
+pages from the source when first touched while a background copy drains the
+rest. The cost moves from one long stop-the-world pause to short first-touch
+stalls, potentially including a network round trip.
+
+Keep the three interfaces separate:
+
+| Interface | Question it answers | Checkpoint use |
+|---|---|---|
+| `/proc/<pid>/maps` | Which VMAs exist? | rebuild the address-space layout |
+| `/proc/<pid>/pagemap` + soft-dirty | Which pages exist, and which changed? | full and incremental dumps |
+| `userfaultfd` | How can userspace resolve a missing page? | lazy/post-copy restore |
+
+You will drive the last interface yourself in [Lab: Serve Page Faults from
+Userspace](#/lab-userfaultfd). Together these mechanisms turn the abstract VMA
+and PTE model into a serializable, migratable process.
 
 ## The page cache: where your RAM "goes"
 

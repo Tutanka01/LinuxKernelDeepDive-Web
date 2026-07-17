@@ -398,6 +398,100 @@ idea in all of Linux internals. And the resource side of that spectrum —
 [Control Groups](#/cgroups), which every task also references via
 `task_struct->cgroups`.
 
+## Checkpoint lens: controlling and recreating a task
+
+The ordinary lifecycle lets the kernel choose a task's identity and lets the
+task execute its own syscalls. Checkpoint/restore needs the inverse powers:
+recreate an old identity exactly, and inspect or control a task from the
+outside. Two kernel interfaces provide them.
+
+### clone3() and choosing a PID
+
+`clone()` accumulated flags for three decades until it ran out of room — its
+fixed argument list could not grow without breaking the ABI. Kernel 5.3
+replaced it with `clone3(2)`, which takes a single pointer to a growable
+struct plus its size: new fields get appended at the end, and an old kernel
+simply rejects a size it doesn't recognize. In v6.12 the struct
+([clone_args](https://elixir.bootlin.com/linux/v6.12/C/ident/clone_args),
+uapi) looks like this:
+
+```c
+struct clone_args {
+    __u64 flags;         /* CLONE_* flags */
+    __u64 pidfd;         /* where to store the pidfd */
+    __u64 child_tid;     /* CLONE_CHILD_*TID target */
+    __u64 parent_tid;    /* CLONE_PARENT_SETTID target */
+    __u64 exit_signal;   /* signal to send the parent on exit */
+    __u64 stack;
+    __u64 stack_size;
+    __u64 tls;
+    __u64 set_tid;       /* pid_t array: PIDs to assign (since 5.5) */
+    __u64 set_tid_size;  /* number of namespace levels in set_tid (5.5) */
+    __u64 cgroup;        /* fd of target cgroup (CLONE_INTO_CGROUP) */
+};
+```
+
+The field that matters here is `set_tid`, added in 5.5. For the kernel's
+entire history it *chose* the PID of every new task — you got the next number
+from the per-namespace allocator and had no say. That's fine until you have
+to **restore** a checkpoint: the processes you're rebuilding had specific PIDs
+when they were dumped, those numbers are baked into their `/proc` paths and
+their own `getpid()` memory, and a tree with different PIDs is a *different
+tree*. Before 5.5, CRIU forced the issue with a race — write the target minus
+one to `/proc/sys/kernel/ns_last_pid`, then immediately `fork()` and pray
+nobody grabbed the number in between. `set_tid` makes it honest: hand
+`clone3()` an array of PIDs, one per PID-namespace level, and the kernel
+assigns exactly those (it costs `CAP_CHECKPOINT_RESTORE`, or `CAP_SYS_ADMIN`).
+This is the cleanest example in the tree of **checkpoint/restore reshaping a
+core kernel interface** — a decades-old refusal reversed because restore
+needed it. The restore side that drives it is
+[CRIU: The Restore](#/criu-restore).
+
+### ptrace: controlling another process
+
+One syscall lets a process reach *inside* another one — read its registers,
+read and write its memory, stop it, single-step it, intercept its syscalls.
+It is `ptrace(2)`, and it is the machinery under gdb, under strace, and — the
+reason it earns a section here — under CRIU, the tool that checkpoints a live
+process to disk. Anything that inspects or reconstructs a process from the
+outside goes through ptrace.
+
+The classic entry point is `PTRACE_ATTACH`: it makes the caller the tracer of
+a target and delivers a `SIGSTOP` to yank the tracee to a halt. That stop is
+the problem. `SIGSTOP` is *visible* — it changes the tracee's job-control
+state, it races with signals already in flight, and a process that was already
+job-control-stopped becomes indistinguishable from one you stopped yourself.
+For a debugger poking at a hung program that's tolerable. For a checkpoint
+tool that must freeze a whole process tree *transparently*, photograph it, and
+let it run on as if nothing happened, it is not.
+
+So kernel 3.4 added `PTRACE_SEIZE`. It attaches **without** stopping the
+tracee and **without** injecting a signal: the process keeps running, its
+signal and job-control state undisturbed. When you actually want it stopped
+you send `PTRACE_INTERRUPT` (also 3.4) — a stop that carries no signal and is
+reported as a distinct `PTRACE_EVENT_STOP` rather than masquerading as
+`SIGSTOP`. A companion, `PTRACE_LISTEN`, lets an already group-stopped tracee
+wait quietly under the tracer's control. This trio — seize, interrupt,
+listen — is exactly what made *serious* checkpointing possible: you can grab
+a running process, learn everything about it, and release it with its own
+notion of "am I stopped?" perfectly intact.
+
+Once attached, you read the tracee's CPU state with `PTRACE_GETREGSET` (since
+2.6.34) — the regset form, which passes a `struct iovec` and generalizes
+across architectures and register banks (general-purpose, FP, vector) instead
+of the old fixed-layout `PTRACE_GETREGS`. Memory is easier still, and mostly
+sidesteps ptrace itself: open `/proc/<pid>/mem` and `pread()` at the virtual
+address, or call `process_vm_readv(2)` to pull many regions across in one
+syscall without a trap per word. CRIU uses precisely these: seize the tree,
+read each task's mappings from `/proc/<pid>/maps`, and bulk-copy the pages.
+
+This is only the barest sketch. The full account of *what* state a process
+holds and how you extract all of it — registers, memory, open files, timers,
+credentials, namespaces — is [The Anatomy of Process State](#/process-state),
+and the dump procedure that drives ptrace is
+[CRIU: Dumping a Live Process](#/criu-dump). Kernel-side it all lives in
+[kernel/ptrace.c](https://elixir.bootlin.com/linux/v6.12/source/kernel/ptrace.c).
+
 ## Process states
 
 You'll see these in `ps`/`top` (`STAT` column):

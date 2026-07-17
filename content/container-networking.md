@@ -547,7 +547,8 @@ default `bridge` network has no such DNS — only `/etc/hosts` injection.
 
 ---
 
-**Next:** Part V — the kernel and the physical machine. We start with
-[Power Management](#/power-management): how Linux decides when to slow down,
-sleep, or shut off hardware. CPU frequency governors, C-states, ACPI, and the
-idle loop that keeps your laptop alive and your datacenter power bill down.
+**Next:** Part V asks a harder question about the workload we just assembled:
+what *exactly* would have to be saved to stop it here and resume it elsewhere?
+[The Anatomy of Process State](#/process-state) inventories the registers,
+memory, fds, signals, namespaces, and hidden device state that make a running
+process unique.

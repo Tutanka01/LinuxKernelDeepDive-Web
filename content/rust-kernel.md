@@ -545,4 +545,4 @@ since 6.6). The fields that matter are `owner`, `wait_lock`, and `wait_list`.
 
 ---
 
-**Next:** Part VII — the kernel as hypervisor. [KVM & Virtualization Internals](#/kvm-internals) turns Linux into the platform that runs every cloud VM on earth: the vCPU execution loop, VM exits, EPT/NPT nested page tables, virtio paravirtualized I/O, and why steal time matters.
+**Next:** Part VIII — the kernel as hypervisor. [KVM & Virtualization Internals](#/kvm-internals) turns Linux into the platform that runs every cloud VM on earth: the vCPU execution loop, VM exits, EPT/NPT nested page tables, virtio paravirtualized I/O, and why steal time matters.

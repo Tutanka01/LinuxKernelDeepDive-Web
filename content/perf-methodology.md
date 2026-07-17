@@ -436,4 +436,5 @@ A CPU flame graph only samples tasks *on* the CPU. If requests are slow because 
 
 ---
 
-**Next:** the [tools chapter](#/observability) — `/proc`, `strace`, `perf`, and eBPF. Everything you've learned across this entire site, now observable on a live system. The theory becomes muscle memory.
+**Next:** go from observing and diagnosing the running kernel to reading and
+building it yourself in [Reading & Building the Kernel](#/kernel-dev).

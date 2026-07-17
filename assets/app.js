@@ -60,7 +60,18 @@ const BOOK = [
     ],
   },
   {
-    part: "Part V — Hardware & Platform",
+    part: "Part V — Checkpoint/Restore",
+    chapters: [
+      { slug: "process-state",        title: "The Anatomy of Process State" },
+      { slug: "criu-dump",            title: "CRIU: Dumping a Live Process" },
+      { slug: "criu-restore",         title: "CRIU: The Restore" },
+      { slug: "live-migration",       title: "Live Migration: Iterative, Lazy & TCP Repair" },
+      { slug: "snapshot-taxonomy",    title: "The Snapshot Taxonomy: CRIU, gVisor & microVMs" },
+      { slug: "gpu-checkpoint",       title: "GPU Checkpointing: cuda-checkpoint & CRIU Plugins" },
+    ],
+  },
+  {
+    part: "Part VI — Hardware & Platform",
     chapters: [
       { slug: "power-management",     title: "Power Management: Governors, C-States & ACPI" },
       { slug: "numa-deep-dive",       title: "NUMA Deep Dive" },
@@ -69,7 +80,7 @@ const BOOK = [
     ],
   },
   {
-    part: "Part VI — Modern Kernel",
+    part: "Part VII — Modern Kernel",
     chapters: [
       { slug: "ebpf-internals",       title: "eBPF Internals" },
       { slug: "security-hardening",   title: "Linux Security & Confinement" },
@@ -79,33 +90,35 @@ const BOOK = [
     ],
   },
   {
-    part: "Part VII — Virtualization",
+    part: "Part VIII — Virtualization",
     chapters: [
       { slug: "kvm-internals",        title: "KVM & Virtualization Internals" },
     ],
   },
   {
-    part: "Part VIII — Kernel Engineering",
+    part: "Part IX — Kernel Engineering",
     chapters: [
       { slug: "kernel-sync",          title: "Kernel Synchronization: Locks, Atomics & RCU" },
       { slug: "kernel-governance",    title: "How the Kernel Is Made: Process & Governance" },
+      { slug: "observability",        title: "/proc, strace, perf & eBPF" },
       { slug: "perf-methodology",     title: "Performance Analysis Methodology" },
     ],
   },
   {
-    part: "Part IX — Tools & Going Deeper",
+    part: "Part X — Tools & Going Deeper",
     chapters: [
-      { slug: "observability",        title: "/proc, strace, perf & eBPF" },
       { slug: "kernel-dev",           title: "Reading & Building the Kernel" },
     ],
   },
   {
-    part: "Part X — Hands-On Labs",
+    part: "Part XI — Hands-On Labs",
     chapters: [
       { slug: "lab-oom-killer",       title: "Lab: Trigger & Autopsy the OOM Killer" },
       { slug: "lab-page-cache",       title: "Lab: Watch the Page Cache Work" },
       { slug: "lab-cgroup-limits",    title: "Lab: Throttle a Process with cgroup v2" },
       { slug: "lab-kernel-module",    title: "Lab: Write, Build & Load a Kernel Module" },
+      { slug: "lab-criu",             title: "Lab: Checkpoint & Restore a Real Process" },
+      { slug: "lab-userfaultfd",      title: "Lab: Serve Page Faults from Userspace" },
     ],
   },
   {

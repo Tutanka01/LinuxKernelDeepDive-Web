@@ -381,4 +381,4 @@ Retpoline mechanically rewrites a well-defined instruction pattern (indirect `ca
 
 ---
 
-**Next:** Part VI — the kernel as a programmable platform. We start with [eBPF Internals](#/ebpf-internals): the constrained in-kernel virtual machine that powers observability, networking, security, and tracing. Programs, maps, helpers, BTF, CO-RE, and the verifier that makes it safe.
+**Next:** Part VII — the kernel as a programmable platform. We start with [eBPF Internals](#/ebpf-internals): the constrained in-kernel virtual machine that powers observability, networking, security, and tracing. Programs, maps, helpers, BTF, CO-RE, and the verifier that makes it safe.

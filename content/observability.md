@@ -558,5 +558,6 @@ from every container regardless of its namespaces.
 
 ---
 
-**Next (final chapter):** going to the source — reading kernel code, building
-your own kernel, and where to go from here. See [Reading & Building the Kernel](#/kernel-dev).
+**Next:** turn those instruments into a repeatable investigation process —
+USE, RED, the 60-second checklist, and on/off-CPU flame graphs — in
+[Performance Analysis Methodology](#/perf-methodology).
