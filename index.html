@@ -2,11 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>The Linux Deep Dive — How Your System Really Works</title>
   <meta name="description" content="A source-level guide to Linux internals, containers, CRIU checkpoint/restore, live migration, userfaultfd, and GPU checkpointing.">
+  <script>
+    /* apply the saved theme before first paint, so there is no flash */
+    try { if (localStorage.getItem("ldd-theme") === "paper") document.documentElement.dataset.theme = "paper"; } catch (e) {}
+  </script>
   <link rel="stylesheet" href="assets/style.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
+  <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
 <body>
   <div id="progress-bar"></div>
@@ -23,6 +27,10 @@
         <span class="search-open-icon">⌕</span> Search
         <kbd class="search-kbd">/</kbd>
       </button>
+      <div class="theme-switch" role="group" aria-label="Colour theme">
+        <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
+        <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
+      </div>
       <div id="toc"><!-- table of contents injected by app.js --></div>
       <a class="side-course" href="distributed/index.html">
         <span class="side-course-kicker">Standalone course</span>
@@ -46,6 +54,8 @@
     </main>
 
     <aside id="page-toc" class="page-toc" aria-label="On this page"></aside>
+
+    <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
 
   </div>
 

@@ -221,8 +221,8 @@ kernel are built on.
 ```mermaid
 graph TD
     A[Timer request] --> B{Precise?}
-    B -- "no, timeout-ish" --> C[timer_list: wheel bucket by jiffies, O(1)]
-    B -- "yes, nanosecond" --> D[hrtimer: rb-tree per clock, O(log n)]
+    B -- "no, timeout-ish" --> C["timer_list: wheel bucket by jiffies, O(1)"]
+    B -- "yes, nanosecond" --> D["hrtimer: rb-tree per clock, O(log n)"]
     C --> E[TIMER_SOFTIRQ on tick]
     D --> F[one-shot clockevent, exact deadline]
 ```

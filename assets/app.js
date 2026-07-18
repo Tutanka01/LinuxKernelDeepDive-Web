@@ -148,6 +148,74 @@ const toggleEl   = document.getElementById("sidebar-toggle");
 const progressEl = document.getElementById("progress-bar");
 const pageTocEl  = document.getElementById("page-toc");
 
+/* ---------------- theme: terminal (dark) / paper (light) ---------------- */
+
+const THEME_KEY   = "ldd-theme";
+const hljsThemeEl = document.getElementById("hljs-theme");
+
+const HLJS_THEME_HREF = {
+  dark:  "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css",
+  paper: "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-light-medium.min.css",
+};
+
+const MERMAID_THEME = {
+  dark: {
+    startOnLoad: false,
+    theme: "dark",
+    themeVariables: {
+      background: "#1a1714",
+      primaryColor: "#262019",
+      primaryTextColor: "#d4cbb7",
+      primaryBorderColor: "#a4783f",
+      lineColor: "#978d7c",
+      fontFamily: "SF Mono, Menlo, monospace",
+      fontSize: "14px",
+    },
+  },
+  paper: {
+    startOnLoad: false,
+    theme: "neutral",
+    themeVariables: {
+      background: "#f6f1e6",
+      primaryColor: "#efe8d7",
+      primaryTextColor: "#383022",
+      primaryBorderColor: "#8f5d1a",
+      lineColor: "#6b6250",
+      fontFamily: "SF Mono, Menlo, monospace",
+      fontSize: "14px",
+    },
+  },
+};
+
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) === "paper" ? "paper" : "dark"; }
+  catch { return "dark"; }
+}
+
+function applyTheme(theme, rerenderDiagrams = false) {
+  if (theme === "paper") document.documentElement.setAttribute("data-theme", "paper");
+  else document.documentElement.removeAttribute("data-theme");
+  if (hljsThemeEl) hljsThemeEl.href = HLJS_THEME_HREF[theme];
+  document.querySelectorAll(".theme-btn").forEach(b => {
+    const on = b.dataset.themeValue === theme;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  if (typeof mermaid !== "undefined") {
+    mermaid.initialize(MERMAID_THEME[theme]);
+    if (rerenderDiagrams) rerenderMermaid();
+  }
+}
+
+function setTheme(theme) {
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.documentElement.classList.add("theme-switching");
+    setTimeout(() => document.documentElement.classList.remove("theme-switching"), 300);
+  }
+  applyTheme(theme, true);
+}
+
 /* ---------------- reading progress (localStorage) ---------------- */
 
 const READ_KEY = "ldd-read";
@@ -190,6 +258,85 @@ function refreshReadButton(slug) {
   btn.classList.toggle("is-read", isRead);
 }
 
+/* ---------------- scroll memory: keep your place across reloads ---------------- */
+
+const SCROLL_KEY = "ldd-scroll";
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
+let booted = false;              // the first route() is a page (re)load, not a nav
+let scrollSaveTimer = null;
+
+function scrollMap() {
+  try { return JSON.parse(sessionStorage.getItem(SCROLL_KEY) || "{}"); }
+  catch { return {}; }
+}
+function rememberScroll(slug) {
+  if (!slug) return;
+  const map = scrollMap();
+  map[slug] = Math.max(0, Math.round(window.scrollY));
+  try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(map)); } catch {}
+}
+function queueRememberScroll() {
+  if (scrollSaveTimer) return;
+  scrollSaveTimer = setTimeout(() => {
+    scrollSaveTimer = null;
+    rememberScroll(currentSlug());
+  }, 250);
+}
+
+/* Restore a saved position, re-pinning it while late content (Mermaid diagrams,
+   syntax highlighting, images) reflows the page — but bailing out the instant
+   the reader scrolls, so we never fight them. */
+function restoreScroll(slug) {
+  const y = scrollMap()[slug] || 0;
+  if (y <= 4) return;
+  let cancelled = false;
+  const stop = () => { cancelled = true; };
+  ["wheel", "touchstart", "keydown", "mousedown"].forEach(evt =>
+    window.addEventListener(evt, stop, { once: true, passive: true }));
+  let frames = 0;
+  const pin = () => {
+    if (cancelled) return;
+    window.scrollTo({ top: y, behavior: "instant" });
+    if (++frames < 40) requestAnimationFrame(pin);   // ~0.6s reflow guard
+  };
+  window.scrollTo({ top: y, behavior: "instant" });
+  requestAnimationFrame(pin);
+}
+
+/* persist the position before the tab is hidden or reloaded */
+window.addEventListener("pagehide", () => rememberScroll(currentSlug()));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") rememberScroll(currentSlug());
+});
+
+/* ---------------- auto-hiding "Contents" bar (tablet / phone) ----------------
+   Slides the sticky toggle out of the way on a sustained scroll down and brings
+   it straight back on any upward move. An accumulator (reset when the direction
+   flips) absorbs momentum jitter without dulling the response. */
+
+let toggleLastY = 0;
+let toggleAcc   = 0;
+
+function updateToggleBar() {
+  const y = Math.max(0, window.scrollY);
+  const delta = y - toggleLastY;
+  toggleLastY = y;
+
+  /* always visible near the top or while the drawer is open */
+  if (y < 64 || sidebarEl.classList.contains("open")) {
+    toggleAcc = 0;
+    toggleEl.classList.remove("hide");
+    return;
+  }
+  /* a change of direction starts the count fresh */
+  if ((delta > 0 && toggleAcc < 0) || (delta < 0 && toggleAcc > 0)) toggleAcc = 0;
+  toggleAcc += delta;
+
+  if (toggleAcc > 48) { toggleEl.classList.add("hide"); toggleAcc = 48; }         // scrolled down enough → hide
+  else if (toggleAcc < -24) { toggleEl.classList.remove("hide"); toggleAcc = -24; } // nudged up → reveal
+}
+
 /* auto-mark a chapter read when the reader reaches the end */
 let autoReadArmed = false;
 window.addEventListener("scroll", () => {
@@ -200,6 +347,8 @@ window.addEventListener("scroll", () => {
     markRead(currentSlug());
   }
   updatePageTocSpy();
+  updateToggleBar();
+  queueRememberScroll();
 }, { passive: true });
 
 /* ---------------- frontmatter ---------------- */
@@ -258,16 +407,41 @@ function decorateHeadings(slug) {
   });
 }
 
+/* wrap wide tables so they scroll on their own instead of blowing out the
+   page width on phones and tablets */
+function wrapTables() {
+  articleEl.querySelectorAll("table").forEach(t => {
+    if (t.parentElement && t.parentElement.classList.contains("table-scroll")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "table-scroll";
+    t.replaceWith(wrap);
+    wrap.appendChild(t);
+  });
+}
+
 function renderMermaid() {
   const blocks = articleEl.querySelectorAll("pre code.language-mermaid");
   if (!blocks.length || typeof mermaid === "undefined") return;
   blocks.forEach(code => {
     const holder = document.createElement("pre");
     holder.className = "mermaid";
+    holder.dataset.src = code.textContent;   // kept for theme re-renders
     holder.textContent = code.textContent;
     code.closest("pre").replaceWith(holder);
   });
   mermaid.run({ nodes: articleEl.querySelectorAll("pre.mermaid") });
+}
+
+/* re-render diagrams after a theme change (colours are baked into the SVG) */
+function rerenderMermaid() {
+  const blocks = articleEl.querySelectorAll("pre.mermaid");
+  if (!blocks.length || typeof mermaid === "undefined") return;
+  blocks.forEach(p => {
+    if (!p.dataset.src) return;
+    p.removeAttribute("data-processed");
+    p.textContent = p.dataset.src;
+  });
+  mermaid.run({ nodes: blocks });
 }
 
 function buildPageToc() {
@@ -381,12 +555,15 @@ async function loadChapter(slug, anchor) {
       if (!el.classList.contains("language-mermaid")) hljs.highlightElement(el);
     });
     decorateHeadings(slug);
+    wrapTables();
     renderMermaid();
     buildPageToc();
     renderPager(slug);
 
     if (anchor) scrollToAnchor(anchor);
-    else window.scrollTo(0, 0);
+    else if (!booted) restoreScroll(slug);                   // reload: keep your place
+    else window.scrollTo({ top: 0, behavior: "instant" });   // new chapter: start at top
+    booted = true;
 
     autoReadArmed = true;
     document.title = `${TITLE_OF[slug]} — The Linux Deep Dive`;
@@ -410,10 +587,20 @@ function scrollToAnchor(anchor) {
   }
 }
 
+/* ---------------- mobile / tablet nav drawer ---------------- */
+
+const scrimEl = document.getElementById("sidebar-scrim");
+
+function setSidebar(open) {
+  sidebarEl.classList.toggle("open", open);
+  document.body.classList.toggle("nav-open", open);
+  toggleEl.setAttribute("aria-expanded", String(open));
+}
+
 function route() {
   const { anchor } = parseHash();
   loadChapter(currentSlug(), anchor);
-  sidebarEl.classList.remove("open");
+  setSidebar(false);
 }
 
 /* ---------------- full-text search ---------------- */
@@ -536,6 +723,10 @@ document.getElementById("search-open").addEventListener("click", openSearch);
 
 document.addEventListener("keydown", e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (e.key === "Escape" && sidebarEl.classList.contains("open")) {
+    setSidebar(false);
+    return;
+  }
   if ((e.key === "/" && !typing) || ((e.metaKey || e.ctrlKey) && e.key === "k")) {
     e.preventDefault();
     openSearch();
@@ -552,23 +743,14 @@ document.addEventListener("keydown", e => {
 
 /* ---------------- boot ---------------- */
 
-if (typeof mermaid !== "undefined") {
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: "dark",
-    themeVariables: {
-      background: "#1c1a17",
-      primaryColor: "#2a2722",
-      primaryTextColor: "#d8d0c0",
-      primaryBorderColor: "#a4783f",
-      lineColor: "#8f8676",
-      fontFamily: "SF Mono, Menlo, monospace",
-      fontSize: "14px",
-    },
-  });
-}
+document.querySelectorAll(".theme-btn").forEach(btn => {
+  btn.addEventListener("click", () => setTheme(btn.dataset.themeValue));
+});
+applyTheme(currentTheme());
 
-toggleEl.addEventListener("click", () => sidebarEl.classList.toggle("open"));
+toggleEl.setAttribute("aria-expanded", "false");
+toggleEl.addEventListener("click", () => setSidebar(!sidebarEl.classList.contains("open")));
+if (scrimEl) scrimEl.addEventListener("click", () => setSidebar(false));
 window.addEventListener("hashchange", route);
 
 buildToc();
