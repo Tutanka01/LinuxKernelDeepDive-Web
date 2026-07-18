@@ -6,8 +6,11 @@
   <title>The Linux Deep Dive — How Your System Really Works</title>
   <meta name="description" content="A source-level guide to Linux internals, containers, CRIU checkpoint/restore, live migration, userfaultfd, and GPU checkpointing.">
   <script>
-    /* apply the saved theme before first paint, so there is no flash */
-    try { if (localStorage.getItem("ldd-theme") === "paper") document.documentElement.dataset.theme = "paper"; } catch (e) {}
+    /* apply saved theme + sidebar state before first paint, so there is no flash */
+    try {
+      if (localStorage.getItem("ldd-theme") === "paper") document.documentElement.dataset.theme = "paper";
+      if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
+    } catch (e) {}
   </script>
   <link rel="stylesheet" href="assets/style.css">
   <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
@@ -18,7 +21,12 @@
 
     <button id="sidebar-toggle" aria-label="Toggle table of contents">☰ Contents</button>
 
+    <button id="sidebar-show" class="sidebar-show" type="button"
+            aria-label="Show sidebar" title="Show contents ( [ )">☰ Contents</button>
+
     <nav id="sidebar" class="sidebar">
+      <button id="sidebar-collapse" class="sidebar-collapse" type="button"
+              aria-label="Collapse sidebar" title="Hide contents ( [ )" aria-expanded="true">«</button>
       <div class="site-title">
         <a href="#/">The Linux<br>Deep Dive</a>
         <p class="site-subtitle">how your system really works</p>

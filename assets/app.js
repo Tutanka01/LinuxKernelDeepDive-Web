@@ -727,6 +727,13 @@ document.addEventListener("keydown", e => {
     setSidebar(false);
     return;
   }
+  /* [ toggles the sidebar on wide screens */
+  if (e.key === "[" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey &&
+      window.matchMedia("(min-width: 901px)").matches) {
+    e.preventDefault();
+    setNavCollapsed(!document.documentElement.classList.contains("nav-collapsed"));
+    return;
+  }
   if ((e.key === "/" && !typing) || ((e.metaKey || e.ctrlKey) && e.key === "k")) {
     e.preventDefault();
     openSearch();
@@ -751,6 +758,22 @@ applyTheme(currentTheme());
 toggleEl.setAttribute("aria-expanded", "false");
 toggleEl.addEventListener("click", () => setSidebar(!sidebarEl.classList.contains("open")));
 if (scrimEl) scrimEl.addEventListener("click", () => setSidebar(false));
+
+/* collapsible sidebar on wide screens (desktop & tablet-landscape) */
+const COLLAPSE_KEY = "ldd-nav-collapsed";
+const collapseBtn  = document.getElementById("sidebar-collapse");
+const showBtn      = document.getElementById("sidebar-show");
+
+function setNavCollapsed(on) {
+  document.documentElement.classList.toggle("nav-collapsed", on);
+  try { localStorage.setItem(COLLAPSE_KEY, on ? "1" : "0"); } catch {}
+  if (collapseBtn) collapseBtn.setAttribute("aria-expanded", String(!on));
+}
+
+if (collapseBtn) collapseBtn.addEventListener("click", () => setNavCollapsed(true));
+if (showBtn)     showBtn.addEventListener("click", () => setNavCollapsed(false));
+setNavCollapsed(document.documentElement.classList.contains("nav-collapsed"));  // sync aria with pre-paint state
+
 window.addEventListener("hashchange", route);
 
 buildToc();

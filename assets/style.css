@@ -289,6 +289,51 @@ html.theme-switching * {
 #sidebar-toggle { display: none; }
 .sidebar-scrim { display: none; }
 
+/* ----- collapse control: hide the sidebar on wide screens ----- */
+.sidebar-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 0 0.4rem auto;          /* pin to the top-right corner of the rail */
+  width: 1.85rem;
+  height: 1.85rem;
+  flex-shrink: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  color: var(--text-faint);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.sidebar-collapse:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+/* floating button that brings the sidebar back once collapsed */
+.sidebar-show {
+  display: none;
+  position: fixed;
+  top: 0.8rem;
+  left: 0.8rem;
+  z-index: 40;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.72rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--accent);
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.28);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.sidebar-show:hover { border-color: var(--accent-dim); color: var(--ink); }
+
 /* ============================================================
    Sidebar search button — quiet
    ============================================================ */
@@ -826,6 +871,12 @@ html.theme-switching * {
      ≤ 420px       small phone
    ============================================================ */
 
+/* ---- collapsed sidebar (applies on every screen wider than the drawer) ---- */
+@media (min-width: 901px) {
+  .nav-collapsed .sidebar { display: none; }
+  .nav-collapsed .sidebar-show { display: inline-flex; }
+}
+
 /* ---- iPad landscape & mid widths: give the reading column room ---- */
 @media (min-width: 901px) and (max-width: 1279px) {
   .sidebar { width: 264px; padding-right: 1rem; }
@@ -905,6 +956,10 @@ html.theme-switching * {
   }
   body.nav-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
   body.nav-open { overflow: hidden; }
+
+  /* the desktop collapse controls have no place in the drawer layout */
+  .sidebar-collapse { display: none; }
+  .sidebar-show { display: none !important; }
 
   /* thumb-sized rows and controls inside the drawer */
   .toc-list a { padding: 0.6rem 0.6rem; font-size: 1rem; line-height: 1.35; }
