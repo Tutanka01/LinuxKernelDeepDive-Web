@@ -219,7 +219,7 @@ ps -eo pid,ni,comm | sort -k2 -n   # sort by niceness
 The exact anchors: nice 0 = weight 1024, nice +1 = 820, nice −1 = 1277;
 the extremes are nice +19 = 15 and nice −20 = 88761. vruntime advances as
 `delta_exec × 1024 / weight`, so under contention a nice −10 task
-(weight 9548) gets roughly 10× the CPU of a nice +10 task (weight 110). On an
+(weight 9548) gets roughly 87× the CPU of a nice +10 task (weight 110). On an
 idle machine, nice changes nothing — weights only matter when tasks compete.
 The kernel keeps a second table,
 [sched_prio_to_wmult[]](https://elixir.bootlin.com/linux/v6.12/C/ident/sched_prio_to_wmult),

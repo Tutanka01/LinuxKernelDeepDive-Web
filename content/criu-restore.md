@@ -215,6 +215,14 @@ CRIU "don't try to recreate this; I will provide an equivalent, splice it in
 here." External mounts are the seam where a self-contained checkpoint meets a
 world it doesn't own.
 
+Since CRIU 3.17 a second engine, **mount-v2**, sidesteps that ordering
+minefield: on kernels with `MOVE_MOUNT_SET_GROUP` (5.15+), each mount is first
+created detached and *plain*, spliced into the tree with the new mount API —
+`open_tree()` + `move_mount()` — and the sharing groups are copied over
+afterwards instead of being inherited in dependency order. CRIU picks mount-v2
+automatically when the kernel supports it; `--mntns-compat-mode` forces the
+legacy walk.
+
 **Cgroups are rejoined, not always recreated.** By default CRIU puts the
 restored tasks back into the cgroup paths they were dumped from (recreating the
 cgroup subtree if `--manage-cgroups` asks it to). The controllers and their

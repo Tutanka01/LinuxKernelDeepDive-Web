@@ -565,14 +565,18 @@ sudo criu restore -D ~/ckpt-copy --shell-job 2>&1 | tail -3
 
 ```text
 dump OK
-Error (criu/pie/restorer.c:XXXX): Unable to clone 6072: Operation not permitted
+Error (criu/pie/restorer.c:XXXX): Unable to clone 6072: File exists
 Error (criu/cr-restore.c:XXXX): Restoring FAILED.
 ```
 
 The restorer asked the kernel (via `clone3` + `set_tid`) for PID 6072 and the
-kernel said no — that number is taken. (If 6072 happens to be free but you
-have another process squatting a PID inside the tree, you get the same class
-of failure.) This is not CRIU being fragile; it's the whole reason production
+kernel said no — that number is taken. Inside `alloc_pid()` the occupied
+`set_tid` slot makes `idr_alloc()` return `-ENOSPC`, which the kernel remaps
+to `-EEXIST` — hence *File exists*, not a permissions complaint. A *permission*
+error (`EPERM`) would mean something different: the restorer lacking
+`CAP_CHECKPOINT_RESTORE`, which is not the case here since we ran under `sudo`.
+(If 6072 happens to be free but you have another process squatting a PID inside
+the tree, you get the same class of failure.) This is not CRIU being fragile; it's the whole reason production
 migration restores into a **fresh PID namespace**, where the original numbers
 are guaranteed available. Which is the perfect segue to the container
 porcelain.

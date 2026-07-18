@@ -231,8 +231,9 @@ Because of OCI, the pieces are swappable:
 
 - **Other OCI runtimes** drop in below containerd: `crun` (C, faster than
   runc's Go), **gVisor**'s `runsc` (syscalls served by a user-space kernel in
-  Go — the container's syscalls hit a ptrace/KVM interceptor, not the host
-  kernel directly), **Kata Containers** (each container in a lightweight
+  Go — the container's syscalls hit a seccomp-based **systrap** interceptor
+  (the default since 2023; KVM optional, the old ptrace platform deprecated),
+  not the host kernel directly), **Kata Containers** (each container in a lightweight
   micro-VM with its own guest kernel) — the
   [What a Container Actually Is](#/containers-overview) chapter's security
   spectrum, sold as products.
@@ -271,6 +272,9 @@ podman:  CLI ──────────────────────�
   user-space packet relay — **pasta** (the modern default) or the older
   slirp4netns. The CLI is intentionally identical (`alias docker=podman` mostly
   works).
+- **Its own network stack.** Since Podman 4.0, wiring the netns is done by
+  **netavark**, with **aardvark-dns** answering container-name lookups — a
+  purpose-built Rust stack that replaced the Kubernetes-oriented CNI plugins.
 - When systemd is present, Quadlet-managed containers become regular systemd
   services (`systemctl --user status <container>`), gaining restart policy and
   socket activation for free.

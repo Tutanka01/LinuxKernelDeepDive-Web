@@ -462,7 +462,11 @@ memory region — all fully describable. But an fd that points at a **device**
 whose state lives on the *hardware* is opaque. The kernel can tell you the fd
 exists and names `/dev/nvidia0`; it cannot hand you the GPU's on-chip memory,
 command queues, or context through `/proc`. The same is true of many special
-device fds.
+device fds. An **io_uring** fd sits on the same boundary: its submission and
+completion rings are kernel-internal state no `/proc` interface exposes, and
+CRIU has no dumper for them — dump aborts on the anonymous-inode fd (`Can't
+dump file … anon [io_uring]`), so the practical rule is *close the ring before
+you checkpoint*.
 
 CRIU's answer is not to guess but to **delegate**. At dump time, when it meets
 an fd it doesn't understand, it fires the plugin hook

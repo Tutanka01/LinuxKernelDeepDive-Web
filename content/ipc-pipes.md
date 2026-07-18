@@ -456,7 +456,7 @@ round trip over a Unix socket costs on the order of **5–10 µs**; TCP over
 loopback is typically 2–3× that, and bulk throughput over Unix sockets
 commonly measures around twice localhost TCP. Not a revolution, but free.
 
-> **eBPF link:** since ~5.7 the kernel supports `AF_UNIX` sockets in a
+> **eBPF link:** since 5.15 the kernel supports `AF_UNIX` sockets in a
 > `BPF_MAP_TYPE_SOCKMAP`/`SOCKHASH`, so a `sk_msg` program can redirect stream
 > data from one Unix (or TCP) socket straight to another's receive queue,
 > skipping the sender's `recvmsg`/`sendmsg` bounce entirely. This is the

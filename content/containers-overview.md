@@ -58,7 +58,7 @@ something other than the host defaults:
   different one. Note what's *not* in there: the user namespace lives in
   `task->cred->user_ns`, and the PID namespace a task *itself* belongs to is
   reachable through its `struct pid`, not through `nsproxy` (more on that
-  below). The whole `nsproxy` is 8 pointers — under 64 bytes — and it's shared
+  below). The whole `nsproxy` is a refcount plus 8 pointers — about 72 bytes — and it's shared
   by pointer, so putting a thousand tasks in one container costs one `nsproxy`,
   not a thousand.
 - **`task->cgroups`** — a pointer to a
@@ -257,7 +257,8 @@ startup time — is the real density win, and it's why "1000 containers, 4 GiB
 of RAM" is plausible while "1000 VMs, 4 GiB" is not.
 
 **Security.** Every container on a host talks to one shared kernel through the
-full syscall interface — roughly **460 syscalls on x86-64 as of 6.12**. A
+full syscall interface — roughly **375 syscalls on x86-64 as of 6.12**
+(numbered up to 462 — the table has gaps). A
 kernel vulnerability reachable from inside a container can mean escape to the
 host: the boundary is a software API surface, not a hardware trap. This is why
 high-stakes multi-tenant platforms wrap containers in micro-VMs
@@ -343,7 +344,7 @@ namespace, the specific lie it tells:
 - **IPC**: private System V IPC objects and POSIX message queues
   ([Pipes, FIFOs & Unix Sockets](#/ipc-pipes)).
 - **user**: a UID/GID remapping table (`/proc/<pid>/uid_map`, up to 340
-  ranges since 5.9). The privilege foundation for rootless containers, and the
+  ranges since 4.15). The privilege foundation for rootless containers, and the
   one namespace an unprivileged user is allowed to create — which is also why
   it has been a recurring source of privilege-escalation CVEs.
 - **cgroup**: virtualizes the cgroup root the process sees in
@@ -406,7 +407,7 @@ same bit means "can do X on the host" or "can do X only inside this container"
 depending on which `user_ns` owns the resource.
 
 On top of that, Docker's default **seccomp-BPF** profile blocks around 44 of
-the ~460 x86-64 syscalls (`mount(2)`, `reboot(2)`, `kexec_load(2)`,
+the ~375 x86-64 syscalls (`mount(2)`, `reboot(2)`, `kexec_load(2)`,
 `open_by_handle_at(2)` — the last famously used in an early container-escape
 exploit). The filter is a classic-BPF program stored in the
 `struct seccomp_filter` chain; the kernel runs it on **every** syscall entry
@@ -473,7 +474,7 @@ and [kernel/fork.c](https://elixir.bootlin.com/linux/v6.12/source/kernel/fork.c)
 1. The `unshare(2)` syscall lands in
    [ksys_unshare()](https://elixir.bootlin.com/linux/v6.12/C/ident/ksys_unshare)
    (kernel/fork.c). It validates the flag combination (e.g. `CLONE_NEWUSER`
-   implies `CLONE_NEWNS`), then calls
+   forces `CLONE_THREAD | CLONE_FS`), then calls
    [unshare_nsproxy_namespaces()](https://elixir.bootlin.com/linux/v6.12/C/ident/unshare_nsproxy_namespaces).
 2. That calls
    [create_new_namespaces()](https://elixir.bootlin.com/linux/v6.12/C/ident/create_new_namespaces)

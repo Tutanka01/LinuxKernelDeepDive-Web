@@ -8,7 +8,7 @@ requires:
 
 # Glossary
 
-> **Goal:** one place to look up the ~110 terms this book leans on, each defined
+> **Goal:** one place to look up the ~70 terms this book leans on, each defined
 > in a sentence or two and linked to the chapter that treats it properly. Read
 > it front to back once to build a mental index, or jump in when a word in
 > another chapter stops you cold.

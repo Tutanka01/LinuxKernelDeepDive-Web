@@ -598,8 +598,9 @@ and SIGKILLs it. The score
 ([`oom_badness()`](https://elixir.bootlin.com/linux/v6.12/C/ident/oom_badness))
 is essentially *RSS + swap used + page-table pages*, normalized to
 per-mille of available memory, then shifted by the per-process
-`oom_score_adj` (−1000 to +1000; −1000 means "never kill this"). Root
-processes get a small 3% discount. The kernel then logs a full memory
+`oom_score_adj` (−1000 to +1000; −1000 means "never kill this"). There is
+no special treatment for root any more — the old 3% `CAP_SYS_ADMIN` bonus
+was removed in 4.17. The kernel then logs a full memory
 autopsy to dmesg — every process's RSS, the zone states, the killer's
 reasoning.
 

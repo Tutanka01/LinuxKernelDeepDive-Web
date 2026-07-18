@@ -385,7 +385,8 @@ sharp edges. Documented constraints, as of the 6.12 / driver-570 era:
   process that is still initializing CUDA.
 
 Newer drivers keep chipping at the list: **580** added GPU migration and
-partial container passthrough, **595** added aarch64, **610** added
+partial container passthrough (the latter also in some 575 drivers), **595**
+added aarch64, **610** added
 `cuIpcGetMemHandle`-based CUDA IPC support. The frontier moves fast enough that
 you should always check the [cuda-checkpoint README](https://github.com/NVIDIA/cuda-checkpoint)
 for the exact matrix on your driver rather than trusting any prose — including

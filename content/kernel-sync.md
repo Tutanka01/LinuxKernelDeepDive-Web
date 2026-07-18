@@ -153,7 +153,8 @@ same cacheline, every one of them hammering it with atomic compare-and-swaps,
 and whichever CPU happens to win is random (a starving CPU can wait
 indefinitely).
 
-Since kernel 4.2, the mainline spinlock on x86-64 and arm64 is the
+Since kernel 4.2 on x86-64 — and 4.19 on arm64, which kept its ticket lock
+a few years longer — the mainline spinlock is the
 **queued spinlock** (`qspinlock`). The visible `struct qspinlock` is still a
 single 32-bit word, but under contention it builds an **MCS queue**: each
 waiting CPU spins on its *own* per-CPU cacheline, and the lock is handed off
@@ -271,7 +272,7 @@ take it as **writer**). Filesystem metadata. The tasklist lock guarding
 `for_each_process()` traversals.
 
 > **Writer starvation warning:** under a continuous stream of readers, a
-> writer can wait a long time. Since around 4.9 the kernel's rwsem has a
+> writer can wait a long time. Since its 5.3 rewrite the kernel's rwsem has a
 > **writer handoff** mechanism: once a writer has waited too long, new readers
 > are blocked and the lock is handed directly to the waiting writer. This
 > bounds the starvation but doesn't eliminate the underlying tension — if

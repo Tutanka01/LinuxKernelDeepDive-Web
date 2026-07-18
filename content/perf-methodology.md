@@ -80,7 +80,7 @@ Read it like this:
 - **avg10 / avg60 / avg300** — decaying averages over the last 10, 60, and 300 seconds, expressed as a percentage.
 - **total** — cumulative stall time in **microseconds** since boot. This is the raw counter; the averages are derived from it. For alerting, rate-of-change of `total` is more robust than the pre-smoothed averages.
 
-The kernel maintains this per resource in `struct psi_group`. Each CPU has a `struct psi_group_cpu` holding a bitmask of the current task states — how many tasks on that CPU are running, memstalled, or I/O-stalled right now — plus per-state time accumulators (`times[]`). Every task state transition (wake, sleep, block on I/O, enter reclaim) flips bits in that per-CPU state and accrues the elapsed time into the right bucket. A periodic worker aggregates the per-CPU buckets into the pretty percentages you read. We trace this exact path in [Follow the code](#follow-the-code-kernel-v612) below.
+The kernel maintains this per resource in `struct psi_group`. Each CPU has a `struct psi_group_cpu` holding a bitmask of the current task states — how many tasks on that CPU are running, memstalled, or I/O-stalled right now — plus per-state time accumulators (`times[]`). Every task state transition (wake, sleep, block on I/O, enter reclaim) flips bits in that per-CPU state and accrues the elapsed time into the right bucket. A periodic worker aggregates the per-CPU buckets into the pretty percentages you read. We trace this exact path in [Follow the code](#/perf-methodology@follow-the-code-kernel-v612) below.
 
 ```bash
 cat /proc/pressure/io

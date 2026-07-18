@@ -441,7 +441,7 @@ of its own syscalls.
 
 Get the direction right: Docker's default profile is an **allowlist**, not
 a blocklist. Its default action is `SCMP_ACT_ERRNO` (return `EPERM`), with
-~350+ syscalls explicitly allowed — out of roughly 360 wired up on x86-64
+~350+ syscalls explicitly allowed — out of roughly 375 wired up on x86-64
 as of 6.12 — leaving ~40 dangerous ones unreachable by omission: `mount`,
 `umount2`, `reboot`, `init_module`/`finit_module`, `kexec_load`,
 `open_by_handle_at` (the 2014 "Shocker" container escape used it), `bpf` (load

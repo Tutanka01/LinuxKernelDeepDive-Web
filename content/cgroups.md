@@ -287,7 +287,7 @@ cpu.max       "150000 100000" = 150ms CPU per 100ms period = 1.5 CPUs, hard cap
 cpu.max.burst optional burst budget above the hard period quota (since 5.14)
 cpu.stat      usage_usec + nr_throttled / throttled_usec ← the smoking gun
 cpu.pressure  PSI: % time tasks stalled on CPU
-cpu.idle      schedule this group only on otherwise-idle CPUs (since 6.0)
+cpu.idle      schedule this group only on otherwise-idle CPUs (since 5.15)
 ```
 
 Version pin: since 6.6 the fair scheduler is **EEVDF**, not CFS — see

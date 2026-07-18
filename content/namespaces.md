@@ -95,8 +95,9 @@ numbers are hard-coded constants (`PROC_PID_INIT_INO` = 0xEFFFFFFC =
 numbers above look the same on every Linux machine you'll ever touch. Two
 processes are "in the same container", kernel-wise, exactly when these inode
 numbers match. Non-initial namespaces get inode numbers allocated from an
-increasing counter, so they land far below `0xF0000000` and change every
-boot.
+increasing counter that starts at `PROC_DYNAMIC_FIRST` = 0xF0000000, so they
+land *at or above* `0xF0000000` — just past the hard-coded init-ns constants
+that sit right below it — and change every boot.
 
 ```mermaid
 graph TD
@@ -582,7 +583,7 @@ resource *limits* are the next chapter's job —
 [Control Groups (cgroup v2)](#/cgroups) — and note the division of labor:
 the cgroup *namespace* hides names; the cgroup *controllers* enforce limits.
 (cgroup **v2**, the unified hierarchy, is the default on all modern
-distros — RHEL 9+, Ubuntu 22.04+, Debian 11+ — with v1 kept only for legacy
+distros — RHEL 9+, Ubuntu 21.10+, Debian 11+ — with v1 kept only for legacy
 workloads.)
 
 ## Watching real containers' namespaces

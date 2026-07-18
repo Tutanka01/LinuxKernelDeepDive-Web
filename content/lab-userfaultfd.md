@@ -524,7 +524,7 @@ sudo cat "/proc/$UFFD_PID/stack"
 ```text
 State:  S (sleeping)
 [<0>] handle_userfault+0x1d3/0x760
-[<0>] hugetlb_fault+0x0/0x0
+[<0>] do_anonymous_page+0x458/0x6b0
 [<0>] handle_mm_fault+0x2a8/0x330
 [<0>] do_user_addr_fault+0x1a4/0x640
 [<0>] exc_page_fault+0x7e/0x180
