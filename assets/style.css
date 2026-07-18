@@ -88,6 +88,16 @@ html[data-theme="paper"] {
 
 * { box-sizing: border-box; }
 
+/* phones: no grey/blue flash on tap; buttons never fall back to the
+   native widget look, whatever the mobile browser's defaults are */
+a, button, summary, input, label { -webkit-tap-highlight-color: transparent; }
+button, input {
+  -webkit-appearance: none;
+  appearance: none;
+  font: inherit;
+  color: inherit;
+}
+
 ::selection { background: var(--selection); color: var(--ink); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -305,6 +315,7 @@ html.theme-switching * {
   border: 1px solid var(--rule);
   border-radius: 6px;
   color: var(--text-faint);
+  font-family: var(--serif);
   font-size: 1.05rem;
   line-height: 1;
   cursor: pointer;
@@ -1032,6 +1043,9 @@ html.theme-switching * {
   .article blockquote { margin: 1.1rem 0; }
   .article table { font-size: 0.84rem; }
   .article th, .article td { padding: 0.4rem 0.6rem; }
+
+  /* search modal: breathing room instead of edge-to-edge */
+  .search-box { margin: 8vh 0.9rem 0; }
 
   .pager { flex-direction: column; gap: 0.5rem; padding: 0.9rem 1.15rem 0; }
   .pager a { max-width: 100%; padding: 0.55rem 0; }

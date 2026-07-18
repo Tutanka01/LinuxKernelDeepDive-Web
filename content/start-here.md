@@ -39,7 +39,9 @@ recall a paragraph.
 
 ## How it is organized
 
-The book is split into parts that roughly climb in depth: what Linux is and how
+The book is split into parts that roughly climb in depth: the prerequisites
+(what a CPU, a compiled program, and a C struct are — for readers who run Linux
+commands daily but have never looked underneath them); what Linux is and how
 it boots; the core kernel subsystems (processes, scheduling, memory, interrupts,
 filesystems, networking); containers; checkpoint/restore and live migration;
 hardware and virtualization; performance, observability, and security; and
@@ -53,14 +55,25 @@ chapter can use a word without re-explaining it. And [What Is Linux, Really?](#/
 is the true starting line if you want the ground-level orientation before any
 path.
 
+One honest fork in the road before anything else: the main book assumes you can
+read a hex address, a C struct, and a syscall signature without flinching. If
+you administer Linux boxes competently but those three things are fog, **Part 0
+— Prerequisites** exists precisely for you. Start with
+[What This Book Assumes](#/prereq-overview): it lists the skills the book
+expects but does *not* teach (terminal fluency, mostly), lets you self-assess,
+and orders the four chapters that build everything else — the machine, the
+compiled program, just-enough C, and how to read the book's evidence. If you
+already own all that, skip Part 0 without guilt.
+
 ### The three level badges
 
 Every chapter carries a **level badge** so you know how deep the water is before
 you wade in:
 
 - **fundamentals** (green) — concepts everyone using Linux benefits from, with
-  no kernel-source spelunking required. [What Is Linux, Really?](#/what-is-linux)
-  and [From Power Button to Login](#/boot-process) are here.
+  no kernel-source spelunking required. All of Part 0,
+  [What Is Linux, Really?](#/what-is-linux) and
+  [From Power Button to Login](#/boot-process) are here.
 - **mechanism** (amber) — how a subsystem actually works, including the key data
   structures and the paths through them. [Virtual Memory](#/memory) and
   [CPU Scheduling](#/scheduling) sit at this level. Most of the book does.
@@ -164,6 +177,11 @@ make sure losing it costs you nothing.** Snapshot before the scary labs.
 Here are ordered reading lists for six common goals. Each ends with a
 **capstone lab** so you finish by doing, not just reading. Pick the one that
 matches why you are here; you can always run another path afterward.
+
+Every path below assumes the Part 0 material. If you have not read
+[What This Book Assumes](#/prereq-overview) and its self-assessment yet, spend
+ten minutes there first — it will either wave you through or save you from
+bouncing off chapter three of whichever path you pick.
 
 ### 1. Understand your machine — foundations for everyone
 
@@ -323,4 +341,5 @@ Three habits make the rest of the book pay off:
    paragraph is usually a missing `requires:` chapter, not a hard concept.
 
 That is the whole manual. Set up a VM, pick a path, and start with
-[What Is Linux, Really?](#/what-is-linux).
+[What This Book Assumes](#/prereq-overview) if the machinery below the shell is
+new to you — or dive straight into [What Is Linux, Really?](#/what-is-linux).

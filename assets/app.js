@@ -18,6 +18,16 @@ const BOOK = [
     ],
   },
   {
+    part: "Part 0 — Prerequisites",
+    chapters: [
+      { slug: "prereq-overview",      title: "What This Book Assumes" },
+      { slug: "prereq-hardware",      title: "The Machine Underneath: CPU, Memory & Devices" },
+      { slug: "prereq-programs",      title: "From Source Code to Running Process" },
+      { slug: "prereq-c",             title: "Just Enough C to Read the Kernel" },
+      { slug: "prereq-tools",         title: "Reading the Evidence: man, /proc & Kernel Source" },
+    ],
+  },
+  {
     part: "Part I — Foundations",
     chapters: [
       { slug: "what-is-linux",        title: "What Is Linux, Really?" },

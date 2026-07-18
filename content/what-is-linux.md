@@ -25,6 +25,12 @@ Everything else — your shell, your editor, `ls`, Docker, Firefox — is just
 hardware-enforced boundary. That boundary gets its own chapter:
 [Kernel, User Space & Syscalls](#/kernel-vs-userspace).
 
+> **Check your footing first:** this chapter — and everything after it — assumes
+> you can read a hex address, a C struct, and a `file /bin/ls` output without
+> squinting. If any of those is new, Part 0 was written for you: start with
+> [What This Book Assumes](#/prereq-overview) and come back. The chapter will
+> read twice as fast.
+
 ## What problem does a kernel solve?
 
 Imagine a computer with no operating system. A program running on it would
