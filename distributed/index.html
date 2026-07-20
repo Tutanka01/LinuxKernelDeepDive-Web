@@ -2,11 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Distributed Systems — A Guided Course</title>
   <meta name="description" content="A self-paced, carefully sequenced course on distributed systems: from 'what is a distributed system' all the way to consensus, transactions, CRDTs and real-world architectures.">
-  <link rel="stylesheet" href="assets/ds.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
+  <script>
+    /* apply saved theme + sidebar state before first paint, so there is no flash */
+    try {
+      if (localStorage.getItem("ldd-theme") === "paper") document.documentElement.dataset.theme = "paper";
+      if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../assets/style.css?v=20260719">
+  <link rel="stylesheet" href="assets/ds.css?v=20260720">
+  <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
 <body>
   <div id="progress-bar"></div>
@@ -14,15 +22,24 @@
 
     <button id="sidebar-toggle" aria-label="Toggle course outline">☰ Course outline</button>
 
+    <button id="sidebar-show" class="sidebar-show" type="button"
+            aria-label="Show sidebar" title="Show course outline ( [ )">☰ Course outline</button>
+
     <nav id="sidebar" class="sidebar">
+      <button id="sidebar-collapse" class="sidebar-collapse" type="button"
+              aria-label="Collapse sidebar" title="Hide course outline ( [ )" aria-expanded="true">«</button>
       <div class="site-title">
         <a href="#/" id="home-link">Distributed<br>Systems</a>
-        <p class="site-subtitle">a guided course, node by node</p>
+        <p class="site-subtitle">A Guided Course</p>
       </div>
 
-      <div class="sidebar-progress">
-        <div class="sidebar-progress-track"><div id="sidebar-progress-fill"></div></div>
-        <p id="sidebar-progress-label">0% complete</p>
+      <button id="search-open" class="search-open" type="button">
+        <span class="search-open-icon">⌕</span> Search
+        <kbd class="search-kbd">/</kbd>
+      </button>
+      <div class="theme-switch" role="group" aria-label="Colour theme">
+        <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
+        <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
       </div>
 
       <div id="toc"><!-- course outline injected by ds.js --></div>
@@ -44,6 +61,17 @@
       </div>
     </main>
 
+    <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
+
+  </div>
+
+  <div id="search-modal" class="search-modal" role="dialog" aria-label="Search">
+    <div class="search-box">
+      <input id="search-input" type="text" placeholder="Search all chapters…"
+             autocomplete="off" spellcheck="false">
+      <ul id="search-results"></ul>
+      <p class="search-footer">↑↓ navigate · Enter open · Esc close</p>
+    </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>

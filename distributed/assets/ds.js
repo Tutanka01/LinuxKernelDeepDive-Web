@@ -121,8 +121,42 @@ const viewEl     = document.getElementById("view");
 const sidebarEl  = document.getElementById("sidebar");
 const toggleEl   = document.getElementById("sidebar-toggle");
 const progressEl = document.getElementById("progress-bar");
-const sbFillEl   = document.getElementById("sidebar-progress-fill");
-const sbLabelEl  = document.getElementById("sidebar-progress-label");
+const scrimEl    = document.getElementById("sidebar-scrim");
+
+/* ---------------- theme: terminal (dark) / paper (light) ---------------- */
+
+const THEME_KEY   = "ldd-theme";
+const hljsThemeEl = document.getElementById("hljs-theme");
+
+const HLJS_THEME_HREF = {
+  dark:  "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css",
+  paper: "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-light-medium.min.css",
+};
+
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) === "paper" ? "paper" : "dark"; }
+  catch { return "dark"; }
+}
+
+function applyTheme(theme) {
+  if (theme === "paper") document.documentElement.setAttribute("data-theme", "paper");
+  else document.documentElement.removeAttribute("data-theme");
+  if (hljsThemeEl) hljsThemeEl.href = HLJS_THEME_HREF[theme];
+  document.querySelectorAll(".theme-btn").forEach(btn => {
+    const active = btn.dataset.themeValue === theme;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function setTheme(theme) {
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.documentElement.classList.add("theme-switching");
+    setTimeout(() => document.documentElement.classList.remove("theme-switching"), 300);
+  }
+  applyTheme(theme);
+}
 
 window.addEventListener("scroll", () => {
   const h = document.documentElement.scrollHeight - window.innerHeight;
@@ -154,9 +188,9 @@ function buildToc() {
     const items = mod.chapters.map(ch => {
       n += 1;
       return `<li><a href="#/${ch.slug}" data-slug="${ch.slug}">
-        <span class="toc-check" data-check="${ch.slug}"></span>
         <span class="toc-num">${String(n).padStart(2, "0")}</span>
-        <span class="toc-title">${ch.title}</span></a></li>`;
+        <span class="toc-title">${ch.title}</span>
+        <span class="toc-check" aria-hidden="true">✓</span></a></li>`;
     }).join("");
     return `<p class="toc-part">${mod.module}</p>
             <ul class="toc-list">${items}</ul>`;
@@ -164,14 +198,9 @@ function buildToc() {
 }
 
 function refreshProgressUI() {
-  const done = completedCount();
-  const pct = Math.round((done / FLAT.length) * 100);
-  sbFillEl.style.width = pct + "%";
-  sbLabelEl.textContent = done === FLAT.length
-    ? "Course complete — well done!"
-    : `${pct}% complete · ${done}/${FLAT.length} chapters`;
-  tocEl.querySelectorAll("[data-check]").forEach(el => {
-    el.classList.toggle("done", isComplete(el.dataset.check));
+  const progress = loadProgress();
+  tocEl.querySelectorAll("a[data-slug]").forEach(a => {
+    a.classList.toggle("read", !!progress.completed[a.dataset.slug]);
   });
 }
 
@@ -263,11 +292,10 @@ function renderHome() {
         pass it and the chapter is marked complete.</p>
 
       ${modules}
-
-      <footer class="page-footer">
-        <p>Part of <a href="../index.html">The Linux Deep Dive</a> — but a journey of its own.</p>
-      </footer>
-    </div>`;
+    </div>
+    <footer class="page-footer">
+      <p>Part of <a href="../index.html">The Linux Deep Dive</a> — but a journey of its own.</p>
+    </footer>`;
   window.scrollTo(0, 0);
 }
 
@@ -392,7 +420,8 @@ python3 -m http.server 8000</code></pre>
       <div class="chapter-done">
         <button class="complete-toggle"></button>
       </div>
-      <nav class="pager">
+    </article>
+    <nav class="pager">
         ${prev ? `<a class="prev" href="#/${prev.slug}">
                     <span class="pager-label">&larr; previous</span>
                     <span class="pager-title">${prev.title}</span></a>` : `<a class="prev" href="#/">
@@ -403,11 +432,10 @@ python3 -m http.server 8000</code></pre>
                     <span class="pager-title">${next.title}</span></a>` : `<a class="next" href="#/">
                     <span class="pager-label">finish &rarr;</span>
                     <span class="pager-title">Back to the course map</span></a>`}
-      </nav>
-      <footer class="page-footer">
-        <p>Distributed Systems — a guided course. Tip: use ← and → to move between chapters.</p>
-      </footer>
-    </article>`;
+    </nav>
+    <footer class="page-footer">
+      <p>Distributed Systems — a guided course. Tip: use ← and → to move between chapters.</p>
+    </footer>`;
 
   viewEl.querySelectorAll(".article-body pre code").forEach(el => {
     if (!el.classList.contains("language-quiz")) hljs.highlightElement(el);
@@ -434,16 +462,161 @@ function currentRoute() {
   return { kind: "home" };
 }
 
+function setSidebar(open) {
+  sidebarEl.classList.toggle("open", open);
+  document.body.classList.toggle("nav-open", open);
+  toggleEl.setAttribute("aria-expanded", String(open));
+}
+
 function route() {
   const r = currentRoute();
   if (r.kind === "home") renderHome();
   else renderChapter(r.slug);
   refreshProgressUI();
-  sidebarEl.classList.remove("open");
+  setSidebar(false);
 }
 
+/* ---------------- full-text search ---------------- */
+
+const searchModal = document.getElementById("search-modal");
+const searchInput = document.getElementById("search-input");
+const searchList  = document.getElementById("search-results");
+let searchIndex   = null;
+let searchSel     = 0;
+
+async function buildSearchIndex() {
+  if (searchIndex) return searchIndex;
+  searchList.innerHTML = `<li class="search-hint">Indexing chapters…</li>`;
+  const docs = await Promise.all(FLAT.map(async ch => {
+    try {
+      const res = await fetch(`content/${ch.slug}.md`, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = (await res.text())
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/[#>*_`|\[\]]/g, " ")
+        .replace(/\(https?:[^)]*\)/g, " ")
+        .replace(/\s+/g, " ");
+      return { slug: ch.slug, title: ch.title, text, lower: text.toLowerCase() };
+    } catch { return null; }
+  }));
+  searchIndex = docs.filter(Boolean);
+  return searchIndex;
+}
+
+function searchQuery(q) {
+  if (!searchIndex) return [];
+  const terms = q.toLowerCase().split(/\s+/).filter(term => term.length > 1);
+  if (!terms.length) return [];
+  const results = [];
+  for (const doc of searchIndex) {
+    let score = 0, firstHit = -1;
+    for (const term of terms) {
+      let hits = 0, i = doc.lower.indexOf(term);
+      if (i === -1) { score = 0; break; }
+      if (firstHit === -1 || i < firstHit) firstHit = i;
+      while (i !== -1 && hits < 50) {
+        hits += 1;
+        i = doc.lower.indexOf(term, i + term.length);
+      }
+      score += hits;
+      if (doc.title.toLowerCase().includes(term)) score += 25;
+    }
+    if (score > 0) results.push({ doc, score, firstHit });
+  }
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, 12);
+}
+
+function snippet(doc, firstHit, terms) {
+  const start = Math.max(0, firstHit - 60);
+  let text = doc.text.slice(start, start + 170);
+  if (start > 0) text = "…" + text;
+  text += "…";
+  for (const term of terms) {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(new RegExp(`(${escaped})`, "ig"), "<mark>$1</mark>");
+  }
+  return text;
+}
+
+function renderSearchResults(q) {
+  const terms = q.toLowerCase().split(/\s+/).filter(term => term.length > 1);
+  const results = searchQuery(q);
+  searchSel = 0;
+  if (!q.trim()) {
+    searchList.innerHTML = `<li class="search-hint">Type to search all ${FLAT.length} chapters.</li>`;
+    return;
+  }
+  if (!results.length) {
+    searchList.innerHTML = `<li class="search-hint">No results for “${q}”.</li>`;
+    return;
+  }
+  searchList.innerHTML = results.map((result, i) =>
+    `<li class="search-result${i === 0 ? " selected" : ""}" data-slug="${result.doc.slug}">
+       <span class="sr-title">${result.doc.title}</span>
+       <span class="sr-snippet">${snippet(result.doc, result.firstHit, terms)}</span>
+     </li>`).join("");
+  searchList.querySelectorAll(".search-result").forEach(li => {
+    li.addEventListener("click", () => {
+      closeSearch();
+      location.hash = `#/${li.dataset.slug}`;
+    });
+  });
+}
+
+async function openSearch() {
+  searchModal.classList.add("open");
+  searchInput.value = "";
+  searchInput.focus();
+  await buildSearchIndex();
+  renderSearchResults(searchInput.value);
+}
+
+function closeSearch() { searchModal.classList.remove("open"); }
+
+searchInput.addEventListener("input", () => renderSearchResults(searchInput.value));
+searchInput.addEventListener("keydown", e => {
+  const items = [...searchList.querySelectorAll(".search-result")];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!items.length) return;
+    searchSel = (searchSel + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+    items.forEach((li, i) => li.classList.toggle("selected", i === searchSel));
+    items[searchSel].scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter" && items[searchSel]) {
+    closeSearch();
+    location.hash = `#/${items[searchSel].dataset.slug}`;
+  } else if (e.key === "Escape") {
+    closeSearch();
+  }
+});
+
+searchModal.addEventListener("click", e => {
+  if (e.target === searchModal) closeSearch();
+});
+document.getElementById("search-open").addEventListener("click", openSearch);
+
+/* ---------------- keyboard navigation ---------------- */
+
 document.addEventListener("keydown", e => {
-  if (e.target.matches("input, textarea, select")) return;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (e.key === "Escape" && sidebarEl.classList.contains("open")) {
+    setSidebar(false);
+    return;
+  }
+  if (e.key === "[" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey &&
+      window.matchMedia("(min-width: 901px)").matches) {
+    e.preventDefault();
+    setNavCollapsed(!document.documentElement.classList.contains("nav-collapsed"));
+    return;
+  }
+  if ((e.key === "/" && !typing) || ((e.metaKey || e.ctrlKey) && e.key === "k")) {
+    e.preventDefault();
+    openSearch();
+    return;
+  }
+  if (typing || searchModal.classList.contains("open")) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const r = currentRoute();
   if (r.kind !== "chapter") return;
   const i = FLAT.findIndex(ch => ch.slug === r.slug);
@@ -451,7 +624,31 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight" && FLAT[i + 1]) location.hash = `#/${FLAT[i + 1].slug}`;
 });
 
-toggleEl.addEventListener("click", () => sidebarEl.classList.toggle("open"));
+/* ---------------- boot ---------------- */
+
+document.querySelectorAll(".theme-btn").forEach(btn => {
+  btn.addEventListener("click", () => setTheme(btn.dataset.themeValue));
+});
+applyTheme(currentTheme());
+
+toggleEl.setAttribute("aria-expanded", "false");
+toggleEl.addEventListener("click", () => setSidebar(!sidebarEl.classList.contains("open")));
+if (scrimEl) scrimEl.addEventListener("click", () => setSidebar(false));
+
+const COLLAPSE_KEY = "ldd-nav-collapsed";
+const collapseBtn  = document.getElementById("sidebar-collapse");
+const showBtn      = document.getElementById("sidebar-show");
+
+function setNavCollapsed(on) {
+  document.documentElement.classList.toggle("nav-collapsed", on);
+  try { localStorage.setItem(COLLAPSE_KEY, on ? "1" : "0"); } catch {}
+  if (collapseBtn) collapseBtn.setAttribute("aria-expanded", String(!on));
+}
+
+if (collapseBtn) collapseBtn.addEventListener("click", () => setNavCollapsed(true));
+if (showBtn) showBtn.addEventListener("click", () => setNavCollapsed(false));
+setNavCollapsed(document.documentElement.classList.contains("nav-collapsed"));
+
 window.addEventListener("hashchange", route);
 
 buildToc();
