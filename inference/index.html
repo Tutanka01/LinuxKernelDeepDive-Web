@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Distributed Systems — A Guided Course</title>
-  <meta name="description" content="A self-paced, carefully sequenced course on distributed systems: from 'what is a distributed system' all the way to consensus, transactions, CRDTs and real-world architectures.">
+  <title>Inference Engineering — A Guided Course</title>
+  <meta name="description" content="A self-paced, carefully sequenced course on LLM inference engineering: from 'what is a token' to rooflines, serving engines, kernels, quantization, speculative decoding and rack-scale disaggregated serving.">
   <script>
     /* apply saved theme + sidebar state before first paint, so there is no flash */
     try {
@@ -13,7 +13,7 @@
     } catch (e) {}
   </script>
   <link rel="stylesheet" href="../assets/style.css?v=20260719">
-  <link rel="stylesheet" href="assets/ds.css?v=20260720">
+  <link rel="stylesheet" href="assets/inf.css?v=20260723">
   <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
 <body>
@@ -29,7 +29,7 @@
       <button id="sidebar-collapse" class="sidebar-collapse" type="button"
               aria-label="Collapse sidebar" title="Hide course outline ( [ )" aria-expanded="true">«</button>
       <div class="site-title">
-        <a href="#/" id="home-link">Distributed<br>Systems</a>
+        <a href="#/" id="home-link">Inference<br>Engineering</a>
         <p class="site-subtitle">A Guided Course</p>
       </div>
 
@@ -42,7 +42,7 @@
         <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
       </div>
 
-      <div id="toc"><!-- course outline injected by ds.js --></div>
+      <div id="toc"><!-- course outline injected by inf.js --></div>
 
       <a class="side-course" href="../index.html">
         <span class="side-course-kicker">Back to the main guide</span>
@@ -50,10 +50,10 @@
         <span class="side-course-desc">How your system really works — kernel, processes, containers.</span>
       </a>
 
-      <a class="side-course" href="../inference/index.html">
+      <a class="side-course" href="../distributed/index.html">
         <span class="side-course-kicker">Sister course</span>
-        <span class="side-course-title">Inference Engineering &rarr;</span>
-        <span class="side-course-desc">How LLMs are actually served — rooflines, engines, kernels.</span>
+        <span class="side-course-title">Distributed Systems &rarr;</span>
+        <span class="side-course-desc">First principles to Raft, Spanner &amp; CRDTs — great preparation for Module 5.</span>
       </a>
 
       <div class="sidebar-footer">
@@ -82,6 +82,6 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="assets/ds.js"></script>
+  <script src="assets/inf.js"></script>
 </body>
 </html>
