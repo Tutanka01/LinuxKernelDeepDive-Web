@@ -82,6 +82,7 @@ const COURSE = [
 const COURSE_META = {
   storeKey:  "ds-course-progress-v1",     /* localStorage: completion (do not rename) */
   scrollKey: "ds-scroll",                 /* sessionStorage: scroll positions */
+  searchKey: "ds-search-index-v1",        /* localStorage: cached search index */
   name:      "Distributed Systems",
   homeTitle: "Distributed Systems — A Guided Course",
   heroTitle: "Distributed Systems,<br>from first principles",

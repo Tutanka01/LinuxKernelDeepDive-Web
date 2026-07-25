@@ -212,6 +212,10 @@ const BOOK = [
 /* flat ordered list used for routing and prev/next */
 const FLAT = BOOK.flatMap(p => p.chapters);
 const TITLE_OF = Object.fromEntries(FLAT.map(ch => [ch.slug, ch.title]));
+/* which part a chapter belongs to — search results say where a hit lives */
+const PART_OF = Object.fromEntries(
+  BOOK.flatMap(p => p.chapters.map(ch => [ch.slug, p.part]))
+);
 
 /* scroll-memory key for the course home; "@" can never appear in a slug
    because it is the chapter/anchor separator in the hash */
@@ -310,10 +314,19 @@ function readSet() {
 /* Returns false when the browser refuses the write (private mode, quota,
    storage disabled). Callers must not claim success on a false. */
 function saveReadSet(set) {
+  const json = JSON.stringify([...set]);
   try {
-    localStorage.setItem(READ_KEY, JSON.stringify([...set]));
+    localStorage.setItem(READ_KEY, json);
     return true;
-  } catch { return false; }
+  } catch {
+    /* Where you are in the book outranks a cache we can rebuild: give up the
+       search index and try once more before admitting the write failed. */
+    try {
+      localStorage.removeItem(INDEX_KEY);
+      localStorage.setItem(READ_KEY, json);
+      return true;
+    } catch { return false; }
+  }
 }
 function markRead(slug, on = true) {
   const set = readSet();
@@ -494,6 +507,41 @@ function metaBannerHtml(meta, slug) {
   return `<div class="chapter-meta">${bits.join("")}</div>${prereqs}`;
 }
 
+/* ---------------- chapter source ----------------
+   One fetch per chapter per session, shared by the reader and the search
+   indexer: building the index warms the whole book, and a chapter already in
+   hand renders without touching the network. */
+
+const mdCache = new Map();
+
+async function fetchChapterSource(slug) {
+  const cached = mdCache.get(slug);
+  if (cached !== undefined) return cached;
+  const res = await fetch(`content/${slug}.md`, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);   // never read an error page as a chapter
+  const text = await res.text();
+  mdCache.set(slug, text);
+  return text;
+}
+
+/* requestIdleCallback where it exists, a plain timer where it does not */
+const whenIdle = window.requestIdleCallback
+  ? cb => requestIdleCallback(cb, { timeout: 2000 })
+  : cb => setTimeout(cb, 500);
+
+/* Fetch the chapters on either side once the browser is quiet, so ←/→ and the
+   pager land instantly. This is a guess about where the reader is going next:
+   it must never surface an error or delay anything they actually asked for. */
+function preloadNeighbours(slug) {
+  const i = FLAT.findIndex(ch => ch.slug === slug);
+  if (i === -1) return;
+  whenIdle(() => {
+    [FLAT[i + 1], FLAT[i - 1]].forEach(ch => {
+      if (ch && !mdCache.has(ch.slug)) fetchChapterSource(ch.slug).catch(() => {});
+    });
+  });
+}
+
 /* ---------------- markdown rendering ---------------- */
 
 function slugify(text) {
@@ -672,9 +720,7 @@ async function loadChapter(slug, anchor) {
   }, 150);
 
   try {
-    const res = await fetch(`content/${slug}.md`, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.text();
+    const raw = await fetchChapterSource(slug);
     if (token !== renderToken) return;      // a newer navigation already won
     const { meta, body } = parseFrontmatter(raw);
 
@@ -713,6 +759,7 @@ async function loadChapter(slug, anchor) {
     autoReadArmed = true;
     document.title = `${TITLE_OF[slug]} — The Linux Deep Dive`;
     lastSlug = slug;              // only a chapter that actually rendered counts as loaded
+    preloadNeighbours(slug);      // ←/→ from here should not have to wait
   } catch (err) {
     lastSlug = null;              // …so clicking the same entry again retries instead of no-oping
     renderLoadError(slug, anchor, err);
@@ -871,32 +918,102 @@ function route() {
   setSidebar(false);
 }
 
-/* ---------------- full-text search ---------------- */
+/* ---------------- full-text search ----------------
+   The index is every word of all 56 chapters, which is far too much to read
+   on each visit: 56 fetches used to run on the first "/" press, unreported,
+   and again on the next page load. It is now built once behind a progress
+   bar and kept in localStorage until the assets change. */
 
 const searchModal  = document.getElementById("search-modal");
 const searchInput  = document.getElementById("search-input");
 const searchList   = document.getElementById("search-results");
-let searchIndex    = null;   // [{slug, title, text, lower}]
+let searchIndex    = null;   // [{slug, title, part, text, lower}]
 let searchSel      = 0;
+let indexBuild     = null;   // the build in flight, so two openings share one
+let indexDone      = 0;      // chapters read so far, for the progress bar
+
+const INDEX_KEY = "ldd-search-index-v1";
+/* This script's own ?v=, so a deploy that bumps it rebuilds the index. The TTL
+   bounds staleness when a chapter changes without one; titles and parts come
+   from BOOK, so only the snippets can ever lag, and never by more than a week. */
+const INDEX_VERSION = (/[?&]v=([^&]+)/.exec(document.currentScript?.src || "") || [])[1] || "0";
+const INDEX_TTL     = 7 * 24 * 60 * 60 * 1000;
+/* A cache is never worth a failed progress write: refuse to store a big one,
+   and saveReadSet drops it outright if storage ever fills up. */
+const INDEX_BUDGET  = 2_000_000;
+
+/* prose only: no fences, no markup punctuation, no link targets */
+function indexDoc(ch, md) {
+  const text = parseFrontmatter(md).body
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[#>*_`|\[\]]/g, " ")
+    .replace(/\(https?:[^)]*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { slug: ch.slug, title: ch.title, part: PART_OF[ch.slug] || "", text };
+}
+
+/* the lowercased copy the query walks is derived, never stored: it would
+   double the size of the cache to save a few milliseconds once */
+function hydrateIndex(docs) {
+  return docs.map(doc => ({ ...doc, lower: doc.text.toLowerCase() }));
+}
+
+function readCachedIndex() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(INDEX_KEY) || "null");
+    if (!cached || cached.v !== INDEX_VERSION || cached.n !== FLAT.length) return null;
+    if (!cached.at || Date.now() - cached.at > INDEX_TTL) return null;
+    return hydrateIndex(cached.docs);
+  } catch { return null; }
+}
+
+function writeCachedIndex(docs) {
+  const payload = JSON.stringify({
+    v: INDEX_VERSION, n: FLAT.length, at: Date.now(),
+    docs: docs.map(({ slug, title, part, text }) => ({ slug, title, part, text })),
+  });
+  if (payload.length > INDEX_BUDGET) return;      // do without rather than hog storage
+  try { localStorage.setItem(INDEX_KEY, payload); }
+  catch { try { localStorage.removeItem(INDEX_KEY); } catch {} }
+}
+
+/* A few workers over one queue instead of 56 fetches at once: the browser
+   serialises them anyway, and this leaves room for what the reader asked for. */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
 
 async function buildSearchIndex() {
   if (searchIndex) return searchIndex;
-  searchList.innerHTML = `<li class="search-hint">Indexing chapters…</li>`;
-  const docs = await Promise.all(FLAT.map(async ch => {
+  if (indexBuild) return indexBuild;
+  const cached = readCachedIndex();
+  if (cached) { searchIndex = cached; return searchIndex; }
+
+  indexDone = 0;
+  showIndexProgress();
+  indexBuild = (async () => {
     try {
-      const res = await fetch(`content/${ch.slug}.md`, { cache: "no-cache" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);   // never index an error page as a chapter
-      const { body } = parseFrontmatter(await res.text());
-      const text = body
-        .replace(/```[\s\S]*?```/g, " ")
-        .replace(/[#>*_`|\[\]]/g, " ")
-        .replace(/\(https?:[^)]*\)/g, " ")
-        .replace(/\s+/g, " ");
-      return { slug: ch.slug, title: ch.title, text, lower: text.toLowerCase() };
-    } catch { return null; }
-  }));
-  searchIndex = docs.filter(Boolean);
-  return searchIndex;
+      const docs = await mapLimit(FLAT, 8, async ch => {
+        try { return indexDoc(ch, await fetchChapterSource(ch.slug)); }
+        catch { return null; }            // a chapter that will not load is not indexed
+        finally { indexDone += 1; showIndexProgress(); }
+      });
+      searchIndex = hydrateIndex(docs.filter(Boolean));
+      writeCachedIndex(searchIndex);
+      return searchIndex;
+    } finally { indexBuild = null; }      // a build that failed must be retryable
+  })();
+  return indexBuild;
 }
 
 function searchQuery(q) {
@@ -931,8 +1048,19 @@ function snippet(doc, firstHit, terms) {
   return s;
 }
 
+/* The hint doubles as the progress bar, borrowing the sidebar's own track and
+   fill so a first search looks like the rest of the product rather than a hang. */
 function indexingHint() {
-  return `<li class="search-hint">Indexing chapters…</li>`;
+  const pct = Math.round((indexDone / FLAT.length) * 100);
+  return `<li class="search-hint">Reading the book for the first time — this is kept for next time.
+     <span class="progress-count">${indexDone} / ${FLAT.length} chapters indexed</span>
+     <span class="progress-track"><span class="progress-fill" style="width:${pct}%"></span></span></li>`;
+}
+
+function showIndexProgress() {
+  if (!searchIndex && searchModal.classList.contains("open")) {
+    searchList.innerHTML = indexingHint();
+  }
 }
 
 function renderSearchResults(q) {
@@ -954,6 +1082,7 @@ function renderSearchResults(q) {
   searchList.innerHTML = results.map((r, i) =>
     `<li class="search-result${i === 0 ? " selected" : ""}" data-slug="${r.doc.slug}">
        <span class="sr-title">${r.doc.title}</span>
+       ${r.doc.part ? `<span class="sr-part">${r.doc.part}</span>` : ""}
        <span class="sr-snippet">${snippet(r.doc, r.firstHit, terms)}</span>
      </li>`).join("");
   searchList.querySelectorAll(".search-result").forEach(li => {
@@ -968,6 +1097,9 @@ async function openSearch() {
   searchModal.classList.add("open");
   searchInput.value = "";
   searchInput.focus();
+  /* Read the cache before the first paint of the modal: a returning reader
+     should never see the indexing hint at all. */
+  if (!searchIndex) searchIndex = readCachedIndex();
   renderSearchResults("");
   await buildSearchIndex();
   renderSearchResults(searchInput.value);   // honour anything typed while indexing

@@ -229,12 +229,15 @@ html[data-theme="paper"] {
 .quiz-q legend { padding: 0 0.4rem; color: var(--ink); font-size: 0.95rem; font-weight: 700; }
 .quiz-q.right { border-color: var(--quiz-good); }
 .quiz-q.wrong { border-color: var(--quiz-bad); }
+/* thumb-sized: the block padding does the lifting so the floor rarely bites,
+   and the baseline answers wrap onto stays where the eye expects it */
 .quiz-choice {
   display: flex;
   align-items: baseline;
   gap: 0.55rem;
+  min-height: 44px;
   margin: 0 -0.5rem;
-  padding: 0.3rem 0.5rem;
+  padding: 0.55rem 0.5rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.93rem;
@@ -260,8 +263,10 @@ html[data-theme="paper"] {
 /* Per-chapter completion control */
 
 .chapter-done { margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--rule); text-align: center; }
+/* the one control a reader taps at the end of every chapter — thumb-sized too */
 .complete-toggle {
-  padding: 0.55rem 1.4rem;
+  min-height: 44px;
+  padding: 0.7rem 1.5rem;
   border: 1px solid var(--rule);
   border-radius: 999px;
   background: transparent;
@@ -308,7 +313,13 @@ html[data-theme="paper"] {
   .ring-label strong { font-size: 1.1rem; }
   .module-head h2 { font-size: 1.22rem; }
   .chapter-card { gap: 0.7rem; padding: 0.75rem 0.9rem; }
-  .card-desc { display: none; }
+  /* the map is all a phone reader has to steer by — clip the blurb, never drop it */
+  .card-desc {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 0.78rem;
+  }
   .quiz { padding: 1.1rem 1rem 1rem; }
   .meta-right { flex-basis: 100%; margin-left: 0; }
 }

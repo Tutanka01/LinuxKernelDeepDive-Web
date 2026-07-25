@@ -98,6 +98,7 @@ const COURSE = [
 const COURSE_META = {
   storeKey:  "inf-course-progress-v1",    /* localStorage: completion (do not rename) */
   scrollKey: "inf-scroll",                /* sessionStorage: scroll positions */
+  searchKey: "inf-search-index-v1",       /* localStorage: cached search index */
   name:      "Inference Engineering",
   homeTitle: "Inference Engineering — A Guided Course",
   heroTitle: "Inference Engineering,<br>from first principles",

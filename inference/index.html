@@ -6,15 +6,29 @@
   <title>Inference Engineering — A Guided Course</title>
   <meta name="description" content="A self-paced, carefully sequenced course on LLM inference engineering: from 'what is a token' to rooflines, serving engines, kernels, quantization, speculative decoding and rack-scale disaggregated serving.">
   <script>
-    /* apply saved theme + sidebar state before first paint, so there is no flash */
-    try {
-      if (localStorage.getItem("ldd-theme") === "paper") document.documentElement.dataset.theme = "paper";
-      if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
-    } catch (e) {}
+    /* Apply the saved theme and sidebar state before first paint, so there is
+       no flash. The highlight.js stylesheet is injected here rather than
+       hardcoded in the markup: hardcoding the dark sheet meant a paper-theme
+       reader watched the code blocks flip colour once the reader script got
+       around to swapping the href, long after first paint. Highlighting is
+       JS-driven anyway, so injecting its stylesheet from JS costs nothing. */
+    (function () {
+      var theme = "dark";
+      try {
+        if (localStorage.getItem("ldd-theme") === "paper") theme = "paper";
+        if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
+      } catch (e) {}
+      if (theme === "paper") document.documentElement.dataset.theme = "paper";
+      var link = document.createElement("link");
+      link.id = "hljs-theme";
+      link.rel = "stylesheet";
+      link.href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-" +
+                  (theme === "paper" ? "light" : "dark") + "-medium.min.css";
+      document.head.appendChild(link);
+    })();
   </script>
   <link rel="stylesheet" href="../assets/style.css?v=20260725">
   <link rel="stylesheet" href="../assets/course.css?v=20260725">
-  <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
 <body>
   <div id="progress-bar"></div>
@@ -29,7 +43,7 @@
       <button id="sidebar-collapse" class="sidebar-collapse" type="button"
               aria-label="Collapse sidebar" title="Hide contents ( [ )" aria-expanded="true">«</button>
       <div class="site-title">
-        <a href="#/" id="home-link">Inference<br>Engineering</a>
+        <a href="#/">Inference<br>Engineering</a>
         <p class="site-subtitle">A Guided Course</p>
       </div>
 

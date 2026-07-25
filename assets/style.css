@@ -812,6 +812,15 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 }
 .search-result:hover, .search-result.selected { background: var(--accent-soft); }
 .sr-title { display: block; color: var(--accent); font-weight: 700; font-size: 0.94rem; }
+/* which part or module the hit lives in — orientation, not decoration */
+.sr-part {
+  display: block;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
 .sr-snippet { display: block; color: var(--text-dim); font-size: 0.82rem; line-height: 1.45; margin-top: 0.15rem; }
 .sr-snippet mark { background: var(--selection); color: var(--ink); border-radius: 2px; padding: 0 0.1em; }
 .search-hint { padding: 0.8rem; color: var(--text-faint); font-style: italic; font-size: 0.86rem; list-style: none; }
