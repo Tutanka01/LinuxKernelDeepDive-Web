@@ -259,6 +259,8 @@ html[data-theme="paper"] {
 .quiz-result { color: var(--text-dim); font-size: 0.9rem; font-style: italic; }
 .quiz-result.pass { color: var(--quiz-good); font-weight: 700; }
 .quiz-result.fail { color: var(--quiz-bad); }
+/* answers were right but the write was refused — never claim a save that failed */
+.quiz-result.warn { color: var(--lvl-internals); font-style: normal; }
 
 /* Per-chapter completion control */
 
@@ -276,6 +278,12 @@ html[data-theme="paper"] {
 }
 .complete-toggle:hover { border-color: var(--accent-dim); color: var(--ink); }
 .complete-toggle.done { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.save-warning {
+  margin: 0.7rem 0 0;
+  color: var(--lvl-internals);
+  font-size: 0.82rem;
+  font-style: italic;
+}
 
 @media (max-width: 900px) {
   .home {

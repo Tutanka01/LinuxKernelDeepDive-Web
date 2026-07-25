@@ -103,15 +103,23 @@ function loadProgress() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { completed: {}, last: null }; }
   catch { return { completed: {}, last: null }; }
 }
-function saveProgress(p) { localStorage.setItem(STORE_KEY, JSON.stringify(p)); }
+/* Returns false when the browser refuses the write (private mode, quota,
+   storage disabled). Callers must not claim success on a false. */
+function saveProgress(p) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(p));
+    return true;
+  } catch { return false; }
+}
 
 function isComplete(slug) { return !!loadProgress().completed[slug]; }
 
 function setComplete(slug, value) {
   const p = loadProgress();
   if (value) p.completed[slug] = true; else delete p.completed[slug];
-  saveProgress(p);
-  refreshProgressUI();
+  const saved = saveProgress(p);
+  refreshProgressUI();          // re-reads storage, so a failed write repaints the truth
+  return saved;
 }
 
 function setLastVisited(slug) {
@@ -372,9 +380,11 @@ function renderQuizzes(slug) {
         return;
       }
       if (correct === data.length) {
-        result.textContent = "Perfect — chapter marked as complete ✓";
-        result.className = "quiz-result pass";
-        setComplete(slug, true);
+        const saved = setComplete(slug, true);   // write first, report second
+        result.textContent = saved
+          ? "Perfect — chapter marked as complete ✓"
+          : "Perfect — every answer correct. Progress can't be saved: this browser is blocking local storage.";
+        result.className = saved ? "quiz-result pass" : "quiz-result warn";
         const btn = viewEl.querySelector(".complete-toggle");
         if (btn) syncCompleteButton(btn, slug);
       } else {
@@ -436,6 +446,7 @@ python3 -m http.server 8000</code></pre>
       <div class="article-body">${marked.parse(md)}</div>
       <div class="chapter-done">
         <button class="complete-toggle"></button>
+        <p class="save-warning" role="status" hidden>Progress can't be saved — this browser is blocking local storage.</p>
       </div>
     </article>
     <nav class="pager">
@@ -462,8 +473,10 @@ python3 -m http.server 8000</code></pre>
   const btn = viewEl.querySelector(".complete-toggle");
   syncCompleteButton(btn, slug);
   btn.addEventListener("click", () => {
-    setComplete(slug, !isComplete(slug));
+    const saved = setComplete(slug, !isComplete(slug));
     syncCompleteButton(btn, slug);
+    const warn = viewEl.querySelector(".save-warning");
+    if (warn) warn.hidden = saved;
   });
 
   document.title = `${ch.title} — Inference Engineering`;

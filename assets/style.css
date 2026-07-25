@@ -637,6 +637,8 @@ html.theme-switching * {
 }
 .meta-read-btn:hover { color: var(--accent); border-bottom-color: var(--accent-dim); }
 .meta-read-btn.is-read { color: var(--lvl-core); }
+/* the write was refused (private mode / quota): say so instead of ticking */
+.meta-read-btn.save-failed { color: var(--lvl-internals); cursor: default; }
 
 .meta-prereqs {
   font-size: 0.82rem;
@@ -645,6 +647,32 @@ html.theme-switching * {
   margin: 0 0 1.5rem;
 }
 .meta-prereqs a { color: var(--text-dim); }
+
+/* ----- primary action button (course CTAs, retry controls) ----- */
+.btn-primary {
+  display: inline-block;
+  padding: 0.62rem 1.25rem;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: var(--serif);
+  font-size: 1rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn-primary:hover { filter: brightness(1.08); }
+
+/* ----- error panel: a failed load must not be a dead end ----- */
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+  margin: 1.4rem 0 1.6rem;
+}
+.error-home { color: var(--accent); font-size: 0.92rem; }
 
 /* ============================================================
    Quizzes & collapsible answers

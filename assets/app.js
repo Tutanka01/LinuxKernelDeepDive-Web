@@ -234,15 +234,23 @@ function readSet() {
   try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) || "[]")); }
   catch { return new Set(); }
 }
+/* Returns false when the browser refuses the write (private mode, quota,
+   storage disabled). Callers must not claim success on a false. */
 function saveReadSet(set) {
-  localStorage.setItem(READ_KEY, JSON.stringify([...set]));
+  try {
+    localStorage.setItem(READ_KEY, JSON.stringify([...set]));
+    return true;
+  } catch { return false; }
 }
 function markRead(slug, on = true) {
   const set = readSet();
   if (on) set.add(slug); else set.delete(slug);
-  saveReadSet(set);
+  const saved = saveReadSet(set);
+  /* both refreshes re-read from storage, so a failed write repaints the
+     truth rather than the intent */
   refreshReadMarks();
   refreshReadButton(slug);
+  return saved;
 }
 
 function refreshReadMarks() {
@@ -534,10 +542,8 @@ let lastSlug = null;
 
 async function loadChapter(slug, anchor) {
   markActive(slug);
-  const sameChapter = slug === lastSlug;
-  lastSlug = slug;
 
-  if (sameChapter) {                       // in-page anchor jump only
+  if (slug === lastSlug) {                 // in-page anchor jump only
     if (anchor) scrollToAnchor(anchor);
     return;
   }
@@ -555,7 +561,11 @@ async function loadChapter(slug, anchor) {
     if (h1 && (meta.level || meta.minutes || meta.kernel || meta.requires)) {
       h1.insertAdjacentHTML("afterend", metaBannerHtml(meta, slug));
       const btn = document.getElementById("mark-read-btn");
-      btn.addEventListener("click", () => markRead(slug, !readSet().has(slug)));
+      btn.addEventListener("click", () => {
+        if (markRead(slug, !readSet().has(slug))) return;
+        btn.textContent = "couldn't save — storage blocked";
+        btn.classList.add("save-failed");
+      });
       refreshReadButton(slug);
     }
 
@@ -577,16 +587,31 @@ async function loadChapter(slug, anchor) {
 
     autoReadArmed = true;
     document.title = `${TITLE_OF[slug]} — The Linux Deep Dive`;
+    lastSlug = slug;              // only a chapter that actually rendered counts as loaded
   } catch (err) {
-    articleEl.innerHTML =
-      `<h1>Couldn't load this page</h1>
-       <p>Failed to fetch <code>content/${slug}.md</code> (${err.message}).</p>
-       <p>If you opened <code>index.html</code> directly from disk, the browser
-       blocks local <code>fetch()</code> calls. Serve the folder instead:</p>
-       <pre><code>cd LinuxKernelDeepDive-Web
-python3 -m http.server 8000</code></pre>
-       <p>…then visit <a href="http://localhost:8000">http://localhost:8000</a>.</p>`;
+    lastSlug = null;              // …so clicking the same entry again retries instead of no-oping
+    renderLoadError(slug, anchor, err);
   }
+}
+
+function renderLoadError(slug, anchor, err) {
+  articleEl.className = "article";
+  articleEl.innerHTML =
+    `<h1>Couldn't load this page</h1>
+     <p>Failed to fetch <code>content/${slug}.md</code> (${err.message}).</p>
+     <p class="error-actions">
+       <button id="retry-load" class="btn-primary" type="button">Try again</button>
+       <a class="error-home" href="#/">Course home</a>
+     </p>
+     <p>If you opened <code>index.html</code> directly from disk, the browser
+     blocks local <code>fetch()</code> calls. Serve the folder instead:</p>
+     <pre><code>cd LinuxKernelDeepDive-Web
+python3 -m http.server 8000</code></pre>
+     <p>…then visit <a href="http://localhost:8000">http://localhost:8000</a>.</p>`;
+  document.getElementById("retry-load")
+    .addEventListener("click", () => loadChapter(slug, anchor));
+  renderPager(slug);              // a dead end otherwise: keep prev/next reachable
+  if (pageTocEl) pageTocEl.innerHTML = "";
 }
 
 function scrollToAnchor(anchor) {
@@ -641,6 +666,7 @@ async function buildSearchIndex() {
 }
 
 function searchQuery(q) {
+  if (!searchIndex) return [];          // still indexing — nothing to match yet
   const terms = q.toLowerCase().split(/\s+/).filter(t => t.length > 1);
   if (!terms.length) return [];
   const results = [];
@@ -671,10 +697,18 @@ function snippet(doc, firstHit, terms) {
   return s;
 }
 
+function indexingHint() {
+  return `<li class="search-hint">Indexing chapters…</li>`;
+}
+
 function renderSearchResults(q) {
   const terms = q.toLowerCase().split(/\s+/).filter(t => t.length > 1);
   const results = searchQuery(q);
   searchSel = 0;
+  if (!searchIndex) {                    // index still building: never claim "no results"
+    searchList.innerHTML = indexingHint();
+    return;
+  }
   if (!q.trim()) {
     searchList.innerHTML = `<li class="search-hint">Type to search all ${FLAT.length} chapters.</li>`;
     return;
@@ -700,8 +734,9 @@ async function openSearch() {
   searchModal.classList.add("open");
   searchInput.value = "";
   searchInput.focus();
-  await buildSearchIndex();
   renderSearchResults("");
+  await buildSearchIndex();
+  renderSearchResults(searchInput.value);   // honour anything typed while indexing
 }
 function closeSearch() { searchModal.classList.remove("open"); }
 
