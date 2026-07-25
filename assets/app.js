@@ -341,6 +341,25 @@ function refreshReadMarks() {
   }
 }
 
+/* The chapter last opened. "Continue" starts its search here rather than at
+   chapter one, so reading 1–3 and then jumping to 10 doesn't offer chapter 4. */
+const LAST_KEY = "ldd-last";
+
+function lastVisited() {
+  try { return localStorage.getItem(LAST_KEY); } catch { return null; }
+}
+function setLastVisited(slug) {
+  try { localStorage.setItem(LAST_KEY, slug); } catch {}
+}
+
+function nextUnread() {
+  const set = readSet();
+  const start = Math.max(0, FLAT.findIndex(ch => ch.slug === lastVisited()));
+  return FLAT.slice(start).find(ch => !set.has(ch.slug))
+      || FLAT.find(ch => !set.has(ch.slug))
+      || FLAT[0];
+}
+
 function refreshReadButton(slug) {
   const btn = document.getElementById("mark-read-btn");
   if (!btn) return;
@@ -631,6 +650,7 @@ function renderPager(slug) {
 }
 
 let lastSlug = null;
+let renderToken = 0;          // guards against a slow fetch landing after a newer one
 
 async function loadChapter(slug, anchor) {
   markActive(slug);
@@ -640,10 +660,23 @@ async function loadChapter(slug, anchor) {
     return;
   }
 
+  const token = ++renderToken;
+
+  /* Only announce the load if it is slow enough to notice: a warm fetch
+     lands well inside this and the reader never sees a flash. */
+  const placeholder = setTimeout(() => {
+    articleEl.className = "article";
+    articleEl.innerHTML = `<p class="loading">Loading ${TITLE_OF[slug]}…</p>`;
+    pagerEl.innerHTML = "";
+    if (pageTocEl) pageTocEl.innerHTML = "";
+  }, 150);
+
   try {
     const res = await fetch(`content/${slug}.md`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { meta, body } = parseFrontmatter(await res.text());
+    const raw = await res.text();
+    if (token !== renderToken) return;      // a newer navigation already won
+    const { meta, body } = parseFrontmatter(raw);
 
     articleEl.className = "article";       // the home view borrows this element
     articleEl.innerHTML = marked.parse(body);
@@ -720,7 +753,7 @@ function renderHome() {
   const set  = readSet();
   const done = FLAT.filter(ch => set.has(ch.slug)).length;
   const pct  = Math.round((done / FLAT.length) * 100);
-  const next = FLAT.find(ch => !set.has(ch.slug)) || FLAT[0];
+  const next = nextUnread();
   const started = done > 0;
 
   /* progress ring geometry */
