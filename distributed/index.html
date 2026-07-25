@@ -20,14 +20,14 @@
   <div id="progress-bar"></div>
   <div class="layout">
 
-    <button id="sidebar-toggle" aria-label="Toggle course outline">☰ Course outline</button>
+    <button id="sidebar-toggle" aria-label="Toggle table of contents">☰ Contents</button>
 
     <button id="sidebar-show" class="sidebar-show" type="button"
-            aria-label="Show sidebar" title="Show course outline ( [ )">☰ Course outline</button>
+            aria-label="Show sidebar" title="Show contents ( [ )">☰ Contents</button>
 
     <nav id="sidebar" class="sidebar">
       <button id="sidebar-collapse" class="sidebar-collapse" type="button"
-              aria-label="Collapse sidebar" title="Hide course outline ( [ )" aria-expanded="true">«</button>
+              aria-label="Collapse sidebar" title="Hide contents ( [ )" aria-expanded="true">«</button>
       <div class="site-title">
         <a href="#/" id="home-link">Distributed<br>Systems</a>
         <p class="site-subtitle">A Guided Course</p>
@@ -58,9 +58,10 @@
         </a>
       </nav>
 
-      <div id="toc"><!-- course outline injected by ds.js --></div>
+      <div id="toc"><!-- course outline injected by course.js --></div>
 
       <div class="sidebar-footer">
+        <p id="progress-summary"></p>
         <p>Your progress is saved locally<br>in this browser.</p>
       </div>
     </nav>
@@ -70,6 +71,8 @@
         <p class="loading">Loading…</p>
       </div>
     </main>
+
+    <aside id="page-toc" class="page-toc" aria-label="On this page"></aside>
 
     <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
 
@@ -86,6 +89,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="assets/ds.js"></script>
+  <script src="assets/ds.js?v=20260725"></script>
+  <script src="../assets/course.js?v=20260725"></script>
 </body>
 </html>

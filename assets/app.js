@@ -954,8 +954,6 @@ searchInput.addEventListener("keydown", e => {
   } else if (e.key === "Enter" && items[searchSel]) {
     closeSearch();
     location.hash = `#/${items[searchSel].dataset.slug}`;
-  } else if (e.key === "Escape") {
-    closeSearch();
   }
 });
 
@@ -969,6 +967,13 @@ document.getElementById("search-open").addEventListener("click", openSearch);
 
 document.addEventListener("keydown", e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  /* Escape closes the modal from anywhere inside it, not only from the input —
+     one click on the results padding used to make the advertised key dead */
+  if (e.key === "Escape" && searchModal.classList.contains("open")) {
+    e.preventDefault();
+    closeSearch();
+    return;
+  }
   if (e.key === "Escape" && sidebarEl.classList.contains("open")) {
     setSidebar(false);
     return;
