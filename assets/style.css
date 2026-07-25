@@ -251,38 +251,61 @@ html.theme-switching * {
 .toc-list a.read .toc-title { color: var(--text-faint); }
 .toc-list a.read:hover .toc-title { color: var(--ink); }
 
-/* Standalone-course link — a quiet footnote, not a competing CTA */
-.side-course {
-  display: block;
-  margin-top: 1.75rem;
-  padding-top: 1.1rem;
+/* ------------------------------------------------------------
+   Cross-course switcher.
+
+   Three courses now share this shell, so the way between them
+   cannot sit under an injected table of contents two viewports
+   down — it lives directly above the outline, in the same place
+   on every page, with the same three entries in the same order.
+   ------------------------------------------------------------ */
+
+.course-switch {
+  margin: 1.25rem 0 0.4rem;
+  padding-top: 1.05rem;
   border-top: 1px solid var(--rule-soft);
-  text-decoration: none;
 }
-.side-course-kicker {
-  display: block;
+.course-switch-title {
+  margin: 0 0 0.5rem;
   font-family: var(--mono);
   font-size: 0.6rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--text-faint);
-  margin-bottom: 0.3rem;
 }
-.side-course-title {
+.course-chip {
+  display: block;
+  padding: 0.38rem 0.6rem;
+  margin: 0 -0.6rem;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+a.course-chip:hover { background: var(--accent-soft); }
+a.course-chip:hover .chip-title { color: var(--accent); }
+.course-chip.current {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 4px 4px 0;
+}
+.chip-title {
   display: block;
   color: var(--text-dim);
+  font-size: 0.88rem;
   font-weight: 700;
-  font-size: 0.92rem;
+  line-height: 1.35;
   transition: color 0.15s ease;
 }
-.side-course:hover .side-course-title { color: var(--accent); }
-.side-course-desc {
+a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
+.course-chip.current .chip-title { color: var(--accent); }
+.chip-desc {
   display: block;
+  margin-top: 0.1rem;
   color: var(--text-faint);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-style: italic;
-  margin-top: 0.3rem;
   line-height: 1.45;
 }
 
@@ -656,8 +679,6 @@ html.theme-switching * {
   border-radius: 5px;
   background: var(--accent);
   color: var(--bg);
-  font-family: var(--serif);
-  font-size: 1rem;
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
@@ -1001,6 +1022,9 @@ html.theme-switching * {
   .sidebar-show { display: none !important; }
 
   /* thumb-sized rows and controls inside the drawer */
+  .course-chip { padding: 0.55rem 0.6rem; }
+  .chip-title { font-size: 0.96rem; }
+  .chip-desc { font-size: 0.76rem; }
   .toc-list a { padding: 0.6rem 0.6rem; font-size: 1rem; line-height: 1.35; }
   .toc-num { font-size: 0.76rem; }
   .toc-part { font-size: 0.7rem; margin-top: 1.4rem; }

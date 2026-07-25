@@ -13,136 +13,209 @@
 const BOOK = [
   {
     part: "Start Here",
+    blurb: "The map before the territory: what this book covers, how a chapter is built, and six ordered paths through the 56 of them.",
     chapters: [
-      { slug: "start-here",           title: "How to Use This Book: Paths & Prerequisites" },
+      { slug: "start-here", title: "How to Use This Book: Paths & Prerequisites",
+        desc: "What this book is, the level badges, and six ordered paths through it." },
     ],
   },
   {
     part: "Part 0 — Prerequisites",
+    blurb: "The optional ground floor for operators: the hardware, the ELF binary, the C, and the man pages every later chapter quietly assumes.",
     chapters: [
-      { slug: "prereq-overview",      title: "What This Book Assumes" },
-      { slug: "prereq-hardware",      title: "The Machine Underneath: CPU, Memory & Devices" },
-      { slug: "prereq-programs",      title: "From Source Code to Running Process" },
-      { slug: "prereq-c",             title: "Just Enough C to Read the Kernel" },
-      { slug: "prereq-tools",         title: "Reading the Evidence: man, /proc & Kernel Source" },
+      { slug: "prereq-overview", title: "What This Book Assumes",
+        desc: "Assumed knowledge, what is not taught here, and a self-assessment for Part 0." },
+      { slug: "prereq-hardware", title: "The Machine Underneath: CPU, Memory & Devices",
+        desc: "Registers, hex addresses, the memory hierarchy, multicore, MMIO, DMA and firmware." },
+      { slug: "prereq-programs", title: "From Source Code to Running Process",
+        desc: "ELF, static vs dynamic linking, the dynamic linker, and why a program must ask the kernel." },
+      { slug: "prereq-c", title: "Just Enough C to Read the Kernel",
+        desc: "Pointers, structs, ops tables, container_of and list_head — enough C to read, not write." },
+      { slug: "prereq-tools", title: "Reading the Evidence: man, /proc & Kernel Source",
+        desc: "man page sections, /proc and /sys as windows, dmesg, and reading source on Elixir." },
     ],
   },
   {
     part: "Part I — Foundations",
+    blurb: "What Linux actually is, how a machine gets from firmware to a login prompt, and the one boundary everything else stands on.",
     chapters: [
-      { slug: "what-is-linux",        title: "What Is Linux, Really?" },
-      { slug: "boot-process",         title: "From Power Button to Login" },
-      { slug: "kernel-vs-userspace",  title: "Kernel, User Space & Syscalls" },
+      { slug: "what-is-linux", title: "What Is Linux, Really?",
+        desc: "Kernel vs distro, the monolithic design, a syscall in slow motion, everything is a file." },
+      { slug: "boot-process", title: "From Power Button to Login",
+        desc: "UEFI, GRUB, the initramfs, PID 1 and systemd — every actor from power-on to login." },
+      { slug: "kernel-vs-userspace", title: "Kernel, User Space & Syscalls",
+        desc: "Rings 0 and 3, the syscall entry path, file descriptors, the vDSO, mode vs context switch." },
     ],
   },
   {
     part: "Part II — Core Kernel Subsystems",
+    blurb: "The load-bearing walls: processes, the scheduler, virtual memory, interrupts, timers, filesystems, storage, devices and the network stack.",
     chapters: [
-      { slug: "processes",            title: "Processes & Threads" },
-      { slug: "scheduling",           title: "CPU Scheduling" },
-      { slug: "memory",               title: "Virtual Memory" },
-      { slug: "interrupts",           title: "Interrupts, Exceptions & Softirqs" },
-      { slug: "timers",               title: "Timers & Time: jiffies, hrtimers & Tickless" },
-      { slug: "filesystems",          title: "Files, Filesystems & the VFS" },
-      { slug: "storage-stack",        title: "The Linux Storage Stack" },
-      { slug: "devices-modules",      title: "Devices, Drivers & Modules" },
-      { slug: "networking",           title: "The Networking Stack" },
-      { slug: "tcp-congestion",       title: "TCP Congestion Control & Tuning" },
+      { slug: "processes", title: "Processes & Threads",
+        desc: "task_struct, fork and exec, wait() and zombies, and threads as processes that share." },
+      { slug: "scheduling", title: "CPU Scheduling",
+        desc: "EEVDF fair-share, runqueues, preemption, load balancing, and what load average means." },
+      { slug: "memory", title: "Virtual Memory",
+        desc: "VMAs, page tables, page faults, the page cache, swap, THP, KSM and the OOM killer." },
+      { slug: "interrupts", title: "Interrupts, Exceptions & Softirqs",
+        desc: "The IDT, hardirq rules, MSI-X, softirqs, tasklets and workqueues, and IRQ affinity." },
+      { slug: "timers", title: "Timers & Time: jiffies, hrtimers & Tickless",
+        desc: "clocksource and clockevents, jiffies, the timer wheel, hrtimers, NTP and NO_HZ." },
+      { slug: "filesystems", title: "Files, Filesystems & the VFS",
+        desc: "The VFS, inodes and dentries, mounts, journaling — and why mounts are per-process." },
+      { slug: "storage-stack", title: "The Linux Storage Stack",
+        desc: "Page cache, bio, blk-mq, I/O schedulers, device mapper, md-raid, NVMe and I/O cgroups." },
+      { slug: "devices-modules", title: "Devices, Drivers & Modules",
+        desc: "Drivers as translators, /dev and /sys, loadable modules, DMA, and udev rules." },
+      { slug: "networking", title: "The Networking Stack",
+        desc: "Sockets, the sk_buff, a packet's journey, routing, netfilter, XDP and the veth toolbox." },
+      { slug: "tcp-congestion", title: "TCP Congestion Control & Tuning",
+        desc: "cwnd and the ACK clock, CUBIC vs BBR, the sysctls, bufferbloat and FQ-CoDel." },
     ],
   },
   {
     part: "Part III — IPC, Signals & Pipes",
+    blurb: "How processes interrupt and talk to each other — signal delivery, pipes, FIFOs and Unix sockets, the plumbing under every shell and runtime.",
     chapters: [
-      { slug: "signals",              title: "Signals: The Kernel's Asynchronous Notifications" },
-      { slug: "ipc-pipes",            title: "Pipes, FIFOs & Unix Sockets" },
+      { slug: "signals", title: "Signals: The Kernel's Asynchronous Notifications",
+        desc: "Delivery and the pending mask, handlers, SIGKILL and SIGSTOP, job control, core dumps." },
+      { slug: "ipc-pipes", title: "Pipes, FIFOs & Unix Sockets",
+        desc: "Anonymous pipes, FIFOs and Unix sockets — the plumbing behind shells and runtimes." },
     ],
   },
   {
     part: "Part IV — Containers, From Scratch",
+    blurb: "There is no container object in the kernel: namespaces, cgroups, OverlayFS and pivot_root, assembled by hand before meeting Docker and runc.",
     chapters: [
-      { slug: "containers-overview",  title: "What a Container Actually Is" },
-      { slug: "namespaces",           title: "Namespaces" },
-      { slug: "cgroups",              title: "Control Groups (cgroup v2)" },
-      { slug: "overlayfs",            title: "Images & OverlayFS" },
-      { slug: "build-a-container",    title: "Build a Container by Hand" },
-      { slug: "container-runtimes",   title: "Docker, containerd, runc" },
-      { slug: "container-networking", title: "Container Networking" },
+      { slug: "containers-overview", title: "What a Container Actually Is",
+        desc: "No struct container anywhere: just a process the kernel lies to, wearing four disguises." },
+      { slug: "namespaces", title: "Namespaces",
+        desc: "All eight types — UTS, PID, mount, net, user, time — plus nsproxy, unshare and setns." },
+      { slug: "cgroups", title: "Control Groups (cgroup v2)",
+        desc: "Controllers and cgroupfs, memory.max and cpu.max, PSI, delegation, the Docker mapping." },
+      { slug: "overlayfs", title: "Images & OverlayFS",
+        desc: "Layers as tarballs, the overlay union, copy-up cost, whiteouts, and pivot_root." },
+      { slug: "build-a-container", title: "Build a Container by Hand",
+        desc: "A rootfs, namespaces, pivot_root, a cgroup, dropped capabilities and a seccomp filter." },
+      { slug: "container-runtimes", title: "Docker, containerd, runc",
+        desc: "The Docker, containerd and runc stack, the OCI specs, podman, and where Kubernetes fits." },
+      { slug: "container-networking", title: "Container Networking",
+        desc: "veth pairs, a software bridge, NAT and port publishing as DNAT, plus the mode menu." },
     ],
   },
   {
     part: "Part V — Checkpoint/Restore",
+    blurb: "Freeze a running process, write it to disk, rebuild it elsewhere — CRIU end to end, live migration, and the GPU case that breaks it.",
     chapters: [
-      { slug: "process-state",        title: "The Anatomy of Process State" },
-      { slug: "criu-dump",            title: "CRIU: Dumping a Live Process" },
-      { slug: "criu-restore",         title: "CRIU: The Restore" },
-      { slug: "live-migration",       title: "Live Migration: Iterative, Lazy & TCP Repair" },
-      { slug: "snapshot-taxonomy",    title: "The Snapshot Taxonomy: CRIU, gVisor & microVMs" },
-      { slug: "gpu-checkpoint",       title: "GPU Checkpointing: cuda-checkpoint & CRIU Plugins" },
+      { slug: "process-state", title: "The Anatomy of Process State",
+        desc: "A full inventory of task state, the three visibility tiers, and ptrace as the master key." },
+      { slug: "criu-dump", title: "CRIU: Dumping a Live Process",
+        desc: "Freezing the tree, harvesting /proc, injecting the parasite, and the protobuf image set." },
+      { slug: "criu-restore", title: "CRIU: The Restore",
+        desc: "The morphing trick, PID reservation, the fd graph, the restorer blob and rt_sigreturn." },
+      { slug: "live-migration", title: "Live Migration: Iterative, Lazy & TCP Repair",
+        desc: "Soft-dirty pre-copy, userfaultfd post-copy, TCP repair — and the downtime equation." },
+      { slug: "snapshot-taxonomy", title: "The Snapshot Taxonomy: CRIU, gVisor & microVMs",
+        desc: "runc checkpoint up to the kubelet, and the four places to draw a snapshot boundary." },
+      { slug: "gpu-checkpoint", title: "GPU Checkpointing: cuda-checkpoint & CRIU Plugins",
+        desc: "Why CUDA breaks CRIU: the plugin hooks, cuda-checkpoint, and the unified-memory frontier." },
     ],
   },
   {
     part: "Part VI — Hardware & Platform",
+    blurb: "Where the kernel meets the silicon: frequency and idle states, NUMA topology, isolated CPUs, and the speculative-execution tax.",
     chapters: [
-      { slug: "power-management",     title: "Power Management: Governors, C-States & ACPI" },
-      { slug: "numa-deep-dive",       title: "NUMA Deep Dive" },
-      { slug: "cpu-isolation",        title: "CPU Isolation, NO_HZ & Real-Time" },
-      { slug: "cpu-mitigations",      title: "CPU Vulnerability Mitigations" },
+      { slug: "power-management", title: "Power Management: Governors, C-States & ACPI",
+        desc: "cpufreq governors and P-states, C-states and the idle loop, suspend, hibernate, ACPI." },
+      { slug: "numa-deep-dive", title: "NUMA Deep Dive",
+        desc: "Nodes and the SLIT matrix, allocation policy, NUMA balancing, and the classic pathologies." },
+      { slug: "cpu-isolation", title: "CPU Isolation, NO_HZ & Real-Time",
+        desc: "isolcpus and nohz_full, cpuset partitions, SCHED_FIFO, PREEMPT_RT and cyclictest." },
+      { slug: "cpu-mitigations", title: "CPU Vulnerability Mitigations",
+        desc: "Spectre and Meltdown, KPTI, retpolines, L1TF and MDS — and what the mitigations cost." },
     ],
   },
   {
     part: "Part VII — Modern Kernel",
+    blurb: "The last decade of kernel change: eBPF as a substrate, the confinement stack, measured boot, io_uring, and Rust in the tree.",
     chapters: [
-      { slug: "ebpf-internals",       title: "eBPF Internals" },
-      { slug: "security-hardening",   title: "Linux Security & Confinement" },
-      { slug: "trusted-computing",    title: "Trusted Computing: Secure Boot, TPM & IMA" },
-      { slug: "modern-io",            title: "Modern I/O & io_uring" },
-      { slug: "rust-kernel",          title: "Rust in the Linux Kernel" },
+      { slug: "ebpf-internals", title: "eBPF Internals",
+        desc: "Programs, maps, helpers, the verifier and JIT, BTF and CO-RE, XDP and TC, LSM BPF." },
+      { slug: "security-hardening", title: "Linux Security & Confinement",
+        desc: "Credentials, DAC, capabilities, seccomp, LSMs, Landlock and lockdown as one path." },
+      { slug: "trusted-computing", title: "Trusted Computing: Secure Boot, TPM & IMA",
+        desc: "Secure Boot, TPM PCRs and measured boot, IMA, LUKS2 with TPM2, confidential computing." },
+      { slug: "modern-io", title: "Modern I/O & io_uring",
+        desc: "Blocking calls to epoll to io_uring: SQ/CQ rings, registered buffers, SQPOLL, multishot." },
+      { slug: "rust-kernel", title: "Rust in the Linux Kernel",
+        desc: "Why memory safety, what has merged since 6.1, and how safe abstractions wrap the C." },
     ],
   },
   {
     part: "Part VIII — Virtualization",
+    blurb: "How the kernel becomes a hypervisor: the KVM module, the vCPU loop, VM exits, nested page tables and virtio devices.",
     chapters: [
-      { slug: "kvm-internals",        title: "KVM & Virtualization Internals" },
+      { slug: "kvm-internals", title: "KVM & Virtualization Internals",
+        desc: "The KVM API, the vCPU loop, VM exits, EPT and NPT, virtio, and the steal-time problem." },
     ],
   },
   {
     part: "Part IX — Kernel Engineering",
+    blurb: "The craft side: locking and RCU, how a patch actually becomes kernel law, and the tools and methods for finding what is slow.",
     chapters: [
-      { slug: "kernel-sync",          title: "Kernel Synchronization: Locks, Atomics & RCU" },
-      { slug: "kernel-governance",    title: "How the Kernel Is Made: Process & Governance" },
-      { slug: "observability",        title: "/proc, strace, perf & eBPF" },
-      { slug: "perf-methodology",     title: "Performance Analysis Methodology" },
+      { slug: "kernel-sync", title: "Kernel Synchronization: Locks, Atomics & RCU",
+        desc: "Atomics, spinlocks, mutexes, seqlocks, RCU, and the memory barriers that make them work." },
+      { slug: "kernel-governance", title: "How the Kernel Is Made: Process & Governance",
+        desc: "The merge window, the maintainer chain, patches on the list, stable and LTS, the culture." },
+      { slug: "observability", title: "/proc, strace, perf & eBPF",
+        desc: "From /proc reads to strace, perf and bpftrace — with the cost model for each layer." },
+      { slug: "perf-methodology", title: "Performance Analysis Methodology",
+        desc: "USE and RED, workload characterization, the 60-second checklist, and flame graphs." },
     ],
   },
   {
     part: "Part X — Tools & Going Deeper",
+    blurb: "Stop reading about the source and open it: the tree layout, Kconfig and Kbuild, and a kernel built and booted in a throwaway VM.",
     chapters: [
-      { slug: "kernel-dev",           title: "Reading & Building the Kernel" },
+      { slug: "kernel-dev", title: "Reading & Building the Kernel",
+        desc: "The tree layout, Kconfig and Kbuild, a kernel built and booted in a VM, a first module." },
     ],
   },
   {
     part: "Part XI — Hands-On Labs",
+    blurb: "Six sessions at a real root shell — the OOM killer, the page cache, cgroup throttling, a kernel module, CRIU and userfaultfd.",
     chapters: [
-      { slug: "lab-oom-killer",       title: "Lab: Trigger & Autopsy the OOM Killer" },
-      { slug: "lab-page-cache",       title: "Lab: Watch the Page Cache Work" },
-      { slug: "lab-cgroup-limits",    title: "Lab: Throttle a Process with cgroup v2" },
-      { slug: "lab-kernel-module",    title: "Lab: Write, Build & Load a Kernel Module" },
-      { slug: "lab-criu",             title: "Lab: Checkpoint & Restore a Real Process" },
-      { slug: "lab-userfaultfd",      title: "Lab: Serve Page Faults from Userspace" },
+      { slug: "lab-oom-killer", title: "Lab: Trigger & Autopsy the OOM Killer",
+        desc: "A cgroup-local OOM kill, the dmesg autopsy line by line, oom_score_adj and PSI." },
+      { slug: "lab-page-cache", title: "Lab: Watch the Page Cache Work",
+        desc: "Cold vs hot reads, dirty pages draining, mincore, drop_caches, minor vs major faults." },
+      { slug: "lab-cgroup-limits", title: "Lab: Throttle a Process with cgroup v2",
+        desc: "A cgroup made by hand: cpu.max throttling, cpu.weight sharing, memory.max and reclaim." },
+      { slug: "lab-kernel-module", title: "Lab: Write, Build & Load a Kernel Module",
+        desc: "hello.c and a kbuild Makefile, insmod and modinfo, module params, seq_file, DKMS." },
+      { slug: "lab-criu", title: "Lab: Checkpoint & Restore a Real Process",
+        desc: "A counting process frozen and restored mid-count, then autopsied with CRIT." },
+      { slug: "lab-userfaultfd", title: "Lab: Serve Page Faults from Userspace",
+        desc: "A C fault server that fills missing pages: register, read, ioctl — timed and broken." },
     ],
   },
   {
     part: "Reference",
+    blurb: "Roughly seventy terms the book leans on, each defined in a sentence or two and linked to the chapter that treats it properly.",
     chapters: [
-      { slug: "glossary",             title: "Glossary" },
+      { slug: "glossary", title: "Glossary",
+        desc: "About seventy terms, each defined in a sentence and linked to its real chapter." },
     ],
   },
 ];
 
 /* flat ordered list used for routing and prev/next */
 const FLAT = BOOK.flatMap(p => p.chapters);
-const HOME_SLUG = FLAT[0].slug;
 const TITLE_OF = Object.fromEntries(FLAT.map(ch => [ch.slug, ch.title]));
+
+/* scroll-memory key for the course home; "@" can never appear in a slug
+   because it is the chapter/anchor separator in the hash */
+const HOME_KEY = "@home";
 
 const LEVEL_LABEL = {
   core:      "fundamentals",
@@ -298,7 +371,7 @@ function queueRememberScroll() {
   if (scrollSaveTimer) return;
   scrollSaveTimer = setTimeout(() => {
     scrollSaveTimer = null;
-    rememberScroll(currentSlug());
+    rememberScroll(scrollKey());
   }, 250);
 }
 
@@ -323,9 +396,9 @@ function restoreScroll(slug) {
 }
 
 /* persist the position before the tab is hidden or reloaded */
-window.addEventListener("pagehide", () => rememberScroll(currentSlug()));
+window.addEventListener("pagehide", () => rememberScroll(scrollKey()));
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") rememberScroll(currentSlug());
+  if (document.visibilityState === "hidden") rememberScroll(scrollKey());
 });
 
 /* ---------------- auto-hiding "Contents" bar (tablet / phone) ----------------
@@ -360,9 +433,10 @@ let autoReadArmed = false;
 window.addEventListener("scroll", () => {
   const h = document.documentElement.scrollHeight - window.innerHeight;
   progressEl.style.width = h > 0 ? (scrollY / h) * 100 + "%" : "0%";
-  if (autoReadArmed && h > 400 && scrollY > h - 120) {
+  const slug = currentSlug();
+  if (autoReadArmed && slug && h > 400 && scrollY > h - 120) {
     autoReadArmed = false;
-    markRead(currentSlug());
+    markRead(slug);
   }
   updatePageTocSpy();
   updateToggleBar();
@@ -510,9 +584,21 @@ function parseHash() {
   return { slug, anchor };
 }
 
+/* An empty or unknown hash is the course home, not chapter one. */
+function currentRoute() {
+  const { slug, anchor } = parseHash();
+  if (slug && FLAT.some(ch => ch.slug === slug)) return { kind: "chapter", slug, anchor };
+  return { kind: "home" };
+}
+
+/* the slug being read, or null on the course home */
 function currentSlug() {
-  const { slug } = parseHash();
-  return FLAT.some(ch => ch.slug === slug) ? slug : HOME_SLUG;
+  const r = currentRoute();
+  return r.kind === "chapter" ? r.slug : null;
+}
+
+function scrollKey() {
+  return currentSlug() || HOME_KEY;
 }
 
 function markActive(slug) {
@@ -532,10 +618,16 @@ function renderPager(slug) {
   pagerEl.innerHTML =
     (prev ? `<a class="prev" href="#/${prev.slug}">` +
             `<span class="pager-label">&larr; previous</span>` +
-            `<span class="pager-title">${prev.title}</span></a>` : "<span></span>") +
+            `<span class="pager-title">${prev.title}</span></a>`
+          : `<a class="prev" href="#/">` +
+            `<span class="pager-label">&larr; back</span>` +
+            `<span class="pager-title">Course home</span></a>`) +
     (next ? `<a class="next" href="#/${next.slug}">` +
             `<span class="pager-label">next &rarr;</span>` +
-            `<span class="pager-title">${next.title}</span></a>` : "<span></span>");
+            `<span class="pager-title">${next.title}</span></a>`
+          : `<a class="next" href="#/">` +
+            `<span class="pager-label">finish &rarr;</span>` +
+            `<span class="pager-title">Back to the course map</span></a>`);
 }
 
 let lastSlug = null;
@@ -553,7 +645,7 @@ async function loadChapter(slug, anchor) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { meta, body } = parseFrontmatter(await res.text());
 
-    articleEl.classList.remove("fade-in");
+    articleEl.className = "article";       // the home view borrows this element
     articleEl.innerHTML = marked.parse(body);
 
     /* insert the meta banner right after the H1 */
@@ -614,6 +706,113 @@ python3 -m http.server 8000</code></pre>
   if (pageTocEl) pageTocEl.innerHTML = "";
 }
 
+/* ---------------- course home ----------------
+   The front door: what this book is, how far you are through it,
+   and every chapter on one map. Reached at #/ — the empty hash no
+   longer drops a first-time visitor into the middle of a chapter. */
+
+function renderHome() {
+  markActive(null);
+  lastSlug = null;                    // the home view replaces the article element
+  autoReadArmed = false;
+  document.title = "The Linux Deep Dive — How Your System Really Works";
+
+  const set  = readSet();
+  const done = FLAT.filter(ch => set.has(ch.slug)).length;
+  const pct  = Math.round((done / FLAT.length) * 100);
+  const next = FLAT.find(ch => !set.has(ch.slug)) || FLAT[0];
+  const started = done > 0;
+
+  /* progress ring geometry */
+  const R = 52, C = 2 * Math.PI * R;
+  const offset = C - (pct / 100) * C;
+
+  let n = 0;
+  const parts = BOOK.map((part, pi) => {
+    const chapters = part.chapters.map(ch => {
+      n += 1;
+      const doneCls = set.has(ch.slug) ? " done" : "";
+      return `
+        <a class="chapter-card${doneCls}" href="#/${ch.slug}">
+          <span class="card-check" aria-hidden="true"></span>
+          <span class="card-num">${String(n).padStart(2, "0")}</span>
+          <span class="card-body">
+            <span class="card-title">${ch.title}</span>
+            <span class="card-desc">${ch.desc}</span>
+          </span>
+          <span class="card-arrow" aria-hidden="true">&rarr;</span>
+        </a>`;
+    }).join("");
+    const count = part.chapters.length;
+    return `
+      <section class="module">
+        <header class="module-head">
+          <span class="module-index">${String(pi + 1).padStart(2, "0")}</span>
+          <div>
+            <h2>${part.part}</h2>
+            <p class="module-blurb">${part.blurb}</p>
+          </div>
+          <span class="lvl-badge">${count} chapter${count > 1 ? "s" : ""}</span>
+        </header>
+        <div class="chapter-grid">${chapters}</div>
+      </section>`;
+  }).join("");
+
+  articleEl.className = "home";
+  articleEl.innerHTML = `
+      <header class="hero">
+        <div class="hero-text">
+          <p class="hero-kicker">A field guide · ${FLAT.length} chapters · Linux 6.12</p>
+          <h1>The Linux Deep Dive</h1>
+          <p class="hero-lede">
+            Everything above the command line is built on machinery you are
+            allowed to look at. This book connects the behaviour you already
+            see — a process that hangs, a container that starts, a page fault,
+            a checkpointed job coming back on another host — to the kernel code
+            responsible for it, naming the structures, quoting the interfaces
+            and pointing at the source. Read it in order, or take one of the
+            six paths through it.
+          </p>
+          <div class="hero-actions">
+            <a class="btn-primary" href="#/${next.slug}">
+              ${started ? "Continue — " + next.title : "Start reading"}
+            </a>
+            <span class="hero-hint">${started
+              ? `${done} of ${FLAT.length} chapters read`
+              : "No account, no sign-up — your place is kept in this browser"}</span>
+          </div>
+        </div>
+        <div class="hero-ring" role="img" aria-label="${pct}% of the book read">
+          <svg viewBox="0 0 120 120" width="132" height="132">
+            <circle cx="60" cy="60" r="${R}" class="ring-track"/>
+            <circle cx="60" cy="60" r="${R}" class="ring-fill"
+                    stroke-dasharray="${C.toFixed(1)}"
+                    stroke-dashoffset="${offset.toFixed(1)}"
+                    transform="rotate(-90 60 60)"/>
+          </svg>
+          <div class="ring-label"><strong>${pct}%</strong><span>read</span></div>
+        </div>
+      </header>
+
+      <p class="path-legend">Chapters tick themselves off when you reach the end of one,
+        and the control at the top of every chapter marks one by hand. (The two guided
+        courses in the sidebar work differently: there, a chapter counts as complete once
+        you pass its end-of-chapter quiz.)</p>
+
+      ${parts}`;
+
+  /* replay the entrance animation on every visit to the home route */
+  void articleEl.offsetWidth;
+  articleEl.classList.add("fade-in");
+
+  pagerEl.innerHTML = "";
+  if (pageTocEl) pageTocEl.innerHTML = "";
+
+  if (!booted) restoreScroll(HOME_KEY);                    // reload: keep your place
+  else window.scrollTo({ top: 0, behavior: "instant" });
+  booted = true;
+}
+
 function scrollToAnchor(anchor) {
   const el = document.getElementById(anchor);
   if (el) {
@@ -633,8 +832,9 @@ function setSidebar(open) {
 }
 
 function route() {
-  const { anchor } = parseHash();
-  loadChapter(currentSlug(), anchor);
+  const r = currentRoute();
+  if (r.kind === "home") renderHome();
+  else loadChapter(r.slug, r.anchor);
   setSidebar(false);
 }
 
@@ -652,6 +852,7 @@ async function buildSearchIndex() {
   const docs = await Promise.all(FLAT.map(async ch => {
     try {
       const res = await fetch(`content/${ch.slug}.md`, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);   // never index an error page as a chapter
       const { body } = parseFrontmatter(await res.text());
       const text = body
         .replace(/```[\s\S]*?```/g, " ")

@@ -1,6 +1,12 @@
-/* Distributed Systems course-only presentation.
-   The product shell, typography, article, navigation, search, themes,
-   responsive layout, focus states and motion live in ../../assets/style.css. */
+/* ============================================================
+   Course presentation — shared by all three courses.
+   The course home (hero, progress ring, module map, chapter
+   cards), the quiz blocks and the completion control.
+
+   The product shell — typography, article, navigation, search,
+   themes, responsive layout, focus states and motion — lives in
+   style.css, which every page loads first.
+   ============================================================ */
 
 :root {
   --quiz-good: #9fbf7f;
@@ -19,6 +25,9 @@ html[data-theme="paper"] {
   margin: 0 auto;
   padding: 3.25rem var(--gutter) 2rem;
 }
+
+.home.fade-in { animation: fadeIn 0.35s ease-out; }
+@media (prefers-reduced-motion: reduce) { .home.fade-in { animation: none; } }
 
 .hero {
   display: flex;
@@ -58,20 +67,6 @@ html[data-theme="paper"] {
 .hero-lede { margin: 1rem 0 1.5rem; }
 .hero-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .hero-hint { color: var(--text-faint); font-size: 0.85rem; font-style: italic; }
-
-.btn-primary {
-  display: inline-block;
-  padding: 0.62rem 1.25rem;
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  background: var(--accent);
-  color: var(--bg);
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.btn-primary:hover { filter: brightness(1.08); }
 
 .hero-ring { position: relative; flex-shrink: 0; }
 .ring-track { fill: none; stroke: var(--rule); stroke-width: 6; }

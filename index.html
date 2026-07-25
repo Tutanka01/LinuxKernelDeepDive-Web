@@ -12,7 +12,8 @@
       if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="assets/style.css?v=20260719">
+  <link rel="stylesheet" href="assets/style.css?v=20260725">
+  <link rel="stylesheet" href="assets/course.css?v=20260725">
   <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
 <body>
@@ -39,17 +40,25 @@
         <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
         <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
       </div>
+
+      <nav class="course-switch" aria-label="Courses on this site">
+        <p class="course-switch-title">Courses</p>
+        <span class="course-chip current" aria-current="page">
+          <span class="chip-title">The Linux Deep Dive</span>
+          <span class="chip-desc">56 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
+        </span>
+        <a class="course-chip" href="distributed/">
+          <span class="chip-title">Distributed Systems</span>
+          <span class="chip-desc">13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span>
+        </a>
+        <a class="course-chip" href="inference/">
+          <span class="chip-title">Inference Engineering</span>
+          <span class="chip-desc">17 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
+        </a>
+      </nav>
+
       <div id="toc"><!-- table of contents injected by app.js --></div>
-      <a class="side-course" href="distributed/index.html">
-        <span class="side-course-kicker">Standalone course</span>
-        <span class="side-course-title">Distributed Systems →</span>
-        <span class="side-course-desc">A guided journey from first principles to Raft, Spanner &amp; CRDTs.</span>
-      </a>
-      <a class="side-course" href="inference/index.html">
-        <span class="side-course-kicker">Standalone course</span>
-        <span class="side-course-title">Inference Engineering →</span>
-        <span class="side-course-desc">How LLMs are actually served: rooflines, engines, kernels &amp; rack-scale systems.</span>
-      </a>
+
       <div class="sidebar-footer">
         <p id="progress-summary"></p>
         <p>Written as plain Markdown,<br>rendered in your browser.</p>

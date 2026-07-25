@@ -1,27 +1,16 @@
-# The Linux Deep Dive
+# Deep Dive Courses
 
-The Linux Deep Dive is a source-level field guide to how Linux works beneath the command line. It connects familiar system behavior to the kernel machinery responsible for it: processes and scheduling, virtual memory, filesystems and storage, networking, containers, checkpoint/restore, virtualization, security, observability, and modern kernel interfaces.
+Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **86 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
 
-The guide contains **56 chapters** and is pinned to **Linux kernel 6.12**. Discussions name the relevant structures and functions, link into the matching kernel source, call out version-dependent behavior, and pair explanations with commands and labs that let you inspect the mechanisms on a real system.
+| Course | Chapters | URL | Scope |
+|---|---:|---|---|
+| The Linux Deep Dive | 56 | `/` | Kernel internals from processes and virtual memory through containers, checkpoint/restore, eBPF and KVM, pinned to Linux 6.12 |
+| Distributed Systems | 13 | `/distributed/` | A guided course from partial failure and logical clocks through replication, consensus and CRDTs |
+| Inference Engineering | 17 | `/inference/` | A guided course on LLM serving: the roofline, KV cache, batching, quantization, kernels and disaggregated fleets |
 
-This repository is also the website. Chapters are plain Markdown files under `content/`; a small client-side application loads and renders them without a framework or build step.
+This repository is also the website. Chapters are plain Markdown files under each course's `content/` directory; a small client-side application fetches and renders them with no framework and no build step.
 
-## Features
-
-- A 56-chapter curriculum, from hardware and C prerequisites through kernel internals and hands-on labs
-- Source-level explanations and links pinned to Linux 6.12
-- A custom client-side Markdown reader built with vanilla HTML, CSS, and JavaScript
-- Full-text chapter search (`/` or `Ctrl/Cmd-K`)
-- Heading anchors, deep links, an on-page outline, and previous/next keyboard navigation
-- Terminal-style dark and paper-style light themes
-- Per-chapter metadata for difficulty, reading time, verification date, kernel version, and prerequisites
-- Reading progress stored locally in the browser
-- Syntax-highlighted code, Mermaid diagrams, and collapsible review answers
-- Responsive navigation for desktop and mobile
-- Six guided learning paths for different goals, including containers, performance, security, kernel development, and checkpoint/restore
-- Six practical labs designed to turn kernel behavior into observable evidence
-- Docker deployment with nginx and no application build step
-- A separate 13-chapter distributed systems course included in the same deployment
+Each course is standalone — its own outline, reader, search index, and progress. A course switcher sits at the top of every sidebar.
 
 ## Run with Docker
 
@@ -31,7 +20,11 @@ You need Docker Engine with Docker Compose available. From the repository root, 
 docker compose up --build
 ```
 
-Open <http://localhost:8081> for the Linux course. The distributed systems course is available at <http://localhost:8081/distributed/>.
+Then open:
+
+- <http://localhost:8081/> — The Linux Deep Dive
+- <http://localhost:8081/distributed/> — Distributed Systems
+- <http://localhost:8081/inference/> — Inference Engineering
 
 To run in the background:
 
@@ -45,11 +38,15 @@ Stop the site with:
 docker compose down
 ```
 
-The container serves the repository as static files through nginx. The reader loads Markdown with `fetch()`, so opening `index.html` directly through a `file://` URL will not work. An internet connection is also required for the CDN-hosted copies of marked, highlight.js, and Mermaid.
+The container serves the repository as static files through nginx. The readers load Markdown with `fetch()`, so opening `index.html` directly through a `file://` URL will not work. An internet connection is also required for the CDN-hosted copies of marked and highlight.js, plus Mermaid in the Linux course.
 
-## Curriculum overview
+## The Linux Deep Dive
 
-The main curriculum is organized as follows:
+A source-level field guide to how Linux works beneath the command line. It connects familiar system behavior to the kernel machinery responsible for it: processes and scheduling, virtual memory, filesystems and storage, networking, containers, checkpoint/restore, virtualization, security, observability, and modern kernel interfaces.
+
+The course is pinned to **Linux kernel 6.12**. Discussions name the relevant structures and functions, link into the matching kernel source, call out version-dependent behavior, and pair explanations with commands and labs that let you inspect the mechanisms on a real system. It also defines six guided reading paths for different goals, including containers, performance, security, kernel development, and checkpoint/restore.
+
+### Curriculum
 
 | Section | Chapters | Topics |
 |---|---:|---|
@@ -66,11 +63,11 @@ The main curriculum is organized as follows:
 | Part IX — Kernel Engineering | 4 | Locks, atomics, RCU, kernel governance, observability, and performance methodology |
 | Part X — Tools & Going Deeper | 1 | Reading and building the Linux kernel |
 | Part XI — Hands-On Labs | 6 | Guided experiments with memory, cgroups, modules, CRIU, and userfaultfd |
-| Reference | 1 | A cross-course glossary |
+| Reference | 1 | A glossary of kernel and systems terms, listed in this course's outline |
 
 That is **56 entries in total**: the opening guide, five prerequisite chapters, 43 core chapters, six labs, and the glossary.
 
-## Prerequisites
+### Prerequisites
 
 The course assumes basic Linux terminal fluency: navigating files, running commands, reading errors, editing text, using simple pipes and redirection, installing packages, and connecting over SSH. It does not assume prior kernel development experience.
 
@@ -85,7 +82,7 @@ Readers already comfortable with C, CPU registers, ELF files, hexadecimal addres
 
 Reading the text only requires a modern browser. Following the examples requires a Linux system or VM and common command-line tools. Individual chapters and labs list any additional packages they need.
 
-## Hands-on labs
+### Hands-on labs
 
 The six labs are:
 
@@ -98,41 +95,91 @@ The six labs are:
 
 Use a disposable Linux VM for the labs unless a lab explicitly says otherwise. In particular, the OOM and kernel-module exercises can disrupt or crash a system, and privileged containers still share the host kernel. Do not run destructive experiments on a machine whose uptime or data matters.
 
-## Distributed Systems course
+## Distributed Systems
 
 The `distributed/` directory contains a standalone course rather than an appendix to the Linux guide. Its **13 chapters** progress through five modules:
 
-- distributed-system fundamentals, hostile networks, partial failure, and failure detection;
-- physical time, clock behavior, logical clocks, vector clocks, and causality;
-- replication, consistency models, CAP/PACELC, partitioning, and sharding;
-- consensus, Paxos intuition, Raft, and distributed transactions; and
-- CRDTs, gossip, anti-entropy, and real-world architectures such as etcd, Kafka, Dynamo, Spanner, and Kubernetes.
+- **Foundations** — what a distributed system is, hostile networks, partial failure, timeouts and idempotency, failure models from crash-stop to Byzantine, and failure detection;
+- **Time & Order** — clock drift, NTP, monotonic versus wall time, happens-before, Lamport and vector clocks, and causality;
+- **Data at Scale** — leader-follower and leaderless replication, quorums, consistency models from linearizability to eventual, CAP and PACELC, partitioning, consistent hashing, and hot keys;
+- **Coordination** — why agreement is hard, FLP, Paxos intuition, Raft end to end, two-phase commit, sagas, and the exactly-once myth; and
+- **Advanced Systems** — CRDTs, gossip and anti-entropy, Merkle trees, and real-world architectures including ZooKeeper/etcd, Kafka, Dynamo, Spanner, and Kubernetes.
 
-The course has its own reader, navigation, quizzes, reading-time estimates, and browser-local completion tracking. Its entry point is `distributed/index.html`, and Docker serves it under `/distributed/`.
+Its entry point is `distributed/index.html`, served under `/distributed/`.
+
+## Inference Engineering
+
+The `inference/` directory contains a second standalone guided course, built on the same engine. Its **17 chapters** progress through six modules:
+
+- **The Physics** (3) — what actually happens when you call an LLM, tokens and the autoregressive loop, prefill versus decode; the GPU mental model of SMs, HBM, tensor cores and the roofline; and inference arithmetic — KV-cache math, batching, critical batch size, TTFT and TPOT;
+- **The Engine** (3) — continuous batching and iteration-level scheduling, chunked prefill and prefill/decode interference; PagedAttention and prefix caching with block tables, copy-on-write and RadixAttention; and the anatomy of a serving engine, inside vLLM and SGLang;
+- **Squeezing the Model** (3) — attention architectures for serving from MHA to GQA to MLA, sliding-window and sparse attention and SSM hybrids; quantization in FP8, INT4 and FP4 with its evaluation traps; and speculative decoding with draft models, EAGLE and MTP;
+- **Under the Hood** (2) — FlashAttention and decode kernels, online softmax and tiling, FlashDecoding and FlashInfer; and CUDA graphs, `torch.compile`, Triton versus CUTLASS, MoE kernels and Blackwell;
+- **Serving at Scale** (4) — tensor, pipeline, expert and context parallelism; MoE at scale with wide expert parallelism and rack-scale NVLink; disaggregated prefill/decode and the KV fabric, Mooncake, Dynamo, KV tiering and cache-aware routing; and the agentic era of cache-hit economics, RL rollouts and multi-LoRA; and
+- **The Big Picture** (2) — hardware and economics across GPUs, TPUs and SRAM silicon, token prices, margins, benchmarks and energy; and a dated snapshot of the frontier as of mid-2026.
+
+Its entry point is `inference/index.html`, served under `/inference/`.
+
+## Features
+
+### Shared by all three courses
+
+- A custom client-side Markdown reader built with vanilla HTML, CSS, and JavaScript, with no build step
+- A course home at each course's root: what the course is, a progress ring, and every chapter on one map
+- Terminal-style dark and paper-style light themes; the choice carries across courses
+- A collapsible sidebar with a cross-course switcher at the top
+- Full-text search over the current course's chapters (`/` or `Ctrl/Cmd-K`). Search is per-course: it does not index the other two.
+- Keyboard shortcuts: `/` or `Ctrl/Cmd-K` to search, `[` to collapse the sidebar, ←/→ for previous and next chapter, `Esc` to close
+- Syntax-highlighted code and a reading-position bar
+- Responsive navigation for desktop and mobile
+- Progress kept in browser local storage, tracked separately per course
+- Scroll position kept across reloads, so a refresh does not lose your place
+- Docker deployment with nginx and no application build step
+
+### The Linux Deep Dive only
+
+- Per-chapter frontmatter for difficulty, reading time, verification date, kernel version, and prerequisites
+- Heading anchors, deep links of the form `#/slug@heading`, and an on-page outline rail
+- Mermaid diagrams and collapsible review answers
+- Reading progress: a chapter is marked read automatically when you reach the end of it, or by hand with the control in the chapter's meta line. The sidebar shows how many of the 56 chapters are read.
+
+### The two guided courses (Distributed Systems, Inference Engineering)
+
+- Completion is gated on a quiz: every chapter ends with a short multiple-choice checkpoint, and answering all of its questions correctly marks the chapter complete. A manual completion toggle is also available.
+- Reading time estimated from the chapter text rather than declared in frontmatter
+- Per-module difficulty badges, from Beginner to Advanced, on the course home
 
 ## Repository layout
 
 ```text
 .
-├── index.html                 Main Linux course shell
+├── index.html                 Linux course shell
 ├── assets/
-│   ├── app.js                 Curriculum, router, renderer, search, and progress
-│   └── style.css              Responsive terminal and paper themes
+│   ├── style.css              Shared shell: themes, sidebar, article, search, responsive
+│   ├── course.css             Shared course-home presentation: hero, progress ring, chapter cards, quizzes
+│   ├── app.js                 Linux course: curriculum, router, renderer, search, progress
+│   └── course.js              Shared engine for the two guided courses: router, renderer, quizzes, search, progress
 ├── content/                   56 Linux course Markdown chapters
 ├── distributed/
-│   ├── index.html             Distributed systems course shell
-│   ├── assets/                Course-specific reader and styles
-│   └── content/               13 distributed systems chapters
+│   ├── index.html             Distributed Systems course shell
+│   ├── assets/ds.js           Course data (the COURSE array) and config; loads ../assets/course.js
+│   └── content/               13 Distributed Systems chapters
+├── inference/
+│   ├── index.html             Inference Engineering course shell
+│   ├── assets/inf.js          Course data (the COURSE array) and config; loads ../assets/course.js
+│   ├── content/               17 Inference Engineering chapters
+│   └── research/              Source and style notes; excluded from the image by .dockerignore
 ├── Dockerfile                 nginx-based image
 ├── docker-compose.yml         Local deployment on port 8081
-└── nginx.conf                 Static-site nginx configuration
+├── nginx.conf                 Static-site nginx configuration
+└── LICENSE                    GNU AGPL v3
 ```
 
 ## Contributing
 
-Corrections, clearer explanations, stronger diagrams, reproducible examples, and new lab improvements are welcome. Keep contributions concrete and verifiable: this project aims to explain what the kernel actually does, not merely repeat an abstraction.
+Corrections, clearer explanations, stronger diagrams, reproducible examples, and new lab improvements are welcome. Keep contributions concrete and verifiable: this project aims to explain what systems actually do, not merely repeat an abstraction.
 
-For a Linux chapter:
+### For a Linux chapter
 
 1. Edit or add a Markdown file under `content/`.
 2. Include the chapter frontmatter fields used by the reader: `level`, `kernel`, `verified`, `minutes`, and `requires`.
@@ -141,7 +188,33 @@ For a Linux chapter:
 5. Test commands in a clean environment. Mark privileged or destructive steps prominently and recommend a disposable VM when appropriate.
 6. Run the Docker deployment and check navigation, theme behavior, diagrams, links, search, and mobile layout before submitting the change.
 
-For the distributed systems course, chapters live in `distributed/content/` and the course registry is the `COURSE` array in `distributed/assets/ds.js`.
+### For a Distributed Systems or Inference Engineering chapter
+
+1. Edit or add a Markdown file under `distributed/content/` or `inference/content/`. These chapters carry no frontmatter; they open with an `# H1` title and reading time is computed from the text.
+2. For a new chapter, register its `slug`, `title`, and `desc` in the `COURSE` array at the top of `distributed/assets/ds.js` or `inference/assets/inf.js`, inside the module it belongs to. The `desc` is what the chapter card shows on the course home.
+3. End the chapter with a ` ```quiz ` fenced block holding a JSON array of questions. `answer` is a zero-based index into `choices`, and `explain` is revealed after the reader checks their answers:
+
+   ````markdown
+   ```quiz
+   [
+     {
+       "q": "Why are Raft election timeouts randomized?",
+       "choices": [
+         "To make elections cryptographically unpredictable",
+         "So split votes become rare and self-resolving",
+         "To spread CPU load across the cluster",
+         "Because identical timeouts would violate one-vote-per-term"
+       ],
+       "answer": 1,
+       "explain": "Randomization staggers candidacies, letting one node solicit votes before its rivals wake."
+     }
+   ]
+   ```
+   ````
+
+4. Write questions that fail an unprepared reader: every question must be answered correctly to complete the chapter, so avoid choices that are guessable from wording alone.
+5. Mermaid is not loaded in these two courses. Use tables, code, or prose instead of diagram blocks.
+6. Run the Docker deployment and check the course home, the progress ring, quiz grading, search, navigation, and mobile layout before submitting the change.
 
 Please keep prose direct, technical, and approachable. Prefer an observable example, named data structure, code path, or primary source over an unsupported generalization.
 

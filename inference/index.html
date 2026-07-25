@@ -12,8 +12,8 @@
       if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="../assets/style.css?v=20260719">
-  <link rel="stylesheet" href="assets/inf.css?v=20260723">
+  <link rel="stylesheet" href="../assets/style.css?v=20260725">
+  <link rel="stylesheet" href="../assets/course.css?v=20260725">
   <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css">
 </head>
 <body>
@@ -42,19 +42,23 @@
         <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
       </div>
 
+      <nav class="course-switch" aria-label="Courses on this site">
+        <p class="course-switch-title">Courses</p>
+        <a class="course-chip" href="../">
+          <span class="chip-title">The Linux Deep Dive</span>
+          <span class="chip-desc">56 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
+        </a>
+        <a class="course-chip" href="../distributed/">
+          <span class="chip-title">Distributed Systems</span>
+          <span class="chip-desc">13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span>
+        </a>
+        <span class="course-chip current" aria-current="page">
+          <span class="chip-title">Inference Engineering</span>
+          <span class="chip-desc">17 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
+        </span>
+      </nav>
+
       <div id="toc"><!-- course outline injected by inf.js --></div>
-
-      <a class="side-course" href="../index.html">
-        <span class="side-course-kicker">Back to the main guide</span>
-        <span class="side-course-title">&larr; The Linux Deep Dive</span>
-        <span class="side-course-desc">How your system really works — kernel, processes, containers.</span>
-      </a>
-
-      <a class="side-course" href="../distributed/index.html">
-        <span class="side-course-kicker">Sister course</span>
-        <span class="side-course-title">Distributed Systems &rarr;</span>
-        <span class="side-course-desc">First principles to Raft, Spanner &amp; CRDTs — great preparation for Module 5.</span>
-      </a>
 
       <div class="sidebar-footer">
         <p>Your progress is saved locally<br>in this browser.</p>
