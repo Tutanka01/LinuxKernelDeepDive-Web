@@ -44,6 +44,12 @@
       scan();
     },
 
+    /* True when the reader has asked the OS for no motion. The simulator
+       used to autoplay an unbounded rAF loop regardless. */
+    reducedMotion() {
+      return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    },
+
     /* "dark" | "paper" — widgets that draw to canvas need this,
        since a canvas cannot inherit a CSS custom property. */
     theme() {
@@ -90,7 +96,14 @@
       parent.appendChild(wrap);
       const input = wrap.querySelector("input");
       const out = wrap.querySelector(".inf-val");
-      const paint = () => { out.textContent = (opts.format || (v => v))(Number(input.value)); };
+      const paint = () => {
+        const shown = (opts.format || (v => v))(Number(input.value));
+        out.textContent = shown;
+        /* Several of these are *index* sliders: the screen says "32K" while
+           the raw value is 15. Without aria-valuetext a screen reader reads
+           "15 of 18", which is not a number about anything. */
+        input.setAttribute("aria-valuetext", String(shown));
+      };
       input.addEventListener("input", paint);
       paint();
       return input;
@@ -120,17 +133,26 @@
 
     /* A canvas that stays sharp on a HiDPI screen and re-lays-out
        with the reading column. Returns {canvas, ctx, size()}. */
-    canvas(parent, aspect) {
+    canvas(parent, aspect, label) {
       const wrap = document.createElement("div");
       wrap.className = "inf-canvas-wrap";
       const canvas = document.createElement("canvas");
+      /* A canvas is a blank element to assistive tech unless it is told
+         what it is; the simulator is a page whose only content is one. */
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label",
+        label || "Diagram drawn from the controls above; the figures beside it carry the same values.");
       wrap.appendChild(canvas);
       parent.appendChild(wrap);
       const ctx = canvas.getContext("2d");
       let w = 0, h = 0;
       function size() {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        w = Math.max(280, wrap.clientWidth || 640);
+        /* the floor used to exceed the real wrapper at <=320px, squashing a
+           280-logical-px drawing into 276 CSS px and skewing every computed
+           x-coordinate */
+        const avail = wrap.clientWidth || parent.clientWidth || 640;
+        w = Math.max(240, Math.min(avail || 640, 1400));
         h = Math.round(w * (aspect || 0.5));
         canvas.width = Math.round(w * dpr);
         canvas.height = Math.round(h * dpr);

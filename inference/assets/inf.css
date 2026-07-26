@@ -25,13 +25,29 @@
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 1.9rem auto;
+  margin: 0 auto;
   border-radius: 8px;
-  background: #f6f1e6;              /* matches the diagram ground exactly */
+  background: #f6f1e6;              /* matches paper --bg exactly; see note */
 }
 
 html[data-theme="paper"] .article-body img {
   border: 1px solid var(--rule);
+}
+
+/* the diagrams are drawn at 880px; never blow them up past it */
+.figure-scroll img { max-width: min(100%, 880px); }
+
+/* The diagrams are authored 880px wide with 9-12px labels. `max-width:100%`
+   alone rendered them at 0.37 scale on a phone — a 9px label at 3.4px is
+   not a small diagram, it is an absent one. Hold a legible floor and let
+   reader-ui.js's .figure-scroll frame do the scrolling, the same contract
+   the code blocks and tables already had. */
+@media (max-width: 900px) {
+  /* min-width beats max-width, so this lands the diagram at exactly 620px:
+     0.70 scale instead of 0.37, which puts the 9px labels back over 6px,
+     without making the reader drag through the full 880px. */
+  .article-body .figure-scroll img,
+  .figure-scroll img { min-width: 620px; max-width: 100%; }
 }
 
 /* A figure with its own caption: image + the italic line under it. */
@@ -113,21 +129,34 @@ html[data-theme="paper"] .article-body img {
    JavaScript at all.
    ------------------------------------------------------------ */
 
-.article-body details {
+/* style.css:.article details and this block both match a guided chapter
+   (<article class="article"><div class="article-body">) at equal
+   specificity, so the shared panel treatment survived underneath: the
+   other three borders, the radius, the raised background and a monospace
+   summary all leaked through. Reset them explicitly rather than hoping
+   about source order. */
+.article .article-body details {
   margin: 0.75rem 0;
-  padding: 0.15rem 0 0.15rem 0;
+  padding: 0.15rem 0;
+  border: none;
   border-top: 1px solid var(--rule-soft);
+  border-radius: 0;
+  background: none;
 }
 
-.article-body details > summary {
+.article .article-body details > summary {
   cursor: pointer;
   padding: 0.6rem 0.2rem 0.6rem 1.4rem;
   position: relative;
   color: var(--ink);
+  font-family: var(--serif);
   font-weight: 700;
   font-size: 0.97rem;
   list-style: none;
 }
+
+/* the shared rule pads every non-summary child; this design indents them */
+.article .article-body details > *:not(summary) { padding: 0; }
 .article-body details > summary::-webkit-details-marker { display: none; }
 .article-body details > summary::marker { content: ""; }
 
@@ -152,7 +181,7 @@ html[data-theme="paper"] .article-body img {
 .article-body .exercise {
   margin: 1.6rem 0;
   padding: 1rem 1.25rem 0.4rem;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-mid);
   border-radius: 6px;
   background: var(--bg-raised);
 }
@@ -167,6 +196,12 @@ html[data-theme="paper"] .article-body img {
    Glossary — a definition list of short entries, two columns on
    a wide screen and one on a narrow one.
    ------------------------------------------------------------ */
+
+@media (min-width: 900.02px) {
+  .article-body .glossary { columns: 2; column-gap: 2.2rem; }
+  .article-body .glossary div,
+  .article-body .glossary dt { break-inside: avoid; }
+}
 
 .article-body .glossary dt {
   margin-top: 1rem;
@@ -194,7 +229,7 @@ html[data-theme="paper"] .article-body img {
 
 .article-body .inf-widget {
   margin: 1.9rem 0;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-mid);
   border-radius: 8px;
   background: var(--bg-raised);
   overflow: hidden;
@@ -212,11 +247,15 @@ html[data-theme="paper"] .article-body img {
   padding: 0.85rem 1.25rem 0.7rem;
   border-bottom: 1px solid var(--rule);
 }
-.inf-widget-head h4 {
+.inf-widget-head h3 {
   margin: 0;
   color: var(--ink);
   font-size: 1rem;
   font-family: var(--serif);
+  /* a widget title is not a document section: keep it off the h3 scale
+     the chapter body uses, and out of the outline (course.js's page-toc
+     only walks direct children of .article-body) */
+  letter-spacing: 0;
 }
 .inf-widget-head p {
   margin: 0.25rem 0 0;
@@ -260,8 +299,9 @@ html[data-theme="paper"] .article-body img {
 .inf-control select,
 .inf-control input[type="number"] {
   width: 100%;
+  min-height: 2.5rem;
   padding: 0.35rem 0.5rem;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 4px;
   background: var(--bg);
   color: var(--text);
@@ -273,13 +313,16 @@ html[data-theme="paper"] .article-body img {
 .inf-toggle {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  min-height: 44px;
+  gap: 0.5rem;
   color: var(--text-dim);
   font-size: 0.82rem;
   font-family: var(--mono);
   cursor: pointer;
 }
-.inf-toggle input { accent-color: var(--accent); cursor: pointer; }
+/* appearance was stripped globally, so these had no box at all; the
+   restore lives in style.css. Size them for a thumb. */
+.inf-toggle input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 
 /* results: the numbers a calculator produces, each one carrying a
    link back to the chapter whose formula produced it */
@@ -331,6 +374,22 @@ html[data-theme="paper"] .article-body img {
   line-height: 1.55;
 }
 
+/* Simulator controls — thumb-sized, and with a keyboard story. */
+.inf-btn {
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.inf-btn:hover,
+.inf-btn:focus-visible { border-color: var(--accent-dim); color: var(--ink); }
+
 .inf-canvas-wrap { margin-top: 1rem; }
 .inf-widget canvas { display: block; width: 100%; height: auto; border-radius: 6px; }
 
@@ -346,6 +405,19 @@ html[data-theme="paper"] .article-body img {
   overflow: visible;
 }
 .article-body .inf-stackmap svg { display: block; width: 100%; height: auto; }
+
+/* Same treatment as the diagrams: the strip is drawn at 880x118 with 16-18px
+   labels, so shrinking it to 328px on a phone set "KV cache" at 6px. Hold a
+   floor and scroll. This has to sit after the block above, which declares
+   `overflow: visible` at the same specificity. */
+@media (max-width: 900px) {
+  .article-body .inf-stackmap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  .article-body .inf-stackmap svg { width: 620px; min-width: 620px; }
+}
 .article-body .inf-stackmap .inf-stackmap-cap {
   margin: 0.35rem 0 0;
   color: var(--text-faint);
@@ -356,7 +428,9 @@ html[data-theme="paper"] .article-body img {
 }
 
 @media (max-width: 700px) {
-  .article-body .inf-widget { margin-left: -0.5rem; margin-right: -0.5rem; }
+  /* symmetric negative margins put 8px of horizontal scroll inside
+     .article-body on every widget chapter */
+  .article-body .inf-widget { margin-left: 0; margin-right: 0; }
   .inf-widget-body { padding: 0.9rem 0.85rem 1rem; }
   .inf-widget-head { padding: 0.7rem 0.85rem 0.6rem; }
   .article-body details > *:not(summary) { margin-left: 0.9rem; }

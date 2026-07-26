@@ -84,7 +84,8 @@
     el.innerHTML = "";
     var head = document.createElement("div");
     head.className = "inf-widget-head";
-    head.innerHTML = "<h4>" + esc(title) + "</h4><p>" + esc(subtitle) + "</p>";
+    /* h4 after a chapter's h2 skipped a level in every widget chapter */
+    head.innerHTML = "<h3>" + esc(title) + "</h3><p>" + esc(subtitle) + "</p>";
     el.appendChild(head);
     var body = document.createElement("div");
     body.className = "inf-widget-body";
@@ -95,6 +96,15 @@
   function div(parent, cls) {
     var d = document.createElement("div");
     if (cls) d.className = cls;
+    /* Every one of these panels is replaced wholesale whenever a control
+       moves, and none of it was announced: a screen-reader user could
+       change a slider and never receive the answer, which is the whole
+       point of the widget. */
+    if (cls === "inf-results" || cls === "inf-verdict") {
+      d.setAttribute("role", "status");
+      d.setAttribute("aria-live", "polite");
+      d.setAttribute("aria-atomic", "true");
+    }
     parent.appendChild(d);
     return d;
   }
@@ -423,7 +433,8 @@
       format: function (v) { return tokLabel(Math.pow(2, v)); }
     });
 
-    var cv = W.canvas(body, 0.55);
+    var cv = W.canvas(body, 0.55,
+      "Roofline chart: attainable throughput against arithmetic intensity, with the current configuration plotted on it. The figures below state the same result in numbers.");
     var caption = div(body, "inf-verdict");
     var results = div(body, "inf-results");
 
@@ -715,7 +726,8 @@
       "). That is also why the hit-rate slider below has more leverage than anything else on this panel.";
     body.appendChild(why);
 
-    var cv = W.canvas(body, 0.30);
+    var cv = W.canvas(body, 0.30,
+      "Cost curve for the current configuration. The figures below state the same result in numbers.");
     var results = div(body, "inf-results");
     var verdict = div(body, "inf-verdict");
 

@@ -9,20 +9,39 @@
     /* Same pre-paint theme bootstrap as inference/index.html, so this page
        does not flash the wrong colours on the way in. */
     (function () {
-      var theme = "dark";
+      var theme = window.matchMedia &&
+                  window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
       try {
-        if (localStorage.getItem("ldd-theme") === "paper") theme = "paper";
+        var saved = localStorage.getItem("ldd-theme");
+        if (saved === "paper" || saved === "dark") theme = saved;
       } catch (e) {}
       if (theme === "paper") document.documentElement.dataset.theme = "paper";
     })();
   </script>
-  <link rel="stylesheet" href="../assets/style.css?v=20260725">
-  <link rel="stylesheet" href="../assets/course.css?v=20260725">
+  <link rel="stylesheet" href="../assets/style.css?v=20260726">
+  <link rel="stylesheet" href="../assets/course.css?v=20260726">
   <link rel="stylesheet" href="assets/inf.css?v=20260726">
+  <style>
+    /* one bar of chrome for a page that has no sidebar */
+    .sim-topline {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.15rem 0.6rem;
+      margin: 0 0 1.6rem;
+      padding-bottom: 0.9rem;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--text-faint);
+    }
+    .sim-topline .theme-switch { margin: 0 0 0 auto; width: 148px; }
+  </style>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <main class="content">
+    <main id="main" class="content" tabindex="-1">
       <!-- inf-widgets.js scans #view for placeholders (it is the element
            course.js swaps on navigation), so the wrapper has to be there
            even on a standalone page. .article-body carries the widget
@@ -31,7 +50,15 @@
         <article class="article">
           <div class="article-body">
 
-            <p><a href="./#/continuous-batching">&larr; Back to Inference Engineering</a></p>
+            <nav class="sim-topline" aria-label="Breadcrumb">
+              <a class="crumb" href="./#/">Inference Engineering</a>
+              <span class="crumb-sep" aria-hidden="true">/</span>
+              <span class="crumb-here">Serving-engine simulator</span>
+              <span class="theme-switch" role="group" aria-label="Colour theme">
+                <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
+                <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
+              </span>
+            </nav>
 
             <h1>Serving-engine simulator</h1>
 
@@ -63,7 +90,35 @@
     </main>
   </div>
 
+  <p id="live-region" class="sr-only" role="status" aria-live="polite"></p>
+
+  <script src="../assets/reader-ui.js?v=20260726"></script>
   <script defer src="assets/inf-widgets.js?v=20260726"></script>
   <script defer src="assets/inf-simulator.js?v=20260726"></script>
+  <script>
+    /* This page has no reader engine, so it wires its own theme switch —
+       the same localStorage key and the same data-theme attribute the
+       courses use, so a choice made here survives the trip back. */
+    (function () {
+      function apply(theme) {
+        if (theme === "paper") document.documentElement.setAttribute("data-theme", "paper");
+        else document.documentElement.removeAttribute("data-theme");
+        document.querySelectorAll(".theme-btn").forEach(function (b) {
+          var on = b.dataset.themeValue === theme;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-pressed", String(on));
+        });
+      }
+      var current = document.documentElement.dataset.theme === "paper" ? "paper" : "dark";
+      document.querySelectorAll(".theme-btn").forEach(function (b) {
+        b.addEventListener("click", function () {
+          current = b.dataset.themeValue;
+          try { localStorage.setItem("ldd-theme", current); } catch (e) {}
+          apply(current);
+        });
+      });
+      apply(current);
+    })();
+  </script>
 </body>
 </html>
