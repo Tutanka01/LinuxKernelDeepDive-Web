@@ -8,6 +8,8 @@
 > fleets the opposite way; and why RL now runs a serving engine *inside*
 > training. It closes Module 5 by naming the one thing everything orbits.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="client,router,kv"></div>
+
 Rewind to 2023. A person opens a chat box, types a sentence, waits, reads a
 paragraph, types again. From the engine's side this is a gift: input is
 short, output is short, and there is a human-shaped pause between turns long
@@ -102,6 +104,16 @@ met in [Disaggregated Serving](#/disaggregation) (SGLang's `sgl-router`
 maintaining a prefix tree, Dynamo's Smart Router scoring cache-overlap minus
 load) — the agent era is simply what made it non-optional.
 
+> [!bridge] You already know this — from the Linux course
+> The CPU scheduler already refuses to treat cores as interchangeable: it
+> prefers to wake a task on the CPU whose cache is still warm, and prices a
+> migration against the misses it will cause. Prefix-affinity routing is that
+> same policy at datacenter scale. What differs is the exchange rate — a cold
+> CPU costs a task microseconds of refill, while a cold replica costs a request
+> a full prefill of its entire context, which is why the router is willing to
+> queue for the right worker rather than run now on the wrong one.
+> [→ Linux: CPU Scheduling](../#/scheduling)
+
 **Caches must tier, because agent sessions outlive HBM.** A tool call can
 take seconds to minutes — a database query, a web fetch, another model's
 reply. For that whole stretch the session's KV cache is idle but must
@@ -170,6 +182,15 @@ optionally offload the model weights to host memory so the trainer can use
 the GPU, then *wake* and reload for the next rollout, all without tearing
 down the server.
 
+> [!bridge] You already know this — from the Linux course
+> Freeing a process's device memory, parking its state in host RAM, and bringing
+> it back later without restarting the service is the cuda-checkpoint / CRIU
+> manoeuvre. What differs is that sleep/wake is cooperative and in-process: the
+> engine knows which of its own allocations are rebuildable (the KV cache, which
+> it simply drops) and which must survive (the weights), so it never has to
+> snapshot an address space it does not understand.
+> [→ Linux: GPU Checkpointing](../#/gpu-checkpoint)
+
 And every training step changes the weights, so the freshly-trained weights
 must be pushed back into the rollout engine before the next batch — the
 **weight-sync problem**. Do it naively (ship every parameter) and it is
@@ -230,6 +251,16 @@ again. The cache hit rate is the dial that converts all that architecture
 into dollars. Learn to see the KV cache at the center and Module 5 stops
 being a list of tricks and becomes one system with one gravity well.
 
+Watch the dial move. Set the simulator below to the **agent** workload — a long
+shared prefix that grows a little with every iteration — and then toggle prefix
+caching off and back on. TTFT p50 is this whole chapter in one meter: with the
+cache off, every iteration pays to rebuild a context the fleet already computed;
+with it on, only the newly appended tool result is prefilled.
+
+<div class="inf-widget" data-widget="engine-simulator">
+<p class="inf-widget-fallback">Interactive serving-engine simulator — needs JavaScript enabled.</p>
+</div>
+
 ## What to remember
 
 - **The workload flipped.** 2023 was chat; 2026 is agents (prefill-heavy,
@@ -255,6 +286,50 @@ being a list of tricks and becomes one system with one gravity well.
   in one call.
 - **The whole module orbits the KV cache.** Every system is machinery to
   compute it once, keep it warm, and find it again.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>My provider reports a high cached-token share but my bill barely moved. Why?</summary>
+
+Check what fraction of your spend was input in the first place. The cache
+discount only applies to input tokens, so on a 20:1 input:output workload it is
+the dominant term, and on a reasoning workload emitting thousands of output
+tokens per short prompt it is nearly irrelevant. The second possibility is the
+physical-vs-logical gap from [The KV Fabric](#/the-kv-fabric): a prefix that
+matched but had already been evicted gets recomputed and billed as fresh input.
+
+</details>
+
+<details>
+<summary>How much does one changing token at the top of my prompt actually cost?</summary>
+
+Everything after it. Prefix caches are keyed on the hash of the token sequence,
+so a block only matches if every token before it matched too — a timestamp, a
+session id, or a randomly-ordered tool schema at position 12 invalidates all
+20,000 tokens that follow. That is the entire reason context engineering is a
+discipline: put anything volatile at the *end* of the context, where it
+invalidates nothing, and keep the head byte-stable across turns.
+
+</details>
+
+<details>
+<summary>Agents are prefill-heavy and reasoning is decode-heavy. Do they cancel out on one fleet?</summary>
+
+In aggregate capacity, partly; in scheduling, no. The two pressures land on
+different resources — agent prefill wants FLOP/s and burns them in bursts, while
+reasoning decode wants a steady drip of HBM bandwidth for thousands of
+consecutive steps — so mixing them on one pool means every agent burst is an
+inter-token-latency spike for every reasoning request in flight. It is the same
+interference argument as [Disaggregated Serving](#/disaggregation), which is why
+mixed fleets tend to route the two shapes to differently-tuned pools rather than
+letting them average out.
+
+</details>
+
+</div>
 
 ```quiz
 [

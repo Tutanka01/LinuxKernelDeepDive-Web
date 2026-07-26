@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 600" width="880" height="600">
+<title>CPU vs GPU memory hierarchy pyramids</title>
+<desc>Two side-by-side pyramids, CPU and GPU, each with four layers — registers, then L1/L2/L3 cache vs SMEM+L1/L2 cache, then DRAM vs HBM — labelled with capacity, bandwidth, and latency. The GPU pyramid is wider at every level, showing far higher absolute bandwidth, but an annotation explains that the compute-to-bandwidth ratio (the ridge point) is actually worse on the GPU, not better.</desc>
+<rect width="880" height="600" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">Memory hierarchy: same shape, shifted numbers, worse ratio</text>
+
+<text x="110" y="58" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">CPU (what you know)</text>
+<text x="730" y="58" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">GPU (H100)</text>
+
+<!-- CPU pyramid, cx=110, bands widen top->bottom -->
+<polygon points="90,70 130,70 145,125 75,125" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<polygon points="75,125 145,125 160,180 60,180" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<polygon points="60,180 160,180 175,235 45,235" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<polygon points="45,235 175,235 190,290 30,290" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="110" y="102" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">reg</text>
+<text x="110" y="157" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">L1</text>
+<text x="110" y="212" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">L2/L3</text>
+<text x="110" y="267" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">DRAM</text>
+
+<!-- GPU pyramid, cx=730, bands widen faster -->
+<polygon points="710,70 750,70 770,125 690,125" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<polygon points="690,125 770,125 790,180 670,180" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<polygon points="670,180 790,180 815,235 645,235" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<polygon points="645,235 815,235 845,290 615,290" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<text x="730" y="102" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">reg</text>
+<text x="730" y="157" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">SMEM+L1</text>
+<text x="730" y="212" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">L2</text>
+<text x="730" y="267" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">HBM</text>
+
+<!-- CPU table -->
+<rect x="20" y="306" width="14" height="14" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="45" y="316" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">Registers — &lt;1 KB/core</text>
+<text x="45" y="332" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">~10 TB/s eff. · ~0.3 ns</text>
+
+<rect x="20" y="348" width="14" height="14" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="45" y="358" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">L1 — ~48 KB/core</text>
+<text x="45" y="374" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">~1–2 TB/s · ~1 ns (4 cyc)</text>
+
+<rect x="20" y="390" width="14" height="14" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="45" y="400" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">L2+L3 — ~1–2 MB + ~64 MB</text>
+<text x="45" y="416" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">~200–600 GB/s · ~10–40 ns</text>
+
+<rect x="20" y="432" width="14" height="14" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="45" y="442" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">DRAM — ~100s of GB</text>
+<text x="45" y="458" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">~0.1–0.4 TB/s · ~80–120 ns</text>
+
+<!-- GPU table -->
+<rect x="450" y="306" width="14" height="14" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<text x="475" y="316" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">Registers — 256 KB/SM</text>
+<text x="475" y="332" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">eff. tens of TB/s · ~1 cyc</text>
+
+<rect x="450" y="348" width="14" height="14" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<text x="475" y="358" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">SRAM (L1+shared) — 256 KB/SM</text>
+<text x="475" y="374" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">tens of TB/s · ~20–30 cyc</text>
+
+<rect x="450" y="390" width="14" height="14" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<text x="475" y="400" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">L2 cache — ~50 MB</text>
+<text x="475" y="416" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">~several TB/s · ~200 cyc</text>
+
+<rect x="450" y="432" width="14" height="14" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<text x="475" y="442" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">HBM — 80 GB</text>
+<text x="475" y="458" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250">3.35 TB/s · ~500–800 ns</text>
+
+<!-- ridge consequence annotation -->
+<rect x="20" y="490" width="840" height="90" rx="6" fill="#ece5d4" stroke="#a4462e" stroke-width="1.5"/>
+<text x="40" y="510" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#a4462e">Ridge consequence</text>
+<text x="40" y="530" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" fill="#221c12">The GPU pyramid is wider at every level and its raw bandwidth is enormous — but compute grew</text>
+<text x="40" y="548" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" fill="#221c12">even faster. The ratio that matters is FLOP/byte, which sets the ridge (≈295 on an H100): a</text>
+<text x="40" y="566" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" fill="#221c12">GPU's compute-to-bandwidth ratio is worse than a CPU's, which is why inference starves for bytes.</text>
+</svg>

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>Launch overhead: eager dispatch vs. CUDA graph replay</title>
+<desc>Profiler-style trace with a microseconds axis. Top: eager launch mode, where the CPU dispatches each kernel back-to-back but the GPU sits idle in visible gaps between short kernels because it keeps catching up to the CPU's dispatch rate. Bottom: the same four kernels captured as a CUDA graph and replayed with a single launch, so the GPU executes them back-to-back with no idle gaps. In production this recovers roughly 25 to 30 percent of per-step decode latency.</desc>
+<rect width="880" height="460" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">Launch overhead: a syscall-overhead story, in kernels</text>
+
+<defs>
+  <pattern id="idleHatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+    <rect width="6" height="6" fill="#a4462e" fill-opacity="0.12"/>
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#a4462e" stroke-width="1.5" opacity="0.5"/>
+  </pattern>
+</defs>
+
+<text x="24" y="64" font-size="13" font-weight="600" fill="#221c12">Eager launch: CPU dispatches each kernel separately</text>
+<text x="24" y="100" font-size="11" fill="#6b6250">CPU</text>
+<rect x="80" y="90" width="30" height="30" fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f"/>
+<text x="95" y="109" font-size="9" text-anchor="middle" fill="#221c12">A</text>
+<rect x="110" y="90" width="30" height="30" fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f"/>
+<text x="125" y="109" font-size="9" text-anchor="middle" fill="#221c12">B</text>
+<rect x="140" y="90" width="30" height="30" fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f"/>
+<text x="155" y="109" font-size="9" text-anchor="middle" fill="#221c12">C</text>
+<rect x="170" y="90" width="30" height="30" fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f"/>
+<text x="185" y="109" font-size="9" text-anchor="middle" fill="#221c12">D</text>
+<text x="205" y="109" font-size="11" fill="#6b6250">...</text>
+
+<text x="24" y="150" font-size="11" fill="#6b6250">GPU</text>
+<rect x="115" y="140" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="135" y="159" font-size="9" text-anchor="middle" fill="#221c12">A</text>
+<rect x="155" y="140" width="30" height="30" fill="url(#idleHatch)" stroke="#a4462e" stroke-dasharray="2,2"/>
+<rect x="185" y="140" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="205" y="159" font-size="9" text-anchor="middle" fill="#221c12">B</text>
+<rect x="225" y="140" width="30" height="30" fill="url(#idleHatch)" stroke="#a4462e" stroke-dasharray="2,2"/>
+<rect x="255" y="140" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="275" y="159" font-size="9" text-anchor="middle" fill="#221c12">C</text>
+<rect x="295" y="140" width="30" height="30" fill="url(#idleHatch)" stroke="#a4462e" stroke-dasharray="2,2"/>
+<rect x="325" y="140" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="345" y="159" font-size="9" text-anchor="middle" fill="#221c12">D</text>
+<rect x="365" y="140" width="30" height="30" fill="url(#idleHatch)" stroke="#a4462e" stroke-dasharray="2,2"/>
+<text x="410" y="159" font-size="10" fill="#a4462e">idle, waiting on CPU</text>
+
+<line x1="80" y1="182" x2="500" y2="182" stroke="#8d8370" stroke-width="1"/>
+<g font-size="9" font-family="SF Mono, Menlo, Consolas, monospace" fill="#8d8370">
+  <text x="80" y="196">0</text>
+  <text x="130" y="196">5</text>
+  <text x="180" y="196">10</text>
+  <text x="230" y="196">15</text>
+  <text x="280" y="196">20</text>
+  <text x="330" y="196">25</text>
+  <text x="380" y="196">30&#181;s</text>
+</g>
+
+<text x="24" y="218" font-size="11" fill="#6b6250">200 kernels &#215; ~5&#181;s launch &#8776; 1 ms of pure dispatch &#8212; the GPU is idle for much of that millisecond.</text>
+
+<line x1="24" y1="242" x2="856" y2="242" stroke="#ddd3bd" stroke-width="1"/>
+
+<text x="24" y="266" font-size="13" font-weight="600" fill="#221c12">CUDA graph replay: one launch, GPU stays fed</text>
+<text x="24" y="300" font-size="11" fill="#6b6250">CPU</text>
+<rect x="80" y="288" width="40" height="30" fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f"/>
+<text x="100" y="307" font-size="8" text-anchor="middle" fill="#221c12">replay</text>
+
+<text x="24" y="350" font-size="11" fill="#6b6250">GPU</text>
+<rect x="120" y="338" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="140" y="357" font-size="9" text-anchor="middle" fill="#221c12">A</text>
+<rect x="160" y="338" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="180" y="357" font-size="9" text-anchor="middle" fill="#221c12">B</text>
+<rect x="200" y="338" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="220" y="357" font-size="9" text-anchor="middle" fill="#221c12">C</text>
+<rect x="240" y="338" width="40" height="30" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f"/>
+<text x="260" y="357" font-size="9" text-anchor="middle" fill="#221c12">D</text>
+<text x="290" y="357" font-size="10" fill="#4f7d2c">no gaps</text>
+
+<line x1="80" y1="380" x2="500" y2="380" stroke="#8d8370" stroke-width="1"/>
+<g font-size="9" font-family="SF Mono, Menlo, Consolas, monospace" fill="#8d8370">
+  <text x="80" y="394">0</text>
+  <text x="130" y="394">5</text>
+  <text x="180" y="394">10</text>
+  <text x="230" y="394">15</text>
+  <text x="280" y="394">20&#181;s</text>
+</g>
+
+<text x="440" y="416" font-size="12" text-anchor="middle" fill="#6b6250">Same four kernels, one CPU crossing instead of four &#8212; the GPU never waits on the dispatcher again.</text>
+<text x="440" y="436" font-size="11" font-style="italic" text-anchor="middle" fill="#6b6250">Production measurement: roughly 25&#8211;30% of per-step decode latency recovered, free.</text>
+</svg>

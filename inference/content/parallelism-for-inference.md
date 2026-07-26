@@ -8,6 +8,8 @@
 > "TP=8, PP=2, EP=64" stops being a config incantation and becomes a set of
 > decisions you can make and defend.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="fabric,runner"></div>
+
 Everything so far in this course has lived on one GPU — the
 [roofline](#/gpu-mental-model), the [prefill/decode split](#/inference-arithmetic),
 [paged KV cache](#/paged-kv-cache), [FlashAttention](#/flashattention). For a
@@ -62,6 +64,17 @@ slow sea.** Every parallelism strategy is a decision about *which communication
 pattern you run across which link*. Chatty patterns must stay on the island;
 only frugal ones may cross the sea.
 
+![Two nodes, each an eight-GPU NVLink island at about 900 GB/s per GPU, joined by an InfiniBand or RoCE link at about 50 GB/s per node — a 20 to 40 times bandwidth cliff at the node boundary](assets/diagrams/interconnect-islands.svg)
+
+> [!bridge] You already know this — from the Linux course
+> NUMA taught you that "memory" is not one uniform resource: a core reaching
+> across a socket boundary pays a real penalty, so you pin threads and allocate
+> on the local node. This is the same locality reasoning with the penalty turned
+> up two orders of magnitude — remote NUMA costs you perhaps 1.5–2× on latency,
+> while leaving the NVLink island costs 20–40× on bandwidth. Pinning a process
+> to its node is optional tuning; keeping a TP group on one island is not.
+> [→ Linux: NUMA Deep Dive](../#/numa-deep-dive)
+
 Hold that map. Now the four strategies.
 
 ## Tensor parallelism: shard every matrix, pay twice a layer
@@ -80,6 +93,15 @@ partial array, and when it finishes, **every** GPU holds the element-wise
 *sum* of all of them. It is one group-wide move — nobody proceeds until
 everybody's contribution is folded in, so it is only as fast as the slowest
 link between any two members.
+
+> [!bridge] You already know this — from the Distributed Systems course
+> "Only as fast as the slowest member" is the straggler shape you met when a
+> fan-out read had to wait on its slowest replica, and it's why tail latency,
+> not the mean, is the number that matters. The difference is the time scale and
+> the frequency: there you tolerated a slow participant on one request, here the
+> barrier fires twice per layer, 160 times per token, so even a small per-member
+> skew compounds into a visible share of latency.
+> [→ Distributed: The Network Is Hostile](../distributed/#/the-network-is-hostile)
 
 A transformer layer has two such recombination points — one after attention,
 one after the MLP — so **TP costs two all-reduces per layer, every layer, every
@@ -137,6 +159,8 @@ neighbor — not an all-reduce. That is **cheap**, kilobytes not megabytes, and
 crucially it **survives a slow link.** Pipeline parallelism is the one you run
 *across* nodes, over InfiniBand, precisely because its communication is
 frugal enough to cross the sea.
+
+![Side-by-side collectives: an all-reduce where four GPUs each end holding the same summed megabyte-scale tensor twice per layer, versus a point-to-point handoff where one GPU passes a kilobyte-scale activation vector to a single neighbor at each stage boundary](assets/diagrams/collectives.svg)
 
 The catch is the **bubble**. A pipeline is only efficient when full — stage A
 on token *n+1* while stage B works on token *n*. But
@@ -259,6 +283,49 @@ the all-to-all becomes the whole ballgame. That is
 - Serving parallelism ≠ training parallelism: decode is latency-bound with
   skinny GEMMs and **no gradients** — weights are read-only replicas (no
   ZeRO/FSDP), and bubbles that hide in training are visible stalls here.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>Can I set TP to any number, or does it have to divide something?</summary>
+
+It has to divide the model's attention heads, and in practice that means powers
+of two. TP shards the head dimension, so TP=6 on a 64-head model leaves ranks
+with unequal head counts and most engines will simply refuse to load it. The
+tighter constraint is GQA: if a model has 8 key/value heads, TP=16 means some
+ranks hold no KV heads at all and must either replicate them or fall back — check
+`num_key_value_heads`, not `num_attention_heads`, before promising a TP degree.
+
+</details>
+
+<details>
+<summary>If the model fits on two GPUs, is TP=8 still worth it?</summary>
+
+Sometimes, and the deciding question is whether you are selling latency or
+throughput. TP=8 gives you roughly 4× the aggregate bandwidth of TP=2, so decode
+gets faster per token and each GPU has far more KV headroom — good if you are
+chasing p99 TPOT. But the all-reduce cost is paid per layer regardless of how
+little work each rank does, so tokens-per-second *per GPU* falls; you are buying
+latency with hardware efficiency. For a batch-throughput workload, running four
+independent TP=2 replicas usually beats one TP=8 replica.
+
+</details>
+
+<details>
+<summary>How do I confirm my GPUs are actually on NVLink and not just PCIe?</summary>
+
+Run `nvidia-smi topo -m`. The matrix labels each GPU pair: `NV#` means NVLink
+with that many links, `PIX`/`PXB` means they share a PCIe switch, `SYS` means the
+traffic crosses the host bridge — the worst case. This matters more than it
+sounds, because cloud instances of the same nominal type can differ, and a TP=8
+group that silently spans two PCIe-connected quads is exactly the disaster in the
+worked example above. Check it once per instance type and record it.
+
+</details>
+
+</div>
 
 ```quiz
 [

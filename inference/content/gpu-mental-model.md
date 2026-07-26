@@ -8,6 +8,8 @@
 > chapter, "989 TFLOP/s" and "3.35 TB/s" stop being spec-sheet noise and
 > become the two numbers that predict performance.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="runner,kernels"></div>
+
 In [the previous chapter](#/what-is-inference) you watched the autoregressive
 loop: the model consumes your prompt, then emits tokens one at a time, each
 one a full pass through the network. Here is the question that decides
@@ -52,6 +54,15 @@ onions.
 That is the entire reason neural networks live on GPUs. The math is parallel;
 the GPU is parallel; the match is near-perfect.
 
+> [!bridge] You already know this — from the Linux course
+> Everything you learned about why a CPU core is *shaped* the way it is —
+> branch prediction, out-of-order issue, deep caches, speculative prefetch —
+> was silicon spent making one unpredictable instruction stream go fast. None
+> of that machinery earns its transistors on a matmul, because there is
+> nothing to predict and nothing to reorder. The GPU is what you build when
+> you delete all of it and spend the area on arithmetic instead.
+> [→ Linux: The Machine Underneath](../#/prereq-hardware)
+
 ## Anatomy of an H100
 
 Let us make it concrete with the workhorse of mid-2026 inference, NVIDIA's
@@ -68,6 +79,8 @@ warp as one instruction with 32 data slots, the natural shape for "do this
 same multiply to 32 numbers.") You will rarely reason at the thread level in
 this course — the unit that matters is the SM and the whole chip — but keep
 the picture: parallelism is baked in three levels deep (chip → SM → warp).
+
+![Nested boxes showing the H100's levels: the whole chip with its 132 SMs and one shared 80 GB HBM pool, an SM holding shared memory, a warp scheduler and tensor cores, a warp of 32 threads issued one instruction in lockstep, and a single thread owning only its registers.](assets/diagrams/gpu-hierarchy.svg)
 
 ### The memory hierarchy, and why it will look familiar
 
@@ -88,6 +101,8 @@ labels and very different numbers:**
         @ ~0.1–0.4 TB/s                 @ 3.35 TB/s
 ```
 
+![Two side-by-side memory pyramids, CPU and GPU, with matching tiers — registers, on-chip cache, then DRAM or HBM — each labelled with capacity, bandwidth and latency. Every GPU tier is wider, yet the annotation notes the compute-to-bandwidth ratio is worse on the GPU, not better.](assets/diagrams/memory-hierarchy.svg)
+
 Two things to read off this. First, the *structure* is identical: a tiny,
 blazing-fast on-chip tier (registers and SRAM — static RAM, the same
 technology as your CPU's cache) backed by a large, comparatively slow
@@ -101,6 +116,16 @@ Second, the numbers are shifted, not reinvented. HBM's 3.35 TB/s is close to
 an order of magnitude more bandwidth than a well-provisioned server's DRAM —
 but the *ratio* that hurt you on the CPU, fast compute starving on slow far
 memory, is if anything worse here. Hold that thought; it is the roofline.
+
+> [!bridge] You already know this — from the Linux course
+> The reason you cared about cache blocking, page locality and which NUMA node
+> a buffer was allocated on is the same reason you will care about SRAM tiling
+> here: the compute unit is never the thing you are waiting for, the trip to
+> far memory is. What differs is how brutal the ratio has become. A CPU core
+> stalling on remote DRAM wastes a few ALUs; an H100 stalling on HBM idles
+> almost a quadrillion FLOP/s of tensor core, which is why "keep the working
+> set on-chip" stops being a tuning tip and becomes the design.
+> [→ Linux: NUMA Deep Dive](../#/numa-deep-dive)
 
 ## Tensor cores, and what a FLOP actually is
 
@@ -197,6 +222,8 @@ TFLOP/s. The ridge is fixed by the chip, not by your workload.
          └ memory-bound ─┘└─ compute-bound ─┘
 ```
 
+![The H100 roofline on log-log axes: a sloping bandwidth roof of attainable = intensity × 3.35 TB/s meeting a flat compute roof at 990 TFLOP/s dense BF16, the two crossing at the ridge point of 295 FLOP/byte.](assets/diagrams/roofline-h100.svg)
+
 ### A worked intensity, start to finish
 
 Take the simplest operation there is: add two BF16 vectors, element by
@@ -217,6 +244,12 @@ entire row or column of the output — roughly `N` multiply-adds per byte. For
 past the ridge, compute-bound**, exactly the regime tensor cores were built
 for. Same chip, same two ceilings; a factor of ten thousand in intensity
 decides which one you hit.
+
+Move the intensity yourself and watch which ceiling catches you:
+
+<div class="inf-widget" data-widget="roofline-explorer">
+<p class="inf-widget-fallback">Interactive roofline explorer — needs JavaScript enabled.</p>
+</div>
 
 ## The generational table — and why the wall stands
 
@@ -250,6 +283,52 @@ GPU** — which is precisely why the rest of this course exists.
 > how *fast* they stream. A model can sit comfortably in 80 GB and still be
 > throttled by the 3.35 TB/s it takes to read those bytes every step. Do not
 > conflate "it fits" with "it is fast."
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>Does the roofline account for the SRAM, or only for HBM?</summary>
+
+Only for HBM, and that is deliberate. The `bytes_moved` term counts traffic
+across the slow off-chip boundary, because that is the ceiling that binds;
+on-chip SRAM traffic is fast enough to ignore in a first-order estimate.
+Keeping data in SRAM does not raise the roof — it *raises your arithmetic
+intensity*, by letting one HBM read serve many more FLOPs before the value is
+evicted. That is precisely what tiling does, and it is the whole idea behind
+[FlashAttention & Decode Kernels](#/flashattention).
+
+</details>
+
+<details>
+<summary>If the ridge point is fixed by the hardware, can I ever move it?</summary>
+
+You cannot move the chip's ridge, but you can move it *for your workload* by
+changing how many bytes a number costs. Quantizing weights from BF16 to FP8
+halves the bytes without changing the FLOPs, which doubles your effective
+intensity — the same operation lands twice as far to the right on the same
+roofline. Buying a chip with more bandwidth per FLOP does the other thing: the
+H200 lowers the ridge to ~206 by adding HBM speed to an unchanged compute die.
+Those are the only two moves, and [Quantization](#/quantization) is the one
+you control.
+
+</details>
+
+<details>
+<summary>An H100 has 132 SMs. Should I be reasoning about SM counts the way I reason about CPU cores?</summary>
+
+Rarely. On a CPU you size work to cores because a core is the unit that runs
+one thread. On a GPU the unit that matters for capacity planning is the whole
+chip — its aggregate 989 TFLOP/s and 3.35 TB/s — because a well-written kernel
+already spreads across every SM and every warp. SM counts start to matter only
+when you are writing or tuning kernels, where occupancy, shared-memory budget
+per SM and tail effects on the last wave of blocks decide throughput. Until
+then, treat the GPU as one very fast, very hungry unit.
+
+</details>
+
+</div>
 
 ## What to remember
 

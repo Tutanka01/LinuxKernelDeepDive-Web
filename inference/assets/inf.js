@@ -10,6 +10,16 @@
 
 const COURSE = [
   {
+    module: "Before we start",
+    level: "beginner",
+    levelLabel: "Preface",
+    blurb: "One short chapter of inoculation: how to read the numbers this field quotes at you, before you meet any of them.",
+    chapters: [
+      { slug: "how-to-read-a-number", title: "How to Read a Number in This Field",
+        desc: "Six rules that defuse almost every benchmark claim you will be shown." },
+    ],
+  },
+  {
     module: "Module 1 — The Physics",
     level: "beginner",
     levelLabel: "Beginner",
@@ -47,8 +57,24 @@ const COURSE = [
         desc: "MHA to GQA to MLA, sliding windows, sparse attention and SSM hybrids." },
       { slug: "quantization", title: "Quantization",
         desc: "FP8, INT4, FP4 — the formats, the methods, and the evaluation traps." },
+      { slug: "did-quantization-break-your-model", title: "Did Quantization Break Your Model?",
+        desc: "Why perplexity lies, task-hardness scaling, token inflation — and what to measure instead." },
       { slug: "speculative-decoding", title: "Speculative Decoding",
         desc: "Draft models, EAGLE, MTP — provably lossless speedup, and when it backfires." },
+    ],
+  },
+  {
+    module: "Module 3.5 — Running It",
+    level: "intermediate",
+    levelLabel: "Intermediate+",
+    blurb: "Between the physics and the metal: how many users fit on your GPUs, which GPU and engine to buy, and how to run the thing at 3am.",
+    chapters: [
+      { slug: "sizing-a-deployment", title: "Sizing a Deployment",
+        desc: "The five-term memory budget, inverted: will it fit, and how many users?" },
+      { slug: "choosing-model-gpu-framework", title: "Choosing: Model, GPU, Framework",
+        desc: "Deployment shape, GPUs in strict order, engine picks — and the real buy-vs-build math." },
+      { slug: "operating-it", title: "Operating It",
+        desc: "Metrics that are physical, symptoms to causes, autoscaling traps and cold starts." },
     ],
   },
   {
@@ -73,8 +99,10 @@ const COURSE = [
         desc: "TP, PP, EP and context parallelism — and why inference isn't training." },
       { slug: "moe-serving", title: "Serving MoE at Scale",
         desc: "DeepSeek's inference system, wide expert parallelism and rack-scale NVLink." },
-      { slug: "disaggregation", title: "Disaggregated Serving & the KV Fabric",
-        desc: "Prefill/decode split, Mooncake, Dynamo, KV tiering and cache-aware routing." },
+      { slug: "disaggregation", title: "Disaggregated Serving",
+        desc: "Splitting prefill from decode: the transfer math, DistServe, and when it doesn't pay." },
+      { slug: "the-kv-fabric", title: "The KV Fabric",
+        desc: "Mooncake, Dynamo and NIXL, KV tiering, cache-aware routing and the autoscaling traps." },
       { slug: "agentic-serving", title: "The Agentic Era",
         desc: "Agent traffic, cache-hit economics, RL rollouts and multi-LoRA." },
     ],
@@ -89,6 +117,16 @@ const COURSE = [
         desc: "GPUs, TPUs and SRAM silicon; token prices, margins, benchmarks, energy." },
       { slug: "frontier", title: "The Frontier (mid-2026)",
         desc: "A dated snapshot: test-time compute, diffusion LLMs, and what might be next." },
+    ],
+  },
+  {
+    module: "Reference",
+    level: "beginner",
+    levelLabel: "Reference",
+    blurb: "Not a chapter to read in order: the whole vocabulary of the field in one place, each term linked to the chapter that teaches it.",
+    chapters: [
+      { slug: "glossary", title: "Glossary",
+        desc: "Every acronym in the course, defined once and linked to where it's taught." },
     ],
   },
 ];

@@ -7,6 +7,8 @@
 > keep a busy server smooth. After this, the word "scheduler" in a serving
 > engine stops being a black box.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="scheduler,batch"></div>
+
 You have one model — say Llama-3-70B — one 8-GPU box, and a thousand people
 hitting your API right now. Their requests arrive at random moments. Some want
 a three-token yes/no; some want a 2,000-token essay. [Inference Arithmetic](#/inference-arithmetic)
@@ -92,6 +94,15 @@ Continuous batching — sequences join and leave every iteration
 No sequence waits for the batch to drain, and no slot idles behind a finished
 neighbour. The GPU stays as full as the arriving traffic allows, which — below
 `B_crit` — is exactly the regime where extra sequences are nearly free.
+
+> [!bridge] You already know this — from the Linux course
+> Static batching is head-of-line blocking with extra steps, and Orca's answer
+> is the run queue: re-decide after every tick, admit whatever became runnable,
+> drop whatever exited. The quantum here is one forward pass — nothing can be
+> preempted mid-pass — and the goal is inverted: CFS divides a CPU *between*
+> tasks, while this scheduler is packing sequences *into the same* weight read,
+> so below `B_crit` the members of the batch are barely competing at all.
+> [→ Linux: CPU Scheduling](../#/scheduling)
 
 Orca's second idea makes this actually implementable. You might assume you can
 just stack all the sequences into one big tensor and run them together. For
@@ -220,6 +231,15 @@ already running has to be kicked out — **preemption**. Two ways to do it:
 - **Recompute:** simply *drop* the victim's KV cache. When it resumes, redo its
   prefill to rebuild it from the prompt (which you still have).
 
+> [!bridge] You already know this — from the Linux course
+> That is page reclaim's central choice. A dirty anonymous page has to be
+> written to swap, because nothing else in the system can reproduce it; a clean
+> file-backed page is simply dropped and re-read on the next fault, because the
+> bytes still exist somewhere cheaper. KV is the clean case — you still hold the
+> prompt that generated it — which is why "drop it and rebuild" is a
+> respectable default here and would be madness for anonymous memory.
+> [→ Linux: Virtual Memory](../#/memory)
+
 vLLM V1 chose **recompute** as its default and deprecated V0's swap. The reason
 is a preview of the next chapter: recompute pairs beautifully with **prefix
 caching**. If the dropped sequence shared a prompt prefix — a system prompt,
@@ -228,6 +248,68 @@ it isn't a full recompute at all; it reuses the surviving KV blocks and only
 recomputes the genuinely new tail. Dropping state is cheap when you can get
 most of it back for free. *How* those KV blocks are stored, shared, and
 reclaimed is exactly where we go next.
+
+## Watch the loop run
+
+Every claim in this chapter is a claim about a loop, and loops are easier to
+believe once you have watched one. In the simulator below, start on preset 1
+and flip **batching** from Static back to Continuous: the grey finished slots
+that were holding the door shut refill on the next step and the queue behind
+them drains. Then take preset 2 — a 10,000-token prompt landing every three
+seconds — and tick **chunked prefill** on and off while you watch the ITL
+reading: that is the interference problem and its fix, at 4× speed.
+
+<div class="inf-widget" data-widget="engine-simulator">
+<p class="inf-widget-fallback">Interactive serving-engine simulator — needs JavaScript enabled.</p>
+</div>
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>If the scheduler admits a new sequence every iteration, does that slow down the ones already decoding?</summary>
+
+Below `B_crit` it barely does. The step's dominant cost is streaming the model
+weights out of HBM, and that cost is paid once per step no matter how many
+sequences ride along — so an extra sequence adds its own KV reads and a sliver
+of arithmetic, not a whole weight sweep. Past `B_crit` the step becomes
+compute-bound and every additional token in the batch does show up as inter-token
+latency for everyone. That is why engines cap the batch (`--max-num-seqs`) and
+the per-step work (`--max-num-batched-tokens`) rather than admitting everything
+that has arrived.
+
+</details>
+
+<details>
+<summary>What should I set the prefill chunk size to?</summary>
+
+Start with the engine's default (commonly 512–2,048 tokens) and move it only
+against a measurement. Smaller chunks smooth inter-token latency for the users
+already decoding and stretch the long prompt's TTFT across more iterations;
+bigger chunks do the reverse, and waste less on re-reading weights per chunk. The
+honest procedure is to fix your ITL target, then raise the chunk size until you
+are about to break it — the largest chunk that still meets your latency SLO is
+also the most throughput you can have.
+
+</details>
+
+<details>
+<summary>My server logs preemptions constantly. What is it telling me?</summary>
+
+That you admitted more concurrent sequences than your KV pool can feed as they
+grow, so the scheduler is repeatedly dropping and re-prefilling somebody's
+cache. It is not a crash and it is not free: recompute burns prefill FLOPs you
+already spent. The levers are to give the pool more room
+(`--gpu-memory-utilization`, a shorter `--max-model-len`, quantized KV) or to
+admit fewer sequences (`--max-num-seqs`) so the ones you did admit can finish. A
+low, occasional preemption rate under a traffic spike is healthy; a steady one
+means you are sized wrong, which is [Sizing a Deployment](#/sizing-a-deployment)'s
+subject.
+
+</details>
+
+</div>
 
 ## What to remember
 

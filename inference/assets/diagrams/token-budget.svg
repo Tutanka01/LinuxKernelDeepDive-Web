@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380">
+<title>The scheduler's token budget, two steps side by side</title>
+<desc>Two horizontal bars, each an 8,192-token scheduler step budget to scale. The first step has only 64 decode tokens, one tiny sliver per running sequence, so the chunked-prefill chunk fills nearly the whole 8,192-token budget at 8,128 tokens. The second step has 2,048 decode tokens as more sequences have joined, so the chunked-prefill chunk shrinks to 6,144 tokens. The decode portion is drawn as a hatched texture to suggest many tiny per-sequence slivers; the prefill chunk is a single solid block.</desc>
+<rect width="880" height="380" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">One token budget, two steps: the prefill chunk shrinks as decodes join</text>
+
+<defs>
+<pattern id="decodeHatch" width="4" height="8" patternUnits="userSpaceOnUse">
+<rect width="4" height="8" fill="#2f6d7d" fill-opacity="0.22"/>
+<line x1="0" y1="0" x2="0" y2="8" stroke="#2f6d7d" stroke-width="1.4"/>
+</pattern>
+<marker id="arrTealB" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#2f6d7d"/>
+</marker>
+</defs>
+
+<!-- Step A: 64 decode tokens, 8,128 prefill -->
+<text x="40" y="90" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">Step N — 64 running sequences</text>
+<rect x="40" y="100" width="6.25" height="50" fill="url(#decodeHatch)" stroke="#2f6d7d" stroke-width="1"/>
+<rect x="46.25" y="100" width="793.75" height="50" fill="#b8791f" stroke="#b8791f" stroke-width="1"/>
+<text x="443.1" y="129" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#f6f1e6">chunked-prefill chunk — 8,128 tokens</text>
+
+<path d="M150,183 L43,170 L43,152" fill="none" stroke="#2f6d7d" stroke-width="1.3" marker-end="url(#arrTealB)"/>
+<text x="155" y="186" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#2f6d7d">≈64 decode tokens — one tiny sliver each</text>
+
+<!-- Step B: 2,048 decode tokens, 6,144 prefill -->
+<text x="40" y="230" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">Step N+k — 2,048 running sequences</text>
+<rect x="40" y="240" width="200" height="50" fill="url(#decodeHatch)" stroke="#2f6d7d" stroke-width="1"/>
+<text x="140" y="269" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11.5" fill="#221c12">2,048 decode tokens</text>
+<rect x="240" y="240" width="600" height="50" fill="#b8791f" stroke="#b8791f" stroke-width="1"/>
+<text x="540" y="269" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#f6f1e6">chunked-prefill chunk — 6,144 tokens</text>
+
+<!-- scale ticks -->
+<line x1="40" y1="290" x2="40" y2="296" stroke="#221c12" stroke-width="1.5"/>
+<line x1="240" y1="290" x2="240" y2="296" stroke="#221c12" stroke-width="1.5"/>
+<line x1="440" y1="290" x2="440" y2="296" stroke="#221c12" stroke-width="1.5"/>
+<line x1="640" y1="290" x2="640" y2="296" stroke="#221c12" stroke-width="1.5"/>
+<line x1="840" y1="290" x2="840" y2="296" stroke="#221c12" stroke-width="1.5"/>
+<text x="40" y="310" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#8d8370">0</text>
+<text x="240" y="310" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#8d8370">2,048</text>
+<text x="440" y="310" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#8d8370">4,096</text>
+<text x="640" y="310" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#8d8370">6,144</text>
+<text x="840" y="310" text-anchor="middle" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#8d8370">8,192</text>
+<text x="440" y="326" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">tokens in this step's budget</text>
+
+<!-- legend -->
+<rect x="40" y="348" width="16" height="14" fill="#b8791f"/>
+<text x="62" y="359" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">chunked-prefill chunk — fills the remainder</text>
+<rect x="400" y="348" width="16" height="14" fill="url(#decodeHatch)" stroke="#2f6d7d" stroke-width="1"/>
+<text x="422" y="359" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">decode tokens — one per running sequence</text>
+</svg>

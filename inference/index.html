@@ -29,6 +29,8 @@
   </script>
   <link rel="stylesheet" href="../assets/style.css?v=20260725">
   <link rel="stylesheet" href="../assets/course.css?v=20260725">
+  <!-- course-local: figures, callouts, disclosure blocks, widget shells -->
+  <link rel="stylesheet" href="assets/inf.css?v=20260726">
 </head>
 <body>
   <div id="progress-bar"></div>
@@ -68,7 +70,7 @@
         </a>
         <span class="course-chip current" aria-current="page">
           <span class="chip-title">Inference Engineering</span>
-          <span class="chip-desc">17 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
+          <span class="chip-desc">23 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
         </span>
       </nav>
 
@@ -103,7 +105,17 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="assets/inf.js?v=20260725"></script>
-  <script src="../assets/course.js?v=20260725"></script>
+  <script src="assets/inf.js?v=20260726"></script>
+  <script src="../assets/course.js?v=20260726"></script>
+
+  <!-- Interactive tools. A <script> written into a markdown chapter never runs
+       (course.js renders through innerHTML, which flags scripts as already
+       executed), so every widget is registered here and mounted into a
+       placeholder div by the host. Order is irrelevant: a late define()
+       triggers a rescan. Each is deferred so none of it blocks first paint. -->
+  <script defer src="assets/inf-widgets.js?v=20260726"></script>
+  <script defer src="assets/inf-stackmap.js?v=20260726"></script>
+  <script defer src="assets/inf-calculators.js?v=20260726"></script>
+  <script defer src="assets/inf-simulator.js?v=20260726"></script>
 </body>
 </html>

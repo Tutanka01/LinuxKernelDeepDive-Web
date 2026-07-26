@@ -6,6 +6,8 @@
 > slow and the rest are fast, and why serving one model to thousands of people
 > is a hard systems problem — the problem this whole course is about.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="client,api,runner"></div>
+
 You open a chat box, type "Explain how a rainbow forms," and press Enter. A
 half-second of nothing. Then words appear — one small chunk at a time, left to
 right, at roughly reading speed, as if something on the other end were typing.
@@ -176,6 +178,15 @@ token comes along, the model reuses those saved notes instead of recomputing the
 > that growing cache is one of the central engineering problems of serving, and it
 > gets its own chapter: [PagedAttention & Prefix Caching](#/paged-kv-cache).
 
+> [!bridge] You already know this — from the Linux course
+> The page cache plays the same trick: hold the expensive result of a slow
+> operation in fast memory so you never pay for it twice, and spend your
+> scarce RAM to buy back time. What differs is what gets avoided — the page
+> cache saves you a *disk read*, the KV cache saves you *recomputation* — and
+> that KV entries belong to one conversation, so they cannot be shared between
+> users the way a hot file's pages are.
+> [→ Linux: Watch the Page Cache Work](../#/lab-page-cache)
+
 ## What "serving" actually means
 
 Everything so far described one request. **Serving** is running this for the real
@@ -216,6 +227,8 @@ has a name you'll meet constantly: **TTFT** (time to first token), as distinct f
 the steady per-token pace that follows. A long prompt means a longer prefill means
 a longer wait for that first word — you can feel the physics through the screen.
 
+![One request's timeline: queue wait and tokenization, then a single wide prefill block that swallows the whole prompt in one pass, then a long train of narrow evenly spaced decode ticks, one per output token, ending at the stop token. TTFT is bracketed from arrival to the first tick; the steady gap between later ticks is the per-token pace.](assets/diagrams/request-timeline.svg)
+
 ## Why this is a systems discipline
 
 If a model were just a function you called once, this would be a math course. It
@@ -230,12 +243,68 @@ minimize one user's latency (giving them the GPU all to themselves) waste capaci
 Navigating that trade-off — and bending it in your favor — is the craft this
 course teaches.
 
+> [!bridge] You already know this — from the Linux course
+> This is the scheduler's oldest dilemma in new clothes: the Linux run queue
+> also trades one task's responsiveness against the whole machine's
+> throughput, and the timeslice is the knob on exactly that. What differs is
+> the granularity and the stakes — a CPU context switch costs microseconds and
+> can happen almost anywhere, while a GPU is committed to a batch for the
+> whole forward pass, and every idle millisecond of it bills at $2–3 an hour.
+> [→ Linux: CPU Scheduling](../#/scheduling)
+
 > **State of play (mid-2026):** the stakes are enormous and concrete. The price of
 > LLM output has fallen by very roughly **95% since 2023** — not mainly because
 > chips got cheaper, but because the *serving* techniques in this course
 > (continuous batching, paged caches, quantization, speculative decoding,
 > disaggregation) squeezed far more useful work out of each GPU. The engineering
 > *is* the cost curve. That is why it's worth a whole course.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>If the model only ever scores the next token, how does it produce a coherent argument?</summary>
+
+Because the text it has already written is part of its input on every
+subsequent pass. By the time it is choosing token 300 it is conditioning on
+the 299 tokens it just committed to, so the constraint "be consistent with
+what I already said" is baked into the scoring rather than planned in advance.
+Coherence is an emergent property of a very good next-token scorer running in
+a loop, not evidence of a plan held somewhere. That is also why a model can
+paint itself into a corner: it cannot revise token 12 once token 13 exists.
+
+</details>
+
+<details>
+<summary>Why can't the server compute the whole answer in parallel and send it in one go?</summary>
+
+Because of the autoregressive chain — token 10 is part of the input needed to
+produce token 11, so there is nothing to parallelise *within* one response.
+What the server does parallelise is *across* responses: many users' decode
+steps are packed into one pass over the model, which is where all the
+throughput comes from. Streaming is then just honesty about the situation —
+the tokens genuinely become available one at a time, so there is no reason to
+withhold them. [Continuous Batching & Scheduling](#/continuous-batching) is
+that packing, in detail.
+
+</details>
+
+<details>
+<summary>When I send a follow-up message, does the model re-read the whole conversation?</summary>
+
+Logically yes — every turn's tokens are part of the prompt for the next turn,
+which is why long chats get slower and more expensive to start. Physically,
+often no: if the server still holds the KV cache for that conversation's
+prefix, it can skip straight past the part it has already digested and prefill
+only your new message. That is prefix caching, and it is the difference
+between a follow-up costing a few hundred tokens of prefill and costing tens
+of thousands. The mechanism is
+[PagedAttention & Prefix Caching](#/paged-kv-cache).
+
+</details>
+
+</div>
 
 ## Where this course goes
 

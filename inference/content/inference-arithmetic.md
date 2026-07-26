@@ -7,6 +7,8 @@
 > batching stops being free, and what a token actually costs. Every later
 > chapter leans on these numbers.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="batch,runner,kv"></div>
+
 Here is a fact that surprises almost everyone. An H100 can do roughly 990
 trillion floating-point operations per second. Ask it to generate text from a
 70-billion-parameter model, one user at a time, and it runs at **under one
@@ -103,11 +105,49 @@ puts you at intensity ≈ 1000.
                   I_ridge ≈ 295  (H100)
 ```
 
+![The H100 roofline with the workload plotted on it: batch-1 decode sitting far down the bandwidth slope at about 1 FLOP/byte, prefill sitting up on the flat compute roof, and a trail of intermediate points marking growing decode batch sizes walking from one to the other across the ridge at 295.](assets/diagrams/prefill-decode-roofline.svg)
+
 This asymmetry is the single most important fact in inference serving. It is why
 prefill and decode have completely different performance characters, different
 metrics, different costs — and, later, why some systems run them on **separate
 pools of GPUs** entirely ([Disaggregated Serving](#/disaggregation)). Hold onto
 it; the rest of the course is footnotes to this picture.
+
+> [!prereq] Attention in sixty seconds
+> The next section derives a formula with four factors in it. Here is where
+> every one of them comes from, from scratch.
+>
+> A transformer layer turns each token's embedding into **three** vectors by
+> multiplying it with three learned matrices. The **query** (`Q`) is "what am I
+> looking for." The **key** (`K`) is "what do I offer to anyone looking." The
+> **value** (`V`) is "what I contribute if I am chosen." Nothing about the three
+> is mystical; they are three different linear views of the same token.
+>
+> Attention then does one thing. It takes the current token's query and takes
+> the dot product against the key of **every token at or before it** — that dot
+> product is a relevance score, high when the query and the key point the same
+> way. The scores go through a softmax, which turns them into weights that are
+> positive and sum to one. The layer's output for this token is those weights
+> applied to the values: a weighted average of what every earlier token
+> contributes, mixed in proportion to how well it matched.
+>
+> Read that again with generation in mind. To produce token `N` you compute
+> **one** query — the one belonging to token `N` — and you need the keys and
+> values of tokens `1 … N−1` to score and mix against. Those keys and values do
+> not change: token 7's key is a function of token 7 alone, and it is identical
+> at step 8, step 800 and step 80,000. So they are worth keeping. The query is
+> not: it is built from the token you are currently processing, consumed by one
+> softmax, and never referenced again. **That asymmetry is the whole reason the
+> cache is called a KV cache and not a QKV cache** — K and V are re-read on
+> every future step, Q is used once and discarded.
+>
+> Two more factors. A layer does not run one attention but `n_heads` of them in
+> parallel, each with its own smaller Q/K/V — so multiply by the head count.
+> And each head's vectors have a width, `head_dim`, typically 64 or 128. Keys
+> and values, times layers, times heads, times head_dim, times bytes per number:
+> that is the formula you are about to meet. The architectural variations that
+> shrink the head count are
+> [Attention Architectures for Serving](#/attention-for-serving).
 
 ## The KV cache: what you store so you don't recompute
 
@@ -146,6 +186,14 @@ you can serve at once**, and so caps throughput. That single fact motivates
 PagedAttention, prefix caching, KV quantization, and half the chapters that
 follow.
 
+![KV cache size for a single sequence against context length, three straight lines — Llama-3-8B at 131 KB per token, Llama-3-70B at 328 KB, DeepSeek-V3 with MLA at about 70 KB — crossing two dashed ceilings: 80 GB for one H100 and 140 GB for the 70B model's own BF16 weights, which the 70B line reaches at roughly 427,000 tokens.](assets/diagrams/kv-growth.svg)
+
+Put your own model and context length in and watch the pool drain:
+
+<div class="inf-widget" data-widget="kv-calculator">
+<p class="inf-widget-fallback">Interactive KV-cache and memory-fit calculator — needs JavaScript enabled.</p>
+</div>
+
 ## Batching: free lunch until the ridge
 
 Decode is memory-bound because one token shares a weight read with no one. The
@@ -153,6 +201,16 @@ fix is obvious once stated: serve **B** independent sequences together. The
 weight bytes moved stay fixed (you read each weight once and apply it to all B
 tokens), while FLOPs scale as `2·P·B`. Arithmetic intensity ≈ **B**. Batching is
 the *only* lever that walks decode up toward the ridge.
+
+> [!bridge] You already know this — from the Linux course
+> This is the same economics as batching submissions into an io_uring ring
+> instead of paying a syscall per I/O: there is a large fixed cost per trip,
+> so the second, tenth and hundredth item on the trip are nearly free, and the
+> curve stays flat until some *other* resource starts binding. What differs is
+> which fixed cost you are amortising — a ring transition there, a full read
+> of the model's weights out of HBM here — and that the GPU's version has a
+> sharp, computable break-even you can name in advance.
+> [→ Linux: Modern I/O & io_uring](../#/modern-io)
 
 Decode becomes compute-bound when `B` reaches the ridge — the **critical batch
 size**, which is exactly the same ratio as `I_ridge`:
@@ -174,6 +232,8 @@ so *halves* B_crit.) The interpretation is where the money is:
 - **B above B_crit — compute-bound.** Now FLOP-limited; per-token latency grows
   with B. You trade latency for diminishing throughput — and likely hit the
   KV-cache HBM wall first anyway.
+
+![Dual-axis chart against batch size: throughput climbs linearly then flattens at a plateau, while per-token latency stays flat then rises linearly, both bending at the same vertical line at B_crit ≈ 295 — the region left of it shaded "free lunch", the region right of it shaded "you now pay latency".](assets/diagrams/batching-knee.svg)
 
 > **Common trap — attention doesn't batch away.** B_crit is the batch size at
 > which the *weight matmuls* saturate compute. Attention is different: each
@@ -217,6 +277,16 @@ In the memory-bound regime `I_work ≪ I_ridge`, so MFU ≪ MBU — quoting deco
 ~10% MFU as if the GPU were broken is the classic misread. **Report the
 utilization whose ceiling is 100% for the binding resource:** MBU for decode, MFU
 for prefill.
+
+> [!bridge] You already know this — from the Linux course
+> "Find the binding resource before you optimise anything" is the USE method
+> in a different costume: you were already taught not to read CPU utilisation
+> on a box that is actually blocked on I/O. What differs is that a GPU offers
+> you two plausible-looking meters, MFU and MBU, for what is really one
+> quantity, and the misleading one reads *low* rather than high — a 9% decode
+> MFU looks like a broken deployment and is in fact exactly what a healthy
+> memory-bound decode looks like.
+> [→ Linux: Performance Analysis Methodology](../#/perf-methodology)
 
 ## The money
 
@@ -265,6 +335,133 @@ cheap storage. That is prefix caching; the full story is
 6. **"Output costs more because it's worth more."** No — decode is sequential and
    bandwidth-bound, ~5× less efficient than parallel prefill. Physics, not
    marketing.
+
+## Exercises
+
+<div class="exercise">
+
+**Exercise 1.** A GQA model has **64 layers**, **8 KV heads**, **head_dim
+128**, and is served in **BF16**. Compute its KV cache per token, and for one
+sequence at a **16K** context. If the engine leaves a **60 GB** KV pool after
+weights and overhead, how many such sequences fit — and what does switching
+the cache to FP8 buy you?
+
+<details>
+<summary>Reveal answer</summary>
+
+Per token, straight from `2 × layers × kv_heads × head_dim × bytes`:
+
+```text
+2 × 64 × 8 × 128 × 2  =  262,144 bytes  =  256 KiB ≈ 262 KB / token
+```
+
+One sequence at 16,384 tokens:
+
+```text
+262,144 × 16,384  =  4.29e9 bytes  ≈  4.29 GB / sequence
+```
+
+Concurrency in a 60 GB pool: `60 / 4.29 ≈ 13` sequences. Thirteen — on a
+model whose weights you probably sized in five seconds and then stopped
+thinking about.
+
+FP8 KV halves `bytes_per_elem` from 2 to 1, so per-token drops to 131 KB,
+per-sequence to **2.15 GB**, and concurrency **doubles to ~27**. Nothing about
+the weights changed; you bought 2× throughput out of the cache alone.
+
+Worth noticing what GQA already saved you. Plain multi-head attention with 64
+KV heads instead of 8 would cost `2 × 64 × 64 × 128 × 2 = 2.1 MB/token` — 8×
+more, 34 GB for that one 16K sequence, and a concurrency of **one**.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 2.** Estimate TTFT for an **8,192-token prompt** to **Llama-3-8B**
+in BF16 on a single **H100** (989 TFLOP/s dense), assuming a prefill **MFU of
+40%** and no queue wait. Then say what happens at a 32K prompt against a 1-second
+TTFT SLO.
+
+<details>
+<summary>Reveal answer</summary>
+
+Prefill compute, from the 2·P rule applied to every prompt token:
+
+```text
+FLOPs = 2 × 8e9 × 8,192  =  1.31e14 FLOPs
+```
+
+The achieved rate is peak times MFU, not peak:
+
+```text
+rate = 989e12 × 0.40  =  3.96e14 FLOP/s
+
+T    = 1.31e14 / 3.96e14  ≈  0.331 s  ≈  331 ms
+```
+
+So **~330 ms of prefill**, and TTFT is that plus queue wait plus tokenization.
+Note that bandwidth never entered the calculation — prefill is compute-bound,
+which is exactly why MFU is the meter to quote here.
+
+At 32,768 tokens the 2·P term scales linearly, 4× → **~1.33 s**, already past
+a 1 s SLO before the request has waited in a queue for a single millisecond.
+Two honest caveats. The quadratic attention term
+(`≈ 4 · n_layers · T² · d_model`, halved for causal masking) adds roughly
+**13%** at 8K and grows as T², so it is a rounding error at short prompts and
+is not one at 128K. And 40% MFU is optimistic if prefill is chunked to protect
+running decodes — which is precisely the trade
+[Continuous Batching & Scheduling](#/continuous-batching) is about.
+
+</details>
+
+</div>
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>Does the 2·P rule apply to prefill as well, or only to decode?</summary>
+
+To both — it is a cost *per token*, not per request. Prefilling a T-token
+prompt costs about `2·P·T` FLOPs, which is why prefill time scales linearly
+with prompt length. What changes between the phases is not the FLOP count but
+the bytes: decode moves `P × bytes_per_weight` to produce one token, prefill
+moves the same bytes to produce T of them. Same numerator, T× smaller
+denominator, opposite sides of the ridge.
+
+</details>
+
+<details>
+<summary>If B_crit is around 280, why do real deployments run batches of 32 or 64?</summary>
+
+Because B_crit is the batch size at which *the weight matmuls* would saturate
+compute, and you usually hit two other walls first. The KV cache runs out of
+HBM — at 328 KB/token, 280 concurrent sequences at even 8K context is ~750 GB
+of cache — and attention's KV reads never amortise across the batch, so
+serving stays memory-bound anyway. B_crit tells you the batching lever is
+*not* the thing costing you latency; it does not promise the lever goes that
+far. [Sizing a Deployment](#/sizing-a-deployment) does the addition properly.
+
+</details>
+
+<details>
+<summary>My measured decode is 20% slower than bytes ÷ bandwidth predicts. What am I missing?</summary>
+
+Three things, in roughly that order of size. Achievable HBM bandwidth is
+~85–90% of the spec figure, so start by deflating 3.35 TB/s accordingly. The
+weights are not the only bytes — every sequence in the batch also streams its
+own KV cache each step, and at long context that term stops being small.
+Finally there is per-step overhead that is neither FLOPs nor bytes: kernel
+launches, sampling, Python-side scheduling, which is what CUDA graphs exist to
+remove ([Kernels, Graphs & Compilation](#/kernels-and-compilation)). Landing
+within 10–25% of the naive bandwidth model is the expected outcome, not a bug.
+
+</details>
+
+</div>
 
 ## What to remember
 

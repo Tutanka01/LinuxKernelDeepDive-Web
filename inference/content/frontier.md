@@ -147,6 +147,14 @@ and the network: bigger than HBM, faster than SSD, addressable by many GPUs
 (HyMCache, SAC). It slots straight into the tiering logic from
 [disaggregation](#/disaggregation) as one more level.
 
+> [!bridge] You already know this — from the Linux course
+> Linux already models CXL memory as what it is: a NUMA node with no CPUs and a
+> worse latency, that the kernel can allocate from and demote cold pages into.
+> The KV question is the same allocation question with a different cost table —
+> is this tier fast enough to beat rebuilding the bytes? — and by the crossover
+> rule, for a large model it comfortably is.
+> [→ Linux: NUMA Deep Dive](../#/numa-deep-dive)
+
 **KV / prefill as a cross-datacenter service.** If prefill is compute-bound and
 decode is memory-bound, and KV cache is just bytes, then in principle you can
 compute a prompt's KV *somewhere else* and ship it to whichever fleet decodes.
@@ -254,6 +262,53 @@ You no longer need a curriculum — you need a feed. The high-signal sources:
   dissolving training/serving boundary.
 - **Bet on the invariants** (roofline, KV cache, batching, the memory wall);
   **hold the volatile layer loosely** (engines, formats, SKUs, prices).
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>How do I tell a frontier direction that will ship from one that won't?</summary>
+
+Ask what it costs the people who would have to adopt it. Trained sparse
+attention shipped because it needed no change to the serving stack — same KV
+cache, same batching, same engines, day-0 support — so the only question was
+whether the model was good. Diffusion LLMs are a harder sell not because the
+idea is worse but because adopting one invalidates exact KV caching and the
+continuous-batching rhythm underneath it. The techniques that land fastest are
+the ones that compose with what is already deployed, which is also why
+block-diffusion speculation is the most plausible route for diffusion to arrive
+at all.
+
+</details>
+
+<details>
+<summary>Should I be designing around diffusion LLMs today?</summary>
+
+No, and the honest reason is in the state-of-play box: no frontier lab runs one
+as a production workload. What is worth doing is keeping the *question* live —
+watch whether a dLLM's tokens-per-dollar at a given per-user speed ever beats
+autoregressive decoding plus speculation on the same silicon, because that
+single comparison decides it. Anything you build now that assumes an exact,
+causal KV cache is a safe assumption for this hardware generation.
+
+</details>
+
+<details>
+<summary>This chapter is stamped July 2026. How do I re-date it myself?</summary>
+
+Work down the volatile layer in order of how fast it rots. Prices move
+quarterly — check Artificial Analysis. SKUs and rack designs move on a roughly
+annual cadence, so re-read the buyer's checklist in
+[Hardware & Economics](#/hardware-and-economics) against whatever shipped since.
+Engine defaults move monthly, which is what the vLLM and SGLang blogs are for.
+The durable layer — roofline asymmetry, KV centrality, batching economics, the
+memory wall — is what lets you skim all of that instead of re-learning it, and
+it is the part that has not needed re-dating once.
+
+</details>
+
+</div>
 
 You started this course not knowing what a token was. You're ending it able to
 read a frontier lab's production postmortem — approximate KV caches, wide

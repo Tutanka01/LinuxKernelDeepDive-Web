@@ -7,6 +7,8 @@
 > attention" on a model card and know exactly what each one does to the memory
 > that caps your concurrency — and why every 2026 flagship model uses one.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="kernels,kv"></div>
+
 You already know the KV cache is the villain of serving. [Inference
 Arithmetic](#/inference-arithmetic) gave you the formula — `2 × n_layers ×
 n_kv_heads × head_dim × bytes` per token — and the punchline: at long context and
@@ -130,6 +132,8 @@ model, caches **~70 KB/token** — *less than the 70B GQA model's 328 KB.* A mod
 nearly ten times larger with a smaller per-token cache, because the cache was
 designed as a compression target, not a raw dump of every head.
 
+![Four attention architectures side by side — MHA wiring 64 query heads to 64 K/V heads at 2.6 MB per token, MQA collapsing to one shared K/V head at 41 KB, GQA-8 grouping the query heads onto 8 K/V heads at 328 KB, and MLA caching a single 576-dimension latent that an up-projection expands at decode time, about 70 KB](assets/diagrams/attention-architectures.svg)
+
 Two subtleties make MLA work, and both are beautiful.
 
 **1. Decoupled RoPE — why the obvious thing breaks.** Transformers encode token
@@ -184,6 +188,15 @@ gpt-oss handles it by baking in a **learnable per-head sink logit** — an expli
 real token. Engines must cooperate: the kernel needs an explicit sink term, and
 the KV allocator must pin the sink tokens even under a sliding window.
 
+> [!bridge] You already know this — from the Linux course
+> A sliding window is an eviction policy, and Linux's page-cache reclaim is the
+> one you already have intuition for: keep the recently used, drop the rest.
+> What differs is the exception. Linux reclaim scans by recency, so the oldest
+> page is the first victim; here the *oldest* entry — token 0, the attention
+> sink — is the one entry you must never evict, and the KV allocator has to know
+> that as a rule, not learn it from access patterns.
+> [→ Linux: Virtual Memory](../#/memory)
+
 ## Trainable sparse attention: the real break from dense
 
 Every variant so far still attends *densely* within its window — each query sees
@@ -222,6 +235,16 @@ manages the SSM state alongside paged KV
 ([PyTorch](https://pytorch.org/blog/hybrid-models-as-first-class-citizens-in-vllm/)).
 Attention buys quality, SSM buys cheap long context — the industry **mixes them**
 rather than picking.
+
+> [!bridge] You already know this — from the distributed course
+> A KV cache is an append-only log of everything that happened; an SSM state is
+> a snapshot of what that log *means*. Raft makes exactly this trade when it
+> compacts: replace an unbounded log with a fixed-size snapshot of the state
+> machine, and bound your memory forever. The cost is the same in both places —
+> once the log is gone you can no longer replay a specific old entry verbatim,
+> which is precisely the recall weakness that forces SSM *hybrids* to keep a few
+> real attention layers around.
+> [→ Distributed: Raft, Step by Step](../distributed/#/raft)
 
 ## A serving footnote: extending context with RoPE scaling
 
@@ -263,6 +286,52 @@ extension and KV reuse pull against each other; the details belong to
   fixed-size state — O(1) memory — keeping a few attention layers for recall.
 - All are **design-time** choices about cache size. Production chose these plus
   quantization and paging over the cited-but-unshipped post-hoc eviction papers.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>The model card doesn't say "GQA" anywhere. How do I tell what it uses?</summary>
+
+Open the checkpoint's `config.json` and compare `num_attention_heads` with
+`num_key_value_heads`. Equal means MHA. `num_key_value_heads: 1` means MQA.
+Anything in between is GQA, and the ratio is the group count — 64 and 8 is
+GQA-8. That second number is the `n_kv_heads` in the KV formula, so it is the
+only one that sets your cache size. MLA models look different again: you will
+see a `kv_lora_rank` (512 for DeepSeek-V3) and a separate rope-dimension field
+instead of a K/V head count.
+
+</details>
+
+<details>
+<summary>Does GQA make decode faster, or only smaller?</summary>
+
+Both, and for the same reason. The query heads are untouched, so the attention
+FLOPs barely change — but decode is bandwidth-bound, and each step must read
+every cached K and V for every sequence in the batch. Cutting `n_kv_heads` from
+64 to 8 cuts those reads 8×, so at long context and high concurrency, where KV
+traffic rivals or exceeds weight traffic, GQA is a real latency win on top of
+the capacity win. At batch 1 with a short context, where weight reads dominate,
+you will barely notice it.
+
+</details>
+
+<details>
+<summary>If MLA caches less per token than GQA, why isn't everyone shipping it?</summary>
+
+Because it is not a serving flag — it is a pretraining commitment. The
+down-projection and up-projection matrices are trained weights, so you cannot
+switch a finished GQA checkpoint to MLA the way you can turn on FP8 KV. It also
+demands more of the engine: decoupled RoPE means two key paths to manage, and
+matrix absorption means a decode kernel distinct from the prefill one. GQA needs
+none of that — it is one integer in a config, supported everywhere — which is
+why it is the default and MLA appears mainly in models built around it from day
+one.
+
+</details>
+
+</div>
 
 ```quiz
 [

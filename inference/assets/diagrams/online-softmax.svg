@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>Online softmax: the running (m, l, O) triple across tiles</title>
+<desc>Worked example from the chapter: one query row, four keys with scores 3, 1, 4, 2 and values 10, 20, 30, 40, processed as two tiles of two. Four panels show the running state evolving: before any tile (m=-infinity, l=0, o=0); after tile 1 with scores 3 and 1 (m=3, l=1.135, o=12.707); tile 2 arriving with scores 4 and 2, whose max of 4 exceeds the running max of 3, forcing a rescale of l and o by the correction factor exp(3-4)=0.368; and finally folding tile 2 in to reach l=1.553, o=40.09, giving O=o/l=25.81 — identical to a plain softmax computed over all four scores at once.</desc>
+<rect width="880" height="460" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">Online softmax: rescale what you've got when the max moves</text>
+<text x="24" y="54" font-size="12" fill="#6b6250">Query row, scores [3, 1, 4, 2], values [10, 20, 30, 40], two tiles of two</text>
+
+<!-- Panel 1 -->
+<rect x="40" y="90" width="190" height="260" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="135" y="110" font-size="11" font-weight="600" text-anchor="middle" fill="#221c12">Before any tile</text>
+<g font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">
+  <text x="50" y="150">keys' scores: 3,1,4,2</text>
+  <text x="50" y="172">values: 10,20,30,40</text>
+  <text x="50" y="200">m = &#8722;&#8734;</text>
+  <text x="50" y="222">&#8467; = 0</text>
+  <text x="50" y="244">o = 0</text>
+</g>
+
+<text x="240" y="226" font-size="18" text-anchor="middle" fill="#221c12">&#8594;</text>
+
+<!-- Panel 2 -->
+<rect x="250" y="90" width="190" height="260" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="345" y="110" font-size="11" font-weight="600" text-anchor="middle" fill="#221c12">Tile 1: scores [3, 1]</text>
+<g font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">
+  <text x="260" y="150">m = max(3,1) = 3</text>
+  <text x="260" y="172">weights: 1.000, 0.135</text>
+  <text x="260" y="194">&#8467; = 1.000+0.135 = 1.135</text>
+  <text x="260" y="216">o = 10.00+2.707</text>
+  <text x="260" y="236" font-weight="600">  = 12.707</text>
+</g>
+
+<text x="450" y="226" font-size="18" text-anchor="middle" fill="#221c12">&#8594;</text>
+
+<!-- Panel 3 -->
+<rect x="460" y="90" width="190" height="260" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="555" y="110" font-size="11" font-weight="600" text-anchor="middle" fill="#221c12">Tile 2 arrives (max 3&#8594;4)</text>
+<g font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">
+  <text x="470" y="150">new max = 4 (&gt; old m=3)</text>
+</g>
+<rect x="466" y="160" width="178" height="18" fill="#b8791f" fill-opacity="0.2"/>
+<text x="470" y="173" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">correction: e^(3&#8722;4)=0.368</text>
+<g font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">
+  <text x="470" y="198">&#8467; &#8592; 1.135&#215;0.368=0.418</text>
+  <text x="470" y="220">o &#8592; 12.707&#215;0.368=4.675</text>
+  <text x="470" y="242" fill="#6b6250">(rescaled &#8212; not refolded yet)</text>
+</g>
+
+<text x="660" y="226" font-size="18" text-anchor="middle" fill="#221c12">&#8594;</text>
+
+<!-- Panel 4 -->
+<rect x="670" y="90" width="190" height="260" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="765" y="110" font-size="11" font-weight="600" text-anchor="middle" fill="#221c12">Fold tile 2, finalize</text>
+<g font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12">
+  <text x="680" y="150">weights: 1.000, 0.135</text>
+  <text x="680" y="172">&#8467; = 0.418+1.135 = 1.553</text>
+  <text x="680" y="194">o &#8592; 4.675+(30+5.4)</text>
+  <text x="680" y="216">  &#8776; 40.09</text>
+</g>
+<rect x="676" y="226" width="178" height="24" fill="#4f7d2c" fill-opacity="0.18" stroke="#4f7d2c"/>
+<text x="765" y="243" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" font-weight="600" text-anchor="middle" fill="#221c12">O = 40.09/1.553 = 25.81</text>
+
+<text x="440" y="400" font-size="12" text-anchor="middle" fill="#6b6250">Rescale rule: exp(s&#8722;m_old) = exp(s&#8722;m_new)&#183;exp(m_old&#8722;m_new) &#8212; every accumulated term is off by exactly one shared factor.</text>
+<text x="440" y="420" font-size="11" font-style="italic" text-anchor="middle" fill="#6b6250">Same answer as a plain softmax over all four scores at once &#8212; computed with only two running numbers in flight.</text>
+</svg>

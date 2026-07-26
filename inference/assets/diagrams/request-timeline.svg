@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 340" width="880" height="340">
+<title>One request's timeline: prefill block then decode comb</title>
+<desc>A horizontal timeline of one request's life: queue wait, tokenize, a single wide prefill block covering all prompt tokens at once, then a long train of narrow evenly spaced decode ticks, one per output token, ending at EOS and detokenize. TTFT is bracketed from arrival to the first decode tick; TPOT is bracketed across two adjacent decode ticks.</desc>
+<rect width="880" height="340" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">One request's life: a fat prefill block, then a thin decode comb</text>
+
+<!-- guide lines -->
+<line x1="40" y1="120" x2="40" y2="150" stroke="#8d8370" stroke-width="1" stroke-dasharray="2,2"/>
+<line x1="292" y1="120" x2="292" y2="150" stroke="#8d8370" stroke-width="1" stroke-dasharray="2,2"/>
+
+<!-- TTFT bracket: arrival (x=40) to first decode tick (x=292) -->
+<path d="M40,110 L40,120 L292,120 L292,110" fill="none" stroke="#221c12" stroke-width="1.5"/>
+<text x="166" y="100" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="14" fill="#221c12">TTFT — arrival to first token</text>
+
+<!-- queue wait -->
+<rect x="40" y="150" width="60" height="60" fill="#a4462e" fill-opacity="0.18" stroke="#a4462e" stroke-width="1.5"/>
+<text x="70" y="228" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">queue wait</text>
+
+<!-- tokenize -->
+<rect x="100" y="150" width="40" height="60" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="120" y="228" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">tokenize</text>
+
+<!-- prefill block -->
+<rect x="140" y="150" width="140" height="60" fill="#b8791f" stroke="#b8791f" stroke-width="1.5"/>
+<text x="210" y="184" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#f6f1e6">prefill</text>
+<text x="210" y="228" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">all prompt tokens, one pass</text>
+
+<!-- decode comb: 21 ticks, x = 290 + 25i, width 4, height 50, i = 0..20 -->
+<rect x="290" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="315" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="340" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="365" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="390" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="415" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="440" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="465" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="490" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="515" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="540" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="565" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="590" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="615" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="640" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="665" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="690" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="715" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="740" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="765" y="155" width="4" height="50" fill="#2f6d7d"/>
+<rect x="790" y="155" width="4" height="50" fill="#2f6d7d"/>
+<text x="540" y="228" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">decode — one token per tick</text>
+
+<!-- EOS / detokenize -->
+<rect x="810" y="150" width="30" height="60" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="825" y="222" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">EOS /</text>
+<text x="825" y="234" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">detok</text>
+
+<!-- TPOT bracket, between tick i=5 (x=415, center 417) and i=6 (x=440, center 442) -->
+<path d="M417,215 L417,225 L442,225 L442,215" fill="none" stroke="#221c12" stroke-width="1.5"/>
+<text x="429" y="248" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="14" fill="#221c12">TPOT</text>
+<text x="429" y="264" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250">steady per-token gap</text>
+
+<!-- legend -->
+<rect x="40" y="296" width="14" height="14" fill="#a4462e" fill-opacity="0.18" stroke="#a4462e" stroke-width="1.5"/>
+<text x="60" y="307" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">queue — wasted, idle silicon</text>
+
+<!-- second legend row -->
+<rect x="300" y="296" width="14" height="14" fill="#b8791f"/>
+<text x="320" y="307" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">prefill — compute-bound</text>
+
+<rect x="560" y="296" width="14" height="14" fill="#2f6d7d"/>
+<text x="580" y="307" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">decode — memory-bound</text>
+</svg>

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" width="880" height="360" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>All-to-all vs. all-reduce as communication patterns</title>
+<desc>All-reduce: every GPU contributes a partial tensor and every GPU ends with the identical summed result — one shared answer. All-to-all: every GPU sends a different personalized shard to every other GPU and receives a different shard back from each — a full regrouping, not a reduction. All-to-all is harder to schedule because its payload is data-dependent (skewed by routing) rather than fixed-size like an all-reduce.</desc>
+<rect width="880" height="360" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">All-reduce (one answer) vs. all-to-all (a full regroup)</text>
+<line x1="440" y1="54" x2="440" y2="340" stroke="#ddd3bd"/>
+
+<text x="24" y="70" font-size="13" font-weight="600" fill="#221c12">All-reduce: symmetric reduction</text>
+<g fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f">
+  <circle cx="120" cy="150" r="24"/><circle cx="320" cy="150" r="24"/>
+  <circle cx="120" cy="250" r="24"/><circle cx="320" cy="250" r="24"/>
+</g>
+<g stroke="#3b5a8f" stroke-width="1.2">
+  <line x1="144" y1="150" x2="296" y2="150"/><line x1="120" y1="174" x2="120" y2="226"/>
+  <line x1="320" y1="174" x2="320" y2="226"/><line x1="144" y1="250" x2="296" y2="250"/>
+</g>
+<text x="220" y="300" font-size="11" text-anchor="middle" fill="#6b6250">every GPU ends holding the SAME sum</text>
+
+<text x="456" y="70" font-size="13" font-weight="600" fill="#221c12">All-to-all: personalized regroup</text>
+<g fill="#a4462e" fill-opacity="0.25" stroke="#a4462e">
+  <circle cx="560" cy="150" r="24"/><circle cx="760" cy="150" r="24"/>
+  <circle cx="560" cy="250" r="24"/><circle cx="760" cy="250" r="24"/>
+</g>
+<g stroke="#a4462e" stroke-width="1" marker-end="url(#ah)">
+  <line x1="560" y1="150" x2="760" y2="150"/>
+  <line x1="560" y1="150" x2="760" y2="250"/>
+  <line x1="560" y1="250" x2="760" y2="150"/>
+  <line x1="560" y1="250" x2="760" y2="250"/>
+  <line x1="760" y1="150" x2="560" y2="150"/>
+  <line x1="760" y1="250" x2="560" y2="250"/>
+</g>
+<text x="660" y="300" font-size="11" text-anchor="middle" fill="#6b6250">each GPU sends a DIFFERENT shard to each other</text>
+<text x="660" y="318" font-size="10" text-anchor="middle" fill="#a4462e">payload size is data-dependent &#8212; hard to schedule</text>
+
+<text x="440" y="346" font-size="11" font-style="italic" text-anchor="middle" fill="#6b6250">A reduction has one fixed-size answer; a regroup's shape depends on where tokens routed &#8212; that's the scheduling problem.</text>
+</svg>

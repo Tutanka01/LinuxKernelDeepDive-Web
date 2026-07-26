@@ -7,6 +7,8 @@
 > conveniently left out. You have the whole technical stack now; this is
 > what you run it *on*, what it *costs*, and how not to get sold.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="runner,fabric"></div>
+
 You know how inference works. You do not yet know what it costs, or why a
 GPU that is "4× faster on paper" can serve tokens more *expensively* than
 the one it replaced. Those answers do not live in a spec sheet — they live
@@ -37,6 +39,15 @@ arithmetic, disaggregation, and wide-EP all working *at once*. SemiAnalysis
 measured Hopper→Blackwell gains of 9.7× to 65× tokens-per-dollar and traced
 most of it to the fabric, not the raw math. A serving system is a network
 of chips, and NVIDIA sells the network.
+
+> [!bridge] You already know this — from the Linux course
+> A NUMA machine is one address space with a cliff in it: local memory is fast,
+> the far node is not, and *placement* is what decides which one you get. An
+> NVL72 is that idea one level up — 72 GPUs presented to the scheduler as a
+> single accelerator, with the cliff pushed out to the rack boundary instead of
+> the socket boundary. What differs is that you cannot fix a bad placement here
+> by migrating a page; the expert or the KV block is where the topology put it.
+> [→ Linux: NUMA Deep Dive](../#/numa-deep-dive)
 
 > **State of play (mid-2026):** **B200** (Blackwell): 192 GB HBM3e,
 > ~8 TB/s, ~9,000 FP4 TFLOPS, 1 kW — roughly 4× H100 for inference.
@@ -197,6 +208,16 @@ which is why batch discounts, off-peak pricing, and caching exist at all.
 > floor; providers differentiate on latency SLAs, fine-tuning, compliance,
 > and catalog — *not* the tokens.
 
+Both halves of that lesson are dials you can turn. Set the GPU-hour price and
+the tokens/sec to your own hardware, then move only two things — **fleet
+utilisation** and **prefix-cache hit rate** — and watch how much further they
+push the cost per million tokens than any plausible change in the sticker price
+of the silicon does.
+
+<div class="inf-widget" data-widget="cost-calculator">
+<p class="inf-widget-fallback">Interactive token cost and margin calculator — needs JavaScript enabled.</p>
+</div>
+
 ## Benchmarks: how not to be fooled
 
 This section should sting, because the numbers you see marketed are
@@ -250,6 +271,16 @@ dial — which is why planners have stopped counting GPUs and started counting
 **tokens per megawatt**. When the grid connection is the wall, that is the
 only number that scales.
 
+> [!bridge] You already know this — from the Linux course
+> Governors and C-states encode the same bargain at a smaller scale: idle
+> silicon still costs, so the win comes from doing the work in fewer, denser
+> bursts and sleeping properly in between rather than trickling it out. What
+> differs is where the fixed cost sits. A CPU's is the wake-up latency; a GPU's
+> is the weight sweep out of HBM, which one step pays for and every sequence in
+> the batch shares — so on a GPU the "race to idle" instinct is really a race to
+> a bigger batch.
+> [→ Linux: Power Management](../#/power-management)
+
 ## What to remember
 
 - **Buy the rack, not the chip.** NVIDIA's moat is composability — FP4,
@@ -272,6 +303,106 @@ only number that scales.
   The Pareto curve is the only honest comparison; report P50/P99 TTFT and
   TPOT at a fixed rate. And power — tokens per megawatt — is the constraint
   everything now bends around.
+
+## Exercises
+
+<div class="exercise">
+
+**Exercise 1.** You serve an open-weight 70B on one replica of **8×H100**,
+rented from a neocloud at **$1.40 per GPU-hour**. Under production traffic —
+input:output ratio **20:1**, prefix-cache hit rate **75%** — you measure
+**12,000 output tokens/sec** sustained at batch size 256. Averaged over the
+month the replica is actually serving **70%** of the hours you pay for. You list
+output at **$0.60 per million tokens**.
+
+(a) What does a million output tokens cost you to serve, and what is your gross
+margin? (b) Your cache hit rate collapses to **0%** after a prompt-format change
+breaks prefix stability. What happens to the margin? Use the course's work model:
+an output token costs ~5× a fresh input token, and a cached input token costs
+0.1× a fresh one.
+
+<details>
+<summary>Reveal answer</summary>
+
+**(a) Cost and margin at 75% hit rate.**
+
+What you rent: `8 × $1.40 = $11.20 per replica-hour`. What the replica produces
+while it is actually serving: `12,000 × 3,600 = 43.2M` output tokens per
+serving-hour. But you pay for hours, not serving-hours, and only 70% of them are
+serving: `43.2M × 0.70 = 30.24M` output tokens per *rented* hour.
+
+So the cost is `$11.20 ÷ 30.24 = $0.370 per 1M output tokens`, and against the
+$0.60 list price the margin is `($0.60 − $0.370) ÷ $0.60 = 38%`.
+
+**A 38% gross margin** — thin, capital-intensive, and entirely in line with the
+~50% the section quotes for commodity open-weight serving.
+
+**(b) The same replica at a 0% hit rate.**
+
+Count the GPU work behind one delivered output token, in units of one output
+token. The decode itself is 1. The 20 input tokens that came with it are worth
+0.2 each (an output token is 5× a fresh input token), and a cached one is worth
+0.02. At 75%: `1 + 20 × (0.25 × 0.2 + 0.75 × 0.02) = 1 + 1.30 = 2.30` units. At
+0%: `1 + 20 × 0.2 = 1 + 4.00 = 5.00` units.
+
+The same GPU-hour now buys `2.30 ÷ 5.00 = 0.46×` as many delivered output
+tokens, so the cost per million rises by `5.00 ÷ 2.30 ≈ 2.17×`, to
+`$0.370 × 2.17 = $0.805 per 1M output tokens` — a margin of
+`($0.60 − $0.805) ÷ $0.60 = −34%`.
+
+**You now lose about 34 cents on every dollar of revenue.** Note what did *not*
+change: the hardware, the rental rate, the batch size, the utilisation, and the
+list price. One client-side formatting change moved the business from a 38%
+margin to underwater, which is the concrete version of the claim that
+**cache-hit rate dominates the bill more than sticker price does**.
+
+</details>
+
+</div>
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>A neocloud quotes $1.40/GPU-hour and my hyperscaler quotes $11. Is the neocloud really eight times cheaper?</summary>
+
+On the line item, yes; on the bill, usually not by that much. The hyperscaler
+price bundles committed capacity, a support path, and a network you have already
+qualified, while the cheap rate is typically spot-ish, on a fabric you have to
+verify before you can plan any of the disaggregation in this course. And the
+exercise above shows the term that actually dominates: a fleet you can only keep
+70% full at $1.40 loses to a fleet you can keep 95% full at $2.20. Price the
+GPU-hours you will *use*, not the ones you can rent.
+
+</details>
+
+<details>
+<summary>Deflation slowed to ~6%. Should I wait for prices to fall before committing to a model?</summary>
+
+Waiting was a good strategy when prices halved twice a year; on an S-curve's
+flat section it is just delay. The remaining drops are gated on new silicon
+rather than on software you get for free with an engine upgrade, which means
+they arrive on a hardware cadence — years, not months. The better move is to
+build so the volatile layer is swappable: keep the model behind an interface,
+keep your evals runnable against any provider, and re-price quarterly.
+
+</details>
+
+<details>
+<summary>Does a chip with more HBM always serve more users?</summary>
+
+More capacity buys more concurrent KV, so it raises the *ceiling* on
+concurrency — but whether you reach it depends on bandwidth. Filling 288 GB with
+KV and then discovering each decode step must sweep the weights and all of that
+KV out of HBM at a fixed TB/s means you have bought users you cannot serve at
+your inter-token-latency target. Capacity and bandwidth are two different rows
+in the buyer's checklist for exactly this reason: one sets how many sequences
+fit, the other sets how fast each of them advances.
+
+</details>
+
+</div>
 
 [The Frontier](#/frontier) closes the course: where all of this is heading.
 

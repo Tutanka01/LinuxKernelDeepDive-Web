@@ -7,6 +7,8 @@
 > costs, why one hot expert can stall a whole cluster — and you can read
 > DeepSeek's disclosed production system as an open book.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="fabric,runner"></div>
+
 A dense model does the same arithmetic for every token: run the whole network,
 top to bottom, weight by weight. DeepSeek-V3 has **671 billion** parameters but
 spends only **37 billion** of them on any given token. That is not a rounding
@@ -48,6 +50,8 @@ patterns; the routed experts specialize.)
 The router is trained, not hand-coded: over training the experts differentiate,
 and the router learns which tokens each is good at. For serving you can treat it
 as a black box that emits, per token, a short list of expert IDs and weights.
+
+![One MoE layer end to end: three tokens hit a router that picks top-k of N experts, an all-to-all dispatch sends each token to the GPUs owning its experts, the expert feed-forward networks run, and a second all-to-all combines the weighted sums back to each token](assets/diagrams/moe-layer.svg)
 
 ## The two numbers that define the serving problem
 
@@ -104,6 +108,15 @@ cluster — arrive as a healthy pile, and each expert runs one efficient
 [grouped-GEMM](#/kernels-and-compilation) over its share. Each GPU sees a
 GEMM-friendly batch again. That is the win.
 
+> [!bridge] You already know this — from the Distributed Systems course
+> Expert parallelism is hash partitioning, and the partition key is the expert ID
+> the router emits. Every lesson transfers: the partition function decides your
+> load distribution, uneven key popularity produces hot shards, and you fix hot
+> shards by replicating them rather than by re-hashing. The one thing that
+> doesn't transfer is your usual freedom to choose the key — a trained router
+> hands you the distribution, and you can only rebalance placement around it.
+> [→ Distributed: Partitioning & Sharding](../distributed/#/partitioning)
+
 The price is movement. A token is processed on the GPU that holds its attention
 and router — but its chosen experts live on *other* GPUs. So every MoE layer, for
 every token, you must:
@@ -134,6 +147,8 @@ every token. Measured cost: an all-to-all eats **10–30% of decode latency** on
 current systems, and far more at large batch sizes. Hiding it behind compute is
 the central engineering fight of MoE serving.
 
+![An all-reduce is a symmetric reduction where every GPU ends holding the same sum, while an all-to-all is a personalized regroup where each GPU sends a different, data-dependent shard to every other GPU](assets/diagrams/moe-alltoall.svg)
+
 ## The straggler problem: one hot expert stalls everyone
 
 Routing is not uniform. Some experts are popular — a token distribution has
@@ -155,6 +170,14 @@ Here it is again, in silicon. The two production countermeasures:
   which to replicate, which to co-locate — and shuffles placement to keep every
   GPU's load even. It is the level-triggered reconciliation reflex applied to
   expert placement: measure the imbalance, nudge toward even, repeat.
+
+> [!bridge] You already know this — from the Distributed Systems course
+> A synchronous fan-out finishes when its slowest participant finishes, so the
+> mean tells you nothing and the tail tells you everything. Same barrier, same
+> arithmetic — what changes is that you cannot hedge. There is no second replica
+> to race and no request to retry: the combine step needs *this* expert's output,
+> so the only lever left is making the load even before the barrier is reached.
+> [→ Distributed: The Network Is Hostile](../distributed/#/the-network-is-hostile)
 
 ## Case study: DeepSeek-V3/R1 in production
 
@@ -263,6 +286,51 @@ interconnect *is* the product.
 - DeepSeek's disclosed system (prefill EP32, decode EP144, DeepEP, 545%
   theoretical margin) is the reference implementation; **wide-EP is now
   mainstream** and **rack-scale NVLink** exists to make its all-to-all local.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>Can I serve a big MoE on fewer GPUs by keeping hot experts in HBM and streaming the rest?</summary>
+
+You can, and for a single local user it works surprisingly well — llama.cpp and
+similar runtimes offload cold experts to system RAM or SSD and still generate at
+readable speed, because at batch 1 only a handful of experts are touched per
+token. It collapses under production load. Batch 64 requests together and their
+top-8 choices union to nearly every expert on every layer, so you stream the full
+671 GB per step over a PCIe link instead of reading it from HBM. Offloading is a
+batch-1 technique, not a capacity strategy.
+
+</details>
+
+<details>
+<summary>Does expert parallelism change the model's outputs?</summary>
+
+Placement itself does not — an expert computes the same function wherever it
+lives, so EP32 and EP144 produce the same tokens up to floating-point ordering.
+What *can* change outputs is a **capacity factor**: some implementations cap how
+many tokens an expert accepts per step and drop the overflow, which silently
+alters results for exactly the tokens that routed to a hot expert. Check whether
+your engine drops or reroutes on overflow before you compare quality across two
+EP configurations.
+
+</details>
+
+<details>
+<summary>What is the minimum GPU count for a DeepSeek-V3-class model?</summary>
+
+Start from the weights: 671B parameters in FP8 is ~671 GB, so eight 80 GB cards
+(640 GB) do not fit and you need at least a full node plus change — in practice
+16 H100/H800s in BF16-free FP8 form, or 8 if you accept a 4-bit quantization of
+the experts. But "fits" is the wrong bar. You still need HBM for the KV cache and
+activations, and spreading experts thinner is what gives each one bandwidth, which
+is why DeepSeek runs decode at EP144 rather than the minimum. Size for the
+throughput you need, then check that it also fits.
+
+</details>
+
+</div>
 
 ```quiz
 [

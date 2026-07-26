@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>Interconnect hierarchy: a fast island in a slow sea</title>
+<desc>Two nodes, each an NVLink domain of 8 GPUs at roughly 900 GB/s per GPU, drawn as a dense fast island. The two nodes are connected by InfiniBand or RoCE at roughly 50 GB/s per node, a 20 to 40 times narrower link drawn as a thin connection crossing a slow sea. The rule this topology enforces: tensor parallelism's chatty all-reduce must stay inside one NVLink island; pipeline parallelism's frugal point-to-point handoff can cross the sea.</desc>
+<rect width="880" height="380" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">A fast island in a slow sea</text>
+
+<rect x="50" y="90" width="330" height="220" rx="12" fill="#ece5d4" stroke="#b8791f" stroke-width="2"/>
+<text x="62" y="112" font-size="11" font-weight="600" fill="#221c12">Node A &#8212; NVLink domain (~900 GB/s per GPU)</text>
+<g fill="#b8791f" fill-opacity="0.25" stroke="#b8791f">
+  <rect x="70" y="130" width="34" height="34"/>
+  <rect x="120" y="130" width="34" height="34"/>
+  <rect x="170" y="130" width="34" height="34"/>
+  <rect x="220" y="130" width="34" height="34"/>
+  <rect x="70" y="190" width="34" height="34"/>
+  <rect x="120" y="190" width="34" height="34"/>
+  <rect x="170" y="190" width="34" height="34"/>
+  <rect x="220" y="190" width="34" height="34"/>
+</g>
+<g stroke="#2f6d7d" stroke-width="1" opacity="0.5">
+  <line x1="87" y1="147" x2="237" y2="207"/>
+  <line x1="237" y1="147" x2="87" y2="207"/>
+  <line x1="87" y1="147" x2="237" y2="147"/>
+  <line x1="87" y1="207" x2="237" y2="207"/>
+</g>
+<text x="215" y="260" font-size="10" text-anchor="middle" fill="#6b6250">8 GPUs, one coherent NVLink mesh</text>
+
+<rect x="500" y="90" width="330" height="220" rx="12" fill="#ece5d4" stroke="#b8791f" stroke-width="2"/>
+<text x="512" y="112" font-size="11" font-weight="600" fill="#221c12">Node B &#8212; NVLink domain (~900 GB/s per GPU)</text>
+<g fill="#b8791f" fill-opacity="0.25" stroke="#b8791f">
+  <rect x="530" y="130" width="34" height="34"/>
+  <rect x="580" y="130" width="34" height="34"/>
+  <rect x="630" y="130" width="34" height="34"/>
+  <rect x="680" y="130" width="34" height="34"/>
+  <rect x="530" y="190" width="34" height="34"/>
+  <rect x="580" y="190" width="34" height="34"/>
+  <rect x="630" y="190" width="34" height="34"/>
+  <rect x="680" y="190" width="34" height="34"/>
+</g>
+<g stroke="#2f6d7d" stroke-width="1" opacity="0.5">
+  <line x1="547" y1="147" x2="697" y2="207"/>
+  <line x1="697" y1="147" x2="547" y2="207"/>
+  <line x1="547" y1="147" x2="697" y2="147"/>
+  <line x1="547" y1="207" x2="697" y2="207"/>
+</g>
+<text x="675" y="260" font-size="10" text-anchor="middle" fill="#6b6250">8 GPUs, one coherent NVLink mesh</text>
+
+<line x1="380" y1="200" x2="500" y2="200" stroke="#2f6d7d" stroke-width="2.5"/>
+<polygon points="380,200 390,195 390,205" fill="#2f6d7d"/>
+<polygon points="500,200 490,195 490,205" fill="#2f6d7d"/>
+<text x="440" y="188" font-size="11" text-anchor="middle" fill="#2f6d7d">InfiniBand / RoCE</text>
+<text x="440" y="216" font-size="11" text-anchor="middle" fill="#2f6d7d">~50 GB/s per node</text>
+
+<line x1="380" y1="90" x2="380" y2="310" stroke="#a4462e" stroke-width="1" stroke-dasharray="4,3"/>
+<line x1="500" y1="90" x2="500" y2="310" stroke="#a4462e" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="440" y="240" font-size="12" font-weight="600" text-anchor="middle" fill="#a4462e">20&#8211;40&#215; bandwidth cliff</text>
+
+<text x="440" y="344" font-size="12" font-style="italic" text-anchor="middle" fill="#6b6250">Iron rule: TP's chatty all-reduce stays inside one NVLink island; PP's frugal point-to-point hop can cross the sea.</text>
+</svg>

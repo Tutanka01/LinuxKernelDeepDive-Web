@@ -8,6 +8,8 @@
 > CPU and which GPU is busy at each moment, and explain why the whole thing
 > is built as a loop that never stops.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="api,scheduler,batch,runner"></div>
+
 You have been handed a pile of excellent parts. The
 [continuous-batching](#/continuous-batching) chapter gave you a scheduler
 that admits and evicts sequences every iteration; the
@@ -47,6 +49,17 @@ runs step N on the GPU, the API server is tokenizing a newcomer and
 detokenizing the outputs of step N−1 on other CPU cores. The GPU never waits
 for a keyboard. (This is vLLM's answer to a trick SGLang shipped first —
 we'll get there.)
+
+![An engine's request path: the client calls the API server, which tokenizes and hands the request over a message queue to the EngineCore process, where a four-stage cycle — schedule, model runner, sample, update — runs forever; the paged KV block pool hangs off the scheduler and the grammar backend off the sampler, and step outputs return to the API server to be detokenized and streamed.](assets/diagrams/engine-architecture.svg)
+
+> [!bridge] You already know this — from the Linux course
+> An interrupt handler does the least it possibly can in interrupt context and
+> defers everything else to a softirq or a workqueue, because the hard path has
+> to be free for the next interrupt. This is that split, drawn around a
+> different scarce resource: the GPU loop is the hard path, and tokenizing,
+> detokenizing and SSE framing are the bottom half, pushed onto other cores so
+> the next forward pass never waits on them.
+> [→ Linux: Interrupts, Exceptions & Softirqs](../#/interrupts)
 
 ## One request, end to end
 
@@ -107,6 +120,8 @@ speculative decoding are not special cases bolted on; they are just
 different values of `num_tokens` in the same map. V0 had a tangle of
 phase-specific code paths here; collapsing them into one budgeted map is
 most of what made V1 up to 1.7× faster on text.
+
+![Two scheduler steps drawn to scale against an 8,192-token budget. In the first, 64 running sequences contribute one decode token each, leaving 8,128 tokens for the prefill chunk. In the second, 2,048 running sequences contribute 2,048 decode tokens, squeezing the prefill chunk down to 6,144.](assets/diagrams/token-budget.svg)
 
 The loop runs every ~10–50 ms and **never terminates**. There is no "start
 a request" and "finish a request" as distinct control flow — there is one
@@ -238,6 +253,16 @@ launches per forward pass) on every one of the loop's 20–100 iterations per
 second. Why that matters and how it's built is
 [kernels-and-compilation](#/kernels-and-compilation).
 
+> [!bridge] You already know this — from the Linux course
+> `io_uring` exists because one syscall per I/O is unaffordable once you are
+> doing a million of them: put the operations in a ring, submit them together,
+> and the per-operation entry cost mostly disappears. A CUDA graph is the same
+> move against per-kernel launch overhead — record the thousands of launches in
+> a forward pass once, then replay the whole graph with a single submission,
+> fifty times a second. Both trade flexibility for the right to stop paying a
+> fixed cost per tiny operation.
+> [→ Linux: Modern I/O & io_uring](../#/modern-io)
+
 ## The engine landscape
 
 > **State of play (mid-2026):** the OSS field has consolidated hard around
@@ -261,6 +286,55 @@ second. Why that matters and how it's built is
 > on proprietary internal stacks; there is **no reliable public confirmation**
 > of which OSS engine, if any, they use. Distrust any unsourced "Lab X runs
 > vLLM" claim.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>Where does the time in one decode step actually go?</summary>
+
+Overwhelmingly into streaming the weights out of HBM for the forward pass —
+tens of milliseconds for a large model, paid once per step regardless of batch
+size. The scheduler's own bookkeeping is microseconds, and the CPU work around
+it (tokenize, detokenize, build the next grammar mask) is deliberately
+overlapped so it costs nothing on the critical path. The two places engine
+overhead does show up are the sampler, which forces a GPU sync every step, and
+per-kernel launch overhead, which is what CUDA graphs exist to remove. If your
+step time is much worse than the weight-read arithmetic predicts, suspect one of
+those two before you suspect the model.
+
+</details>
+
+<details>
+<summary>Does asking for structured JSON slow generation down?</summary>
+
+Per step, barely: the context-independent part of the mask is precomputed and
+cached, and the rest is built on the CPU while the GPU is busy, so the mask is
+ready when the logits land. Jump-forward decoding can make constrained
+generation *faster* than free generation, because deterministic stretches of the
+schema skip the model entirely. The real costs are elsewhere — compiling a new
+grammar the first time it is seen, and the fact that constraining the sampler
+changes what the model can say, which is a quality question rather than a
+throughput one.
+
+</details>
+
+<details>
+<summary>vLLM or SGLang?</summary>
+
+For general serving, either; the gap moves every few releases and most published
+deltas are vendor benchmarks. Pick on shape rather than speed: if your traffic
+is prefix-heavy, branching, agentic, or structured-output-dominated, SGLang's
+radix cache and DSL are aimed straight at you; if you need broad model and
+hardware coverage, or you want the option with the largest deployment surface
+and the most third-party integration, vLLM is the safer default. Then benchmark
+the one you chose on *your* traffic, because a prefix hit rate is a property of
+your prompts, not of the engine.
+
+</details>
+
+</div>
 
 ## What to remember
 

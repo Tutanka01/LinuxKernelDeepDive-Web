@@ -8,6 +8,8 @@
 > After this chapter, "2× faster, same model, no quality loss" stops sounding
 > like a free lunch and starts looking like what it is — arbitrage on idle silicon.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="runner,batch"></div>
+
 Here is a fact from [Inference Arithmetic](#/inference-arithmetic) that should
 still bother you. When you generate text one request at a time, the GPU reads
 its *entire* weight set — 140 GB for a 70B model in FP8 — out of high-bandwidth
@@ -28,6 +30,19 @@ But notice the asymmetry. Generating token 11 requires knowing token 10.
 scoring `k` candidate tokens is just `k` positions fed through the model in one
 pass, at the same bandwidth cost, exactly like prefill. Generation is serial;
 verification is parallel. Speculative decoding is built entirely out of that gap.
+
+> [!bridge] You already know this — from the Linux course
+> The CPU in front of you has been doing this since the 1990s. It guesses which
+> way a branch will go, runs ahead down the predicted path, and squashes the
+> results when the guess was wrong — because the execution units would otherwise
+> have idled waiting for the comparison to retire. Same trade, same reason:
+> spare capacity is worthless unless you spend it on a guess. What differs is
+> the cleanliness of the rollback. A mispredicted CPU path leaves
+> microarchitectural traces that turned into a decade of Spectre-class
+> vulnerabilities; a rejected draft token leaves nothing behind but some KV
+> cache entries the engine rolls back, and the accepted output is provably
+> identical to what you would have got without speculating.
+> [→ Linux: CPU Vulnerability Mitigations](../#/cpu-mitigations)
 
 ## The mechanism: guess cheap, check in bulk
 
@@ -52,6 +67,8 @@ scoring all γ positions at once. You walk the proposals left to right, acceptin
 or rejecting each. On the first rejection you discard the rest of the draft (they
 were conditioned on a token that didn't survive) and emit one token from the
 target instead. Next round, the draft resumes from there.
+
+![Two stacked timelines. Ordinary decode spends one full target forward pass per token, five passes for five tokens. Speculative decoding with gamma equal to 4 runs four cheap draft steps proposing "the", "cat", "sat", "on", then one target pass that verifies all four positions at once: "the" and "cat" are accepted, "sat" is rejected and replaced by the target's own correction "ran", and "on" is discarded because it was conditioned on the rejected token — three tokens emitted for one target pass, and the same tokens the target would have produced alone](assets/diagrams/spec-decode-timeline.svg)
 
 The magic is entirely in the accept/reject rule. Get it wrong and you've built a
 faster model that says different things — worthless. Get it right and the output
@@ -219,6 +236,19 @@ on a machine that had nothing to spare.
 > workload-dependent — they're starting points for measurement, not published
 > laws. Measure your own crossover; don't inherit someone else's number.
 
+![Wall-clock speedup from speculative decoding plotted against batch size on a log axis. The curve starts near 2.3x at batch 1, falls steadily as concurrency rises, crosses 1.0x at about batch 32 — the "disable above ~32" rule of thumb — and keeps falling into a shaded region below 1.0x where speculation is a net slowdown, reaching roughly 0.22x at batch 256. Same draft, same target model; only the batch size changes](assets/diagrams/spec-speedup-vs-batch.svg)
+
+> [!bridge] You already know this — from the Linux course
+> `SCHED_IDLE` is the same economics. A task in that class runs only on cycles
+> nothing else wants: free when the machine is quiet, and a straight tax on
+> everyone else the moment it isn't — which is why you put background work
+> there and never latency-critical work. Speculative decoding is `SCHED_IDLE`
+> for FLOPs. What differs is that the kernel *enforces* the priority for you,
+> and here nothing does: at batch 64 the draft and the rejected tokens compete
+> with real requests at equal priority, and the scheduler has no idea it is
+> spending your throughput on a guess. You are the one who has to turn it off.
+> [→ Linux: CPU Scheduling](../#/scheduling)
+
 And the counter-twist, because reality enjoys symmetry: **very long context flips
 it back on.** With a huge KV cache, each decode step must stream that enormous
 cache out of HBM — so even at high batch you're *bandwidth-bound again*, this time
@@ -236,6 +266,18 @@ depends on batch size **and** context length together. Measure, don't assume.
 > negative — as batch grows. DeepSeek-V3's built-in MTP at ~1.8× is the number to
 > anchor on. If a pitch quotes 4× without stating the batch size, it's a
 > low-batch number.
+
+The inversion is easier to believe once you have watched it happen. Turn the
+**speculative decoding** toggle on with the arrival rate down at 2 req/s and the
+spec-versus-no-spec readout swings strongly positive — idle math units, verified
+tokens riding free. Leave it on and drag the arrival rate up past the knee and
+the same readout goes negative, with nothing special-cased to make it do so: the
+draft's FLOPs are simply coming out of a budget that is already full. Preset 6
+("speculation past the knee") starts you on the wrong side of it.
+
+<div class="inf-widget" data-widget="engine-simulator">
+<p class="inf-widget-fallback">Interactive serving-engine simulator — needs JavaScript enabled.</p>
+</div>
 
 ## Neighbors, in one breath
 
@@ -268,6 +310,107 @@ version that reached production.
 - **The inversion:** a **latency** tool. Big wins at low batch; overhead —
   possibly negative — at high batch; and long context flips it helpful again.
   Measure your crossover.
+
+## Exercises
+
+<div class="exercise">
+
+**Exercise 1.** You are serving a 70B target at low batch. Your drafter proposes
+**k = 5** tokens per round and each proposed token survives verification with
+probability **α = 0.7**. (a) How many tokens do you get per target forward pass?
+(b) The draft costs **5%** of a target pass (`c = 0.05`). What is the wall-clock
+speedup? (c) A colleague proposes swapping in a much better drafter: **α = 0.9**,
+but it is a 25%-of-target-size model (`c = 0.25`), same k = 5. Is that an
+upgrade?
+
+<details>
+<summary>Reveal answer</summary>
+
+**(a) Tokens per pass.** Acceptances are modelled as independent, so the
+expected number of tokens emitted per verification is the geometric sum
+`(1 − α^(k+1)) / (1 − α)`:
+
+```text
+   0.7⁶ = 0.117649
+   E = (1 − 0.117649) / (1 − 0.7) = 0.882351 / 0.3 = 2.94 tokens
+```
+
+Just under three tokens for one expensive weight-read.
+
+**(b) Wall-clock speedup**, dividing by the draft overhead `1 + c·k`:
+
+```text
+   1 + 0.05 × 5 = 1.25
+   speedup = 2.94 / 1.25 = 2.35×
+```
+
+**(c) The better drafter.** Recompute both halves:
+
+```text
+   0.9⁶ = 0.531441
+   E = (1 − 0.531441) / (1 − 0.9) = 0.468559 / 0.1 = 4.69 tokens
+   1 + 0.25 × 5 = 2.25
+   speedup = 4.69 / 2.25 = 2.08×
+```
+
+**No — it is a downgrade: 2.35× becomes 2.08×.** The gross win improved by 59%
+(2.94 → 4.69 tokens per pass) and the net win still fell, because the overhead
+term grew by 80% (1.25 → 2.25). This is the "accurate but slow draft" failure
+mode with numbers attached: acceptance enters through a saturating function —
+`E` can never exceed `1/(1−α)` no matter how long you draft — while draft cost
+enters linearly and without limit. **Cheapness beats accuracy in this trade far
+more often than people expect.**
+
+</details>
+
+</div>
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>How do I find out what my acceptance rate actually is?</summary>
+
+You don't derive it, you read it: every engine that implements speculation
+exposes an acceptance metric, usually as an acceptance rate per proposed token
+or as a mean accepted length per verification. If you only have the latter,
+that number *is* the `E` in the formula above — invert it to recover α rather
+than guessing. Expect it to move a lot with workload: drafting for code
+completion or RAG-style summarization, where the output echoes the input, lands
+far higher than open-ended chat. Measure it on your traffic, not on a benchmark
+prompt set.
+
+</details>
+
+<details>
+<summary>If longer drafts mean more tokens per pass, why not set k = 20?</summary>
+
+Because the two sides of the ratio grow differently. As k rises, `(1 − α^(k+1))
+/ (1 − α)` climbs toward a hard ceiling of `1/(1−α)` — at α = 0.7 that is 3.33
+tokens, and k = 5 already gets you 2.94 of them. Every extra draft step past
+that buys almost nothing while adding a full `c` to the denominator, and each
+one also costs a sequential draft forward pass on the latency path. That is why
+production drafts are short, and why dynamic γ — draft further only while
+acceptance is running high — is the version that actually helps.
+
+</details>
+
+<details>
+<summary>Does speculative decoding cost extra memory?</summary>
+
+Yes, and it is easy to forget when you are budgeting. An independent draft model
+brings its own weights *and* its own KV cache; the target must hold KV slots for
+the γ+1 verified positions per in-flight sequence, and the engine needs the
+bookkeeping to roll those slots back on a rejection. That memory comes out of
+the pool your concurrent sequences were sharing, so speculation can quietly cost
+you a few slots of batch — the resource whose scarcity was already the argument
+for turning it on. Bolt-on heads (Medusa, EAGLE, MTP) exist partly to make this
+bill small.
+
+</details>
+
+</div>
 
 ```quiz
 [

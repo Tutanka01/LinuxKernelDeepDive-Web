@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 424" width="880" height="424" role="img" aria-labelledby="t d">
+<title id="t">Four attention architectures and what each costs per token of KV cache</title>
+<desc id="d">Four side-by-side panels showing how query heads are wired to key/value heads. MHA: 64 query heads wired one-to-one to 64 KV heads, 2.6 MB of KV cache per token. MQA: all 64 query heads converge on a single shared KV head, 41 KB per token. GQA-8: the 64 query heads are split into 8 groups, each group sharing one KV head, 328 KB per token. MLA: all query heads read one compressed 576-dimension latent vector, which an up-projection expands back into per-head keys and values at decode time; only the latent is cached, about 70 KB per token. Six query heads are drawn in each panel to stand for all 64.</desc>
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6b6250"/></marker></defs>
+<rect width="880" height="424" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">Four ways to wire 64 query heads to their keys and values</text>
+<rect x="20" y="60" width="201" height="308" rx="8" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="120.5" y="84" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="15" font-weight="600" fill="#221c12" text-anchor="middle">MHA</text>
+<text x="120.5" y="102" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">64 Q &#8594; 64 KV</text>
+<text x="120.5" y="112" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="9" fill="#8d8370" text-anchor="middle">64 query heads (6 drawn)</text>
+<rect x="34.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="65.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="96.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="127.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="158.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="189.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<text x="120.5" y="132" font-family="SF Mono, Menlo, Consolas, monospace" font-size="9" fill="#8d8370" text-anchor="middle">&#8230;</text>
+<line x1="34" y1="268" x2="207" y2="268" stroke="#ddd3bd"/>
+<text x="120.5" y="288" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">KV cache, bytes per token</text>
+<text x="120.5" y="316" font-family="SF Mono, Menlo, Consolas, monospace" font-size="21" font-weight="700" fill="#a4462e" text-anchor="middle">2.6 MB</text>
+<text x="120.5" y="336" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250" text-anchor="middle">2&#215;80&#215;64&#215;128&#215;2</text>
+<text x="120.5" y="356" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250" text-anchor="middle">1&#215; &#8212; the baseline</text>
+<path d="M 43.0 138 C 43.0 168, 43.0 170, 43.0 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="34.0" y="200" width="18.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<path d="M 74.0 138 C 74.0 168, 74.0 170, 74.0 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="65.0" y="200" width="18.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<path d="M 105.0 138 C 105.0 168, 105.0 170, 105.0 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="96.0" y="200" width="18.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<path d="M 136.0 138 C 136.0 168, 136.0 170, 136.0 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="127.0" y="200" width="18.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<path d="M 167.0 138 C 167.0 168, 167.0 170, 167.0 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="158.0" y="200" width="18.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<path d="M 198.0 138 C 198.0 168, 198.0 170, 198.0 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="189.0" y="200" width="18.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<text x="120.5" y="240" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250" text-anchor="middle">64 KV heads, one each</text>
+<text x="120.5" y="256" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">maximum quality, maximum cache</text>
+<rect x="233" y="60" width="201" height="308" rx="8" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="333.5" y="84" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="15" font-weight="600" fill="#221c12" text-anchor="middle">MQA</text>
+<text x="333.5" y="102" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">64 Q &#8594; 1 KV</text>
+<text x="333.5" y="112" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="9" fill="#8d8370" text-anchor="middle">64 query heads (6 drawn)</text>
+<rect x="247.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="278.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="309.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="340.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="371.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="402.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<text x="333.5" y="132" font-family="SF Mono, Menlo, Consolas, monospace" font-size="9" fill="#8d8370" text-anchor="middle">&#8230;</text>
+<line x1="247" y1="268" x2="420" y2="268" stroke="#ddd3bd"/>
+<text x="333.5" y="288" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">KV cache, bytes per token</text>
+<text x="333.5" y="316" font-family="SF Mono, Menlo, Consolas, monospace" font-size="21" font-weight="700" fill="#4f7d2c" text-anchor="middle">41 KB</text>
+<text x="333.5" y="336" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250" text-anchor="middle">2&#215;80&#215;1&#215;128&#215;2</text>
+<text x="333.5" y="356" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#4f7d2c" text-anchor="middle">64&#215; smaller</text>
+<path d="M 256.0 138 C 256.0 168, 333.5 170, 333.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 287.0 138 C 287.0 168, 333.5 170, 333.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 318.0 138 C 318.0 168, 333.5 170, 333.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 349.0 138 C 349.0 168, 333.5 170, 333.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 380.0 138 C 380.0 168, 333.5 170, 333.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 411.0 138 C 411.0 168, 333.5 170, 333.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="307.5" y="200" width="52.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<text x="333.5" y="214" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12" text-anchor="middle">1 K/V</text>
+<text x="333.5" y="240" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250" text-anchor="middle">one shared KV head</text>
+<text x="333.5" y="256" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">hurts long-context recall</text>
+<rect x="446" y="60" width="201" height="308" rx="8" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="546.5" y="84" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="15" font-weight="600" fill="#221c12" text-anchor="middle">GQA-8</text>
+<text x="546.5" y="102" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">64 Q &#8594; 8 KV</text>
+<text x="546.5" y="112" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="9" fill="#8d8370" text-anchor="middle">64 query heads (6 drawn)</text>
+<rect x="460.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="491.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="522.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="553.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="584.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="615.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<text x="546.5" y="132" font-family="SF Mono, Menlo, Consolas, monospace" font-size="9" fill="#8d8370" text-anchor="middle">&#8230;</text>
+<line x1="460" y1="268" x2="633" y2="268" stroke="#ddd3bd"/>
+<text x="546.5" y="288" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">KV cache, bytes per token</text>
+<text x="546.5" y="316" font-family="SF Mono, Menlo, Consolas, monospace" font-size="21" font-weight="700" fill="#b8791f" text-anchor="middle">328 KB</text>
+<text x="546.5" y="336" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250" text-anchor="middle">2&#215;80&#215;8&#215;128&#215;2</text>
+<text x="546.5" y="356" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#4f7d2c" text-anchor="middle">8&#215; smaller</text>
+<rect x="455.0" y="114" width="59.0" height="28" rx="4" fill="#b8791f" fill-opacity="0.14"/>
+<path d="M 469.0 138 C 469.0 168, 484.5 170, 484.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 500.0 138 C 500.0 168, 484.5 170, 484.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="464.5" y="200" width="40.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<text x="484.5" y="214" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12" text-anchor="middle">K/V</text>
+<rect x="517.0" y="114" width="59.0" height="28" rx="4" fill="#b8791f" fill-opacity="0.14"/>
+<path d="M 531.0 138 C 531.0 168, 546.5 170, 546.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 562.0 138 C 562.0 168, 546.5 170, 546.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="526.5" y="200" width="40.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<text x="546.5" y="214" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12" text-anchor="middle">K/V</text>
+<rect x="579.0" y="114" width="59.0" height="28" rx="4" fill="#b8791f" fill-opacity="0.14"/>
+<path d="M 593.0 138 C 593.0 168, 608.5 170, 608.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 624.0 138 C 624.0 168, 608.5 170, 608.5 200" fill="none" stroke="#2f6d7d" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="588.5" y="200" width="40.0" height="20" rx="3" fill="#2f6d7d" fill-opacity="0.22" stroke="#2f6d7d" stroke-width="1.3"/>
+<text x="608.5" y="214" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12" text-anchor="middle">K/V</text>
+<text x="546.5" y="240" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250" text-anchor="middle">8 groups, 8 KV heads</text>
+<text x="546.5" y="256" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">3 of 8 groups drawn &#8212; the 2026 default</text>
+<rect x="659" y="60" width="201" height="308" rx="8" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="759.5" y="84" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="15" font-weight="600" fill="#221c12" text-anchor="middle">MLA</text>
+<text x="759.5" y="102" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">64 Q &#8594; 1 latent</text>
+<text x="759.5" y="112" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="9" fill="#8d8370" text-anchor="middle">64 query heads (6 drawn)</text>
+<rect x="673.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="704.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="735.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="766.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="797.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<rect x="828.0" y="118" width="18" height="20" rx="3" fill="#f6f1e6" stroke="#221c12" stroke-width="1.1"/>
+<text x="759.5" y="132" font-family="SF Mono, Menlo, Consolas, monospace" font-size="9" fill="#8d8370" text-anchor="middle">&#8230;</text>
+<line x1="673" y1="268" x2="846" y2="268" stroke="#ddd3bd"/>
+<text x="759.5" y="288" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">KV cache, bytes per token</text>
+<text x="759.5" y="316" font-family="SF Mono, Menlo, Consolas, monospace" font-size="21" font-weight="700" fill="#4f7d2c" text-anchor="middle">~70 KB</text>
+<text x="759.5" y="336" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#6b6250" text-anchor="middle">latent 576 &#215; 61 layers</text>
+<text x="759.5" y="356" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#4f7d2c" text-anchor="middle">smaller than GQA-8</text>
+<path d="M 682.0 138 C 682.0 168, 759.5 170, 759.5 200" fill="none" stroke="#b8791f" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 713.0 138 C 713.0 168, 759.5 170, 759.5 200" fill="none" stroke="#b8791f" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 744.0 138 C 744.0 168, 759.5 170, 759.5 200" fill="none" stroke="#b8791f" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 775.0 138 C 775.0 168, 759.5 170, 759.5 200" fill="none" stroke="#b8791f" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 806.0 138 C 806.0 168, 759.5 170, 759.5 200" fill="none" stroke="#b8791f" stroke-width="1.2" stroke-opacity="0.75"/>
+<path d="M 837.0 138 C 837.0 168, 759.5 170, 759.5 200" fill="none" stroke="#b8791f" stroke-width="1.2" stroke-opacity="0.75"/>
+<rect x="689.0" y="200" width="141" height="20" rx="3" fill="#b8791f" fill-opacity="0.22" stroke="#b8791f" stroke-width="1.4"/>
+<text x="759.5" y="214" font-family="SF Mono, Menlo, Consolas, monospace" font-size="10" fill="#221c12" text-anchor="middle">latent 576 &#8212; cached</text>
+<line x1="759.5" y1="221" x2="759.5" y2="235" stroke="#6b6250" stroke-width="1.3" marker-end="url(#ar)"/>
+<rect x="689.0" y="232" width="141" height="17" rx="3" fill="none" stroke="#2f6d7d" stroke-width="1.1" stroke-dasharray="4 3"/>
+<text x="759.5" y="244" font-family="SF Mono, Menlo, Consolas, monospace" font-size="9" fill="#2f6d7d" text-anchor="middle">up-proj &#8594; K,V &#215;64</text>
+<text x="759.5" y="264" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10" fill="#8d8370" text-anchor="middle">reconstructed, never stored</text>
+<text x="24" y="392" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250">Llama-3-70B shape: 80 layers, 64 query heads, head_dim 128, BF16. Query heads stay diverse; only the keys and values are shared.</text>
+<text x="24" y="410" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#8d8370">MLA&#8217;s figure is DeepSeek-V3 (671B total, 61 layers, latent 576 = 512 content + 64 decoupled RoPE) &#8212; no one applies MLA to a 70B.</text>
+</svg>

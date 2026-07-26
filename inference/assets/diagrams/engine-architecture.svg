@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" width="880" height="560">
+<title>Anatomy of a serving engine: request path and the EngineCore step loop</title>
+<desc>Boxes and arrows for a modern engine. A client sends a request to an API server, which hands it through an async message queue to the EngineCore process. Inside EngineCore, a four-node cycle runs forever: schedule, then model runner (GPU forward pass), then sample, then update, back to schedule. The KV cache manager and block pool hang off the scheduler node. A structured-output grammar backend hangs off the sample node. Step outputs flow back up to the API server to be detokenized and streamed as Server-Sent Events.</desc>
+<rect width="880" height="560" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">Anatomy of an engine: one request in, a loop that never stops</text>
+
+<defs>
+<marker id="arrInk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#221c12"/>
+</marker>
+<marker id="arrAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#b8791f"/>
+</marker>
+<marker id="arrTeal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#2f6d7d"/>
+</marker>
+<marker id="arrIndigo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#3b5a8f"/>
+</marker>
+</defs>
+
+<!-- top pipeline -->
+<rect x="30" y="90" width="140" height="60" rx="6" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="100" y="114" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">Client</text>
+<text x="100" y="132" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">your app / curl</text>
+
+<line x1="170" y1="120" x2="210" y2="120" stroke="#221c12" stroke-width="1.5" marker-end="url(#arrInk)"/>
+
+<rect x="210" y="90" width="200" height="60" rx="6" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="310" y="114" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">API Server</text>
+<text x="310" y="132" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">HTTP · tokenize/detok · SSE</text>
+
+<line x1="410" y1="120" x2="455" y2="120" stroke="#221c12" stroke-width="1.5" marker-end="url(#arrInk)"/>
+
+<rect x="455" y="90" width="140" height="60" rx="6" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="525" y="114" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">Message queue</text>
+<text x="525" y="132" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">CPU ↔ GPU overlap</text>
+
+<line x1="525" y1="150" x2="525" y2="216" stroke="#221c12" stroke-width="1.5" marker-end="url(#arrInk)"/>
+
+<!-- EngineCore container -->
+<rect x="190" y="180" width="670" height="360" rx="10" fill="#b8791f" fill-opacity="0.06" stroke="#221c12" stroke-width="2"/>
+<text x="205" y="203" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">EngineCore process — the GPU loop, every ~10–50 ms, forever</text>
+
+<!-- cycle nodes -->
+<rect x="455" y="220" width="140" height="60" rx="6" fill="#ece5d4" stroke="#b8791f" stroke-width="1.5"/>
+<text x="525" y="244" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">1. SCHEDULE</text>
+<text x="525" y="261" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">spend token budget</text>
+
+<rect x="625" y="330" width="140" height="60" rx="6" fill="#ece5d4" stroke="#b8791f" stroke-width="1.5"/>
+<text x="695" y="354" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">2. MODEL RUNNER</text>
+<text x="695" y="371" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">forward pass (GPU)</text>
+
+<rect x="455" y="440" width="140" height="60" rx="6" fill="#ece5d4" stroke="#b8791f" stroke-width="1.5"/>
+<text x="525" y="464" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">3. SAMPLE</text>
+<text x="525" y="481" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">argmax / top-p</text>
+
+<rect x="285" y="330" width="140" height="60" rx="6" fill="#ece5d4" stroke="#b8791f" stroke-width="1.5"/>
+<text x="355" y="354" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12.5" font-weight="600" fill="#221c12">4. UPDATE</text>
+<text x="355" y="371" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#6b6250">KV + evict + emit</text>
+
+<!-- cycle arrows, edge to edge -->
+<line x1="571.4" y1="280" x2="648.6" y2="330" stroke="#b8791f" stroke-width="2" marker-end="url(#arrAmber)"/>
+<line x1="648.6" y1="390" x2="571.4" y2="440" stroke="#b8791f" stroke-width="2" marker-end="url(#arrAmber)"/>
+<line x1="478.6" y1="440" x2="401.4" y2="390" stroke="#b8791f" stroke-width="2" marker-end="url(#arrAmber)"/>
+<line x1="401.4" y1="330" x2="478.6" y2="280" stroke="#b8791f" stroke-width="2" marker-end="url(#arrAmber)"/>
+
+<!-- KV cache manager, hangs off scheduler -->
+<rect x="30" y="330" width="140" height="60" rx="6" fill="#2f6d7d" fill-opacity="0.12" stroke="#2f6d7d" stroke-width="1.5"/>
+<text x="100" y="354" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" font-weight="600" fill="#221c12">KV cache manager</text>
+<text x="100" y="371" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#2f6d7d">+ block pool (paged)</text>
+<line x1="455" y1="250" x2="170" y2="365" stroke="#2f6d7d" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrTeal)"/>
+
+<!-- structured-output backend, hangs off sample -->
+<rect x="650" y="440" width="190" height="60" rx="6" fill="#3b5a8f" fill-opacity="0.12" stroke="#3b5a8f" stroke-width="1.5"/>
+<text x="745" y="463" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" font-weight="600" fill="#221c12">Structured-output backend</text>
+<text x="745" y="480" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="10.5" fill="#3b5a8f">(XGrammar) — masks logits</text>
+<line x1="595" y1="470" x2="650" y2="470" stroke="#3b5a8f" stroke-width="1.5" marker-end="url(#arrIndigo)"/>
+
+<!-- return path: step outputs -> API server -->
+<path d="M355,330 L355,160 L310,160 L310,150" fill="none" stroke="#221c12" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrInk)"/>
+<text x="30" y="172" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#6b6250">step outputs → detokenize → SSE stream</text>
+
+<!-- legend -->
+<rect x="30" y="524" width="14" height="14" fill="#b8791f" fill-opacity="0.3" stroke="#b8791f" stroke-width="1.5"/>
+<text x="50" y="535" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11.5" fill="#221c12">EngineCore step cycle</text>
+<rect x="240" y="524" width="14" height="14" fill="#2f6d7d" fill-opacity="0.3" stroke="#2f6d7d" stroke-width="1.5"/>
+<text x="260" y="535" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11.5" fill="#221c12">KV / paging</text>
+<rect x="400" y="524" width="14" height="14" fill="#3b5a8f" fill-opacity="0.3" stroke="#3b5a8f" stroke-width="1.5"/>
+<text x="420" y="535" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11.5" fill="#221c12">structured output</text>
+</svg>

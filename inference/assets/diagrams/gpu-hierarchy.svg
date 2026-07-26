@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" width="880" height="520">
+<title>GPU nesting: chip, SM, warp, thread</title>
+<desc>A nested-box diagram (not a tree) showing an H100 chip containing 132 streaming multiprocessors, each SM containing many warps of 32 threads running in lockstep, each warp containing individual threads. Each ring between boxes lists what that level owns: the chip owns HBM and the SM array, the SM owns shared memory, the warp scheduler, and tensor cores, the warp owns lockstep instruction issue, and the thread owns its own registers.</desc>
+<rect width="880" height="520" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">Nested, not hierarchical: chip → SM → warp → thread</text>
+
+<!-- L1: chip -->
+<rect x="20" y="60" width="840" height="430" fill="none" stroke="#221c12" stroke-width="2"/>
+<text x="32" y="84" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="14" font-weight="600" fill="#221c12">H100 chip — 132 SMs, one shared 80 GB HBM pool</text>
+<text x="32" y="470" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">chip owns: HBM (80 GB @ 3.35 TB/s), the 132-SM array, L2 cache (~50 MB)</text>
+
+<!-- L2: SM -->
+<rect x="65" y="105" width="750" height="340" fill="#ece5d4" stroke="#8d8370" stroke-width="1.5"/>
+<text x="80" y="130" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13.5" font-weight="600" fill="#221c12">Streaming Multiprocessor (SM) × 132</text>
+<text x="80" y="425" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">SM owns: shared memory / L1 (256 KB), the warp scheduler(s), tensor cores</text>
+
+<!-- L3: warp -->
+<rect x="110" y="150" width="660" height="250" fill="#b8791f" fill-opacity="0.10" stroke="#b8791f" stroke-width="1.5"/>
+<text x="125" y="175" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">Warp — 32 threads in lockstep (SIMT)</text>
+<text x="125" y="380" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">warp owns: one instruction issued to all 32 lanes per cycle</text>
+
+<!-- L4: thread -->
+<rect x="155" y="195" width="570" height="160" fill="#b8791f" fill-opacity="0.25" stroke="#b8791f" stroke-width="2"/>
+<text x="440" y="270" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#221c12">Thread</text>
+<text x="440" y="290" text-anchor="middle" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">one arithmetic lane; owns its own registers</text>
+</svg>

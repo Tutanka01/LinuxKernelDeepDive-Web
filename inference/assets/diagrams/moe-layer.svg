@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 340" width="880" height="340" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>One MoE layer's dispatch path</title>
+<desc>Tokens flow through a router that scores each against every expert and picks the top-k. Dispatch (an all-to-all) sends each token to the GPUs holding its chosen experts, where expert FFNs run, then combine (another all-to-all) gathers results back to each token's home GPU. Three example tokens are shown taking different routes through different experts.</desc>
+<rect width="880" height="340" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">One MoE layer: router &#8594; dispatch &#8594; experts &#8594; combine</text>
+
+<g font-size="11" fill="#221c12">
+  <circle cx="50" cy="130" r="14" fill="#3b5a8f" fill-opacity="0.3" stroke="#3b5a8f"/><text x="50" y="134" text-anchor="middle">t1</text>
+  <circle cx="50" cy="170" r="14" fill="#3b5a8f" fill-opacity="0.3" stroke="#3b5a8f"/><text x="50" y="174" text-anchor="middle">t2</text>
+  <circle cx="50" cy="210" r="14" fill="#3b5a8f" fill-opacity="0.3" stroke="#3b5a8f"/><text x="50" y="214" text-anchor="middle">t3</text>
+</g>
+
+<rect x="110" y="120" width="90" height="100" rx="6" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f"/>
+<text x="155" y="165" font-size="11" text-anchor="middle" fill="#221c12">router</text>
+<text x="155" y="182" font-size="9" text-anchor="middle" fill="#6b6250">top-k of N</text>
+<text x="155" y="196" font-size="9" text-anchor="middle" fill="#6b6250">experts</text>
+
+<text x="255" y="126" font-size="10" fill="#6b6250" text-anchor="middle">dispatch</text>
+<text x="255" y="138" font-size="9" fill="#a4462e" text-anchor="middle">(all-to-all)</text>
+
+<g fill="#4f7d2c" fill-opacity="0.2" stroke="#4f7d2c">
+  <rect x="330" y="60" width="60" height="40" rx="4"/>
+  <rect x="330" y="120" width="60" height="40" rx="4"/>
+  <rect x="330" y="180" width="60" height="40" rx="4"/>
+  <rect x="330" y="240" width="60" height="40" rx="4"/>
+</g>
+<g font-size="10" text-anchor="middle" fill="#221c12">
+  <text x="360" y="84">E3</text><text x="360" y="144">E7</text><text x="360" y="204">E12</text><text x="360" y="264">E42</text>
+</g>
+
+<path d="M200,140 C260,140 270,80 330,80" fill="none" stroke="#3b5a8f" stroke-width="1.5"/>
+<path d="M200,150 C260,150 270,140 330,140" fill="none" stroke="#3b5a8f" stroke-width="1.5"/>
+<path d="M200,160 C260,160 270,200 330,200" fill="none" stroke="#3b5a8f" stroke-width="1.5"/>
+<path d="M200,170 C260,170 270,260 330,260" fill="none" stroke="#3b5a8f" stroke-width="1.5" opacity="0.6"/>
+
+<text x="440" y="126" font-size="10" fill="#6b6250" text-anchor="middle">expert FFNs</text>
+<text x="440" y="138" font-size="9" fill="#6b6250" text-anchor="middle">(own GPUs)</text>
+
+<text x="510" y="126" font-size="10" fill="#6b6250" text-anchor="middle">combine</text>
+<text x="510" y="138" font-size="9" fill="#a4462e" text-anchor="middle">(all-to-all)</text>
+
+<path d="M390,80 C450,80 460,140 520,150" fill="none" stroke="#4f7d2c" stroke-width="1.5"/>
+<path d="M390,140 C450,140 460,150 520,155" fill="none" stroke="#4f7d2c" stroke-width="1.5"/>
+<path d="M390,200 C450,200 460,180 520,175" fill="none" stroke="#4f7d2c" stroke-width="1.5"/>
+
+<rect x="590" y="120" width="90" height="100" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
+<text x="635" y="165" font-size="11" text-anchor="middle" fill="#221c12">weighted</text>
+<text x="635" y="180" font-size="11" text-anchor="middle" fill="#221c12">sum</text>
+
+<g font-size="11" fill="#221c12">
+  <circle cx="770" cy="130" r="14" fill="#4f7d2c" fill-opacity="0.3" stroke="#4f7d2c"/><text x="770" y="134" text-anchor="middle">t1</text>
+  <circle cx="770" cy="170" r="14" fill="#4f7d2c" fill-opacity="0.3" stroke="#4f7d2c"/><text x="770" y="174" text-anchor="middle">t2</text>
+  <circle cx="770" cy="210" r="14" fill="#4f7d2c" fill-opacity="0.3" stroke="#4f7d2c"/><text x="770" y="214" text-anchor="middle">t3</text>
+</g>
+<line x1="680" y1="170" x2="740" y2="170" stroke="#8d8370"/>
+
+<text x="440" y="310" font-size="11" font-style="italic" text-anchor="middle" fill="#6b6250">Each token visits only its own top-k experts &#8212; different tokens, different routes, two all-to-all shuffles per layer.</text>
+</svg>

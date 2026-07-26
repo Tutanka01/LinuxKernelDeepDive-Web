@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>All-reduce vs. point-to-point communication</title>
+<desc>Left: an all-reduce across four GPUs for tensor parallelism — every GPU starts with a partial sum and every GPU ends with the same combined tensor, a large megabyte-scale payload repeated twice per layer, every token. Right: pipeline parallelism's point-to-point handoff — one GPU passes a small kilobyte-scale activation vector to exactly one neighbor, once per stage boundary per token.</desc>
+<rect width="880" height="380" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">Reduction vs. handoff: two very different collectives</text>
+<line x1="440" y1="54" x2="440" y2="360" stroke="#ddd3bd"/>
+
+<text x="24" y="70" font-size="13" font-weight="600" fill="#221c12">All-reduce (tensor parallelism)</text>
+<g fill="#3b5a8f" fill-opacity="0.25" stroke="#3b5a8f">
+  <circle cx="120" cy="130" r="26"/>
+  <circle cx="320" cy="130" r="26"/>
+  <circle cx="120" cy="250" r="26"/>
+  <circle cx="320" cy="250" r="26"/>
+</g>
+<g font-size="11" text-anchor="middle" fill="#221c12">
+  <text x="120" y="134">GPU0</text><text x="320" y="134">GPU1</text>
+  <text x="120" y="254">GPU2</text><text x="320" y="254">GPU3</text>
+</g>
+<g stroke="#3b5a8f" stroke-width="1.5">
+  <line x1="146" y1="130" x2="294" y2="130"/>
+  <line x1="120" y1="156" x2="120" y2="224"/>
+  <line x1="320" y1="156" x2="320" y2="224"/>
+  <line x1="146" y1="250" x2="294" y2="250"/>
+  <line x1="142" y1="150" x2="298" y2="230"/>
+  <line x1="298" y1="150" x2="142" y2="230"/>
+</g>
+<text x="220" y="300" font-size="11" text-anchor="middle" fill="#6b6250">every GPU ends with the SAME summed tensor</text>
+<text x="220" y="320" font-size="11" font-weight="600" text-anchor="middle" fill="#3b5a8f">~MB payload, 2&#215;/layer, every token</text>
+<text x="220" y="340" font-size="10" text-anchor="middle" fill="#6b6250">cost set by the slowest link in the group</text>
+
+<text x="456" y="70" font-size="13" font-weight="600" fill="#221c12">Point-to-point (pipeline parallelism)</text>
+<g fill="#2f6d7d" fill-opacity="0.25" stroke="#2f6d7d">
+  <rect x="480" y="170" width="70" height="46"/>
+  <rect x="620" y="170" width="70" height="46"/>
+  <rect x="760" y="170" width="70" height="46"/>
+</g>
+<g font-size="11" text-anchor="middle" fill="#221c12">
+  <text x="515" y="197">GPU A</text><text x="655" y="197">GPU B</text><text x="795" y="197">GPU C</text>
+</g>
+<line x1="550" y1="193" x2="620" y2="193" stroke="#2f6d7d" stroke-width="2"/>
+<polygon points="620,193 610,188 610,198" fill="#2f6d7d"/>
+<line x1="690" y1="193" x2="760" y2="193" stroke="#2f6d7d" stroke-width="2"/>
+<polygon points="760,193 750,188 750,198" fill="#2f6d7d"/>
+<text x="655" y="240" font-size="11" text-anchor="middle" fill="#6b6250">one activation vector, one neighbor</text>
+<text x="655" y="260" font-size="11" font-weight="600" text-anchor="middle" fill="#2f6d7d">~KB payload, 1&#215;/stage boundary, every token</text>
+<text x="655" y="280" font-size="10" text-anchor="middle" fill="#6b6250">frugal enough to cross a slow inter-node link</text>
+
+<text x="440" y="360" font-size="11" font-style="italic" text-anchor="middle" fill="#6b6250">Same GPUs, opposite shapes: a group-wide reduction vs. a single frugal handoff.</text>
+</svg>

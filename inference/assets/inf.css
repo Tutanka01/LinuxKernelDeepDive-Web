@@ -1,0 +1,363 @@
+/* ============================================================
+   Inference Engineering — course-local styling.
+
+   Everything here is additive to ../assets/style.css and
+   ../assets/course.css, which are shared with the other two
+   courses and must not be touched. Scope every rule to this
+   course's own classes or to .article-body, so nothing here can
+   leak into the Linux or Distributed Systems reader.
+
+   Contents: figures, callout boxes, FAQ/exercise disclosure,
+   glossary, and the shells the interactive widgets mount into.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Figures.
+
+   Diagrams are authored on an ivory ground with near-black ink,
+   so they read as printed insets in the dark theme and as plain
+   paper in the light one. The frame below is the only thing that
+   changes between themes: on ivory stock a figure needs a border
+   to keep its edge, on near-black it does not.
+   ------------------------------------------------------------ */
+
+.article-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.9rem auto;
+  border-radius: 8px;
+  background: #f6f1e6;              /* matches the diagram ground exactly */
+}
+
+html[data-theme="paper"] .article-body img {
+  border: 1px solid var(--rule);
+}
+
+/* A figure with its own caption: image + the italic line under it. */
+.article-body figure { margin: 1.9rem 0; }
+.article-body figure img { margin-bottom: 0.6rem; }
+.article-body figcaption {
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  font-style: italic;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------
+   Callouts.
+
+   Authored in markdown as a blockquote whose first line opens
+   with a [!tag] marker, GitHub-alert style:
+
+     > [!bridge] You already know this
+     > Body text, still markdown.
+
+   inf-widgets.js strips the marker and applies the class, so the
+   body stays ordinary markdown — links, code and emphasis all
+   still work. An unstyled fallback (plain blockquote with a
+   visible [!tag]) is the worst case if the script fails.
+   ------------------------------------------------------------ */
+
+.article blockquote.inf-callout {
+  padding: 0.95rem 1.25rem;
+  border-left: 2px solid var(--accent-dim);
+  border-radius: 0 6px 6px 0;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-style: normal;
+}
+
+.article blockquote.inf-callout > .inf-callout-title {
+  display: block;
+  margin: 0 0 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+}
+
+/* Cross-course bridge — the "you already know this from Linux /
+   Distributed Systems" boxes. Given the level-dot green so they
+   read as a different species from the amber in-course callouts. */
+.article blockquote.callout-bridge {
+  border-left-color: var(--lvl-core);
+  background: color-mix(in srgb, var(--lvl-core) 9%, transparent);
+}
+.article blockquote.callout-bridge > .inf-callout-title { color: var(--lvl-core); }
+
+/* Prerequisite / primer box — a self-contained refresher the
+   reader may already be able to skip. */
+.article blockquote.callout-prereq {
+  border-left-color: var(--text-faint);
+  background: var(--bg-raised);
+}
+.article blockquote.callout-prereq > .inf-callout-title { color: var(--text-dim); }
+
+/* Trap — the "people get this wrong" boxes. */
+.article blockquote.callout-trap {
+  border-left-color: var(--lvl-internals);
+  background: color-mix(in srgb, var(--lvl-internals) 9%, transparent);
+}
+.article blockquote.callout-trap > .inf-callout-title { color: var(--lvl-internals); }
+
+/* ------------------------------------------------------------
+   Disclosure: FAQs and exercise answers.
+
+   Both are authored as plain <details> with blank lines around
+   the inner markdown, so marked parses the body as markdown and
+   the whole thing degrades to a working native accordion with no
+   JavaScript at all.
+   ------------------------------------------------------------ */
+
+.article-body details {
+  margin: 0.75rem 0;
+  padding: 0.15rem 0 0.15rem 0;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.article-body details > summary {
+  cursor: pointer;
+  padding: 0.6rem 0.2rem 0.6rem 1.4rem;
+  position: relative;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.97rem;
+  list-style: none;
+}
+.article-body details > summary::-webkit-details-marker { display: none; }
+.article-body details > summary::marker { content: ""; }
+
+.article-body details > summary::before {
+  content: "›";
+  position: absolute;
+  left: 0.25rem;
+  color: var(--accent);
+  font-size: 1.05rem;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+.article-body details[open] > summary::before { transform: rotate(90deg); }
+.article-body details > summary:hover { color: var(--accent); }
+
+/* the answer body, indented to sit under the summary text */
+.article-body details > *:not(summary) { margin-left: 1.4rem; }
+.article-body details > p:last-child { margin-bottom: 0.9rem; }
+
+/* Exercise: a problem statement plus a reveal. The wrapper keeps
+   the problem and its answer visually welded together. */
+.article-body .exercise {
+  margin: 1.6rem 0;
+  padding: 1rem 1.25rem 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--bg-raised);
+}
+.article-body .exercise > p:first-child { margin-top: 0; }
+.article-body .exercise details { border-top-color: var(--rule); }
+
+/* FAQ block at the foot of a chapter. */
+.article-body .faq { margin: 1.4rem 0 0; }
+.article-body .faq details:last-of-type { border-bottom: 1px solid var(--rule-soft); }
+
+/* ------------------------------------------------------------
+   Glossary — a definition list of short entries, two columns on
+   a wide screen and one on a narrow one.
+   ------------------------------------------------------------ */
+
+.article-body .glossary dt {
+  margin-top: 1rem;
+  color: var(--ink);
+  font-weight: 700;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+.article-body .glossary dd {
+  margin: 0.2rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------
+   Widgets.
+
+   Every interactive tool is a <div class="inf-widget"
+   data-widget="name"> placeholder in the markdown; inf-widgets.js
+   finds it after each render and hands it to the registered
+   mount function. Before that happens — and forever, if the
+   script fails to load — it shows the fallback line inside it.
+   ------------------------------------------------------------ */
+
+.article-body .inf-widget {
+  margin: 1.9rem 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.article-body .inf-widget-fallback {
+  margin: 0;
+  padding: 1.1rem 1.25rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.inf-widget-head {
+  padding: 0.85rem 1.25rem 0.7rem;
+  border-bottom: 1px solid var(--rule);
+}
+.inf-widget-head h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-family: var(--serif);
+}
+.inf-widget-head p {
+  margin: 0.25rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  font-style: italic;
+}
+
+.inf-widget-body { padding: 1.1rem 1.25rem 1.25rem; }
+
+/* controls: a label / input / value row that reflows to one
+   column when the reading column gets narrow */
+.inf-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.85rem 1.4rem;
+}
+
+.inf-control { display: flex; flex-direction: column; gap: 0.3rem; }
+.inf-control > label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+}
+.inf-control > label .inf-val {
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.inf-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.inf-control select,
+.inf-control input[type="number"] {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.inf-toggles { display: flex; flex-wrap: wrap; gap: 0.5rem 1.1rem; margin-top: 0.9rem; }
+.inf-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+.inf-toggle input { accent-color: var(--accent); cursor: pointer; }
+
+/* results: the numbers a calculator produces, each one carrying a
+   link back to the chapter whose formula produced it */
+.inf-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.2rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.inf-result-label {
+  display: block;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.inf-result-value {
+  display: block;
+  margin: 0.15rem 0 0.1rem;
+  color: var(--ink);
+  font-size: 1.35rem;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.inf-result-value.good { color: var(--lvl-core); }
+.inf-result-value.bad  { color: var(--lvl-internals); }
+.inf-result-note {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+.inf-result-note a { color: var(--accent-dim); }
+
+.inf-verdict {
+  margin: 1.1rem 0 0;
+  padding: 0.7rem 0.95rem;
+  border-left: 2px solid var(--accent-dim);
+  border-radius: 0 4px 4px 0;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.inf-canvas-wrap { margin-top: 1rem; }
+.inf-widget canvas { display: block; width: 100%; height: auto; border-radius: 6px; }
+
+/* ------------------------------------------------------------
+   Serving-stack map — the recurring architecture strip at the
+   head of a chapter, with this chapter's stage lit.
+   ------------------------------------------------------------ */
+
+.article-body .inf-stackmap {
+  margin: 0 0 1.9rem;
+  border: none;
+  background: none;
+  overflow: visible;
+}
+.article-body .inf-stackmap svg { display: block; width: 100%; height: auto; }
+.article-body .inf-stackmap .inf-stackmap-cap {
+  margin: 0.35rem 0 0;
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .article-body .inf-widget { margin-left: -0.5rem; margin-right: -0.5rem; }
+  .inf-widget-body { padding: 0.9rem 0.85rem 1rem; }
+  .inf-widget-head { padding: 0.7rem 0.85rem 0.6rem; }
+  .article-body details > *:not(summary) { margin-left: 0.9rem; }
+}

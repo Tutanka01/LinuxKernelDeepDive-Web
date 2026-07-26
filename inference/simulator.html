@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Serving-Engine Simulator — Inference Engineering</title>
+  <meta name="description" content="A live, in-browser LLM serving-engine simulator: continuous batching, chunked prefill, a paged KV block pool, prefix caching, preemption and speculative decoding, with TTFT/ITL/throughput meters.">
+  <script>
+    /* Same pre-paint theme bootstrap as inference/index.html, so this page
+       does not flash the wrong colours on the way in. */
+    (function () {
+      var theme = "dark";
+      try {
+        if (localStorage.getItem("ldd-theme") === "paper") theme = "paper";
+      } catch (e) {}
+      if (theme === "paper") document.documentElement.dataset.theme = "paper";
+    })();
+  </script>
+  <link rel="stylesheet" href="../assets/style.css?v=20260725">
+  <link rel="stylesheet" href="../assets/course.css?v=20260725">
+  <link rel="stylesheet" href="assets/inf.css?v=20260726">
+</head>
+<body>
+  <div class="layout">
+    <main class="content">
+      <!-- inf-widgets.js scans #view for placeholders (it is the element
+           course.js swaps on navigation), so the wrapper has to be there
+           even on a standalone page. .article-body carries the widget
+           styling, which is scoped to it in inf.css. -->
+      <div id="view">
+        <article class="article">
+          <div class="article-body">
+
+            <p><a href="./#/continuous-batching">&larr; Back to Inference Engineering</a></p>
+
+            <h1>Serving-engine simulator</h1>
+
+            <p>One replica of Llama-3-70B in BF16, tensor-parallel over four
+            H100s. Requests arrive by a Poisson process with heavy-tailed
+            prompt and output lengths, the scheduler batches them one
+            iteration at a time, the paged KV block pool allocates and frees,
+            and three meters move. A step costs a fixed weight read (14&nbsp;ms,
+            paid once however many sequences ride on it), a per-sequence KV
+            read proportional to context length, and a compute term that only
+            binds once the step's token count passes <code>B_crit</code>. Every
+            constant is derived from the course's reference numbers, so the
+            meters read like a real machine and the knobs move them for the
+            real reasons. Start with the numbered scenarios.</p>
+
+            <div class="inf-widget" data-widget="engine-simulator">
+            <p class="inf-widget-fallback">Interactive serving-engine simulator &mdash; needs JavaScript.</p>
+            </div>
+
+            <p>Related chapters:
+            <a href="./#/continuous-batching">Continuous Batching &amp; Scheduling</a>,
+            <a href="./#/paged-kv-cache">PagedAttention &amp; Prefix Caching</a>,
+            <a href="./#/inference-arithmetic">Inference Arithmetic</a>,
+            <a href="./#/speculative-decoding">Speculative Decoding</a>.</p>
+
+          </div>
+        </article>
+      </div>
+    </main>
+  </div>
+
+  <script defer src="assets/inf-widgets.js?v=20260726"></script>
+  <script defer src="assets/inf-simulator.js?v=20260726"></script>
+</body>
+</html>

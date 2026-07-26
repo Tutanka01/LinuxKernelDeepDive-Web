@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" width="880" height="470" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>Ordinary decode vs. speculative decoding, γ = 4</title>
+<desc>Two stacked timelines. Top: ordinary decode, one target-model forward pass produces one token, five passes shown evenly spaced. Bottom: speculative decoding with four cheap draft steps proposing "the", "cat", "sat", "on", followed by one target forward pass that verifies all four in parallel. "the" and "cat" are accepted, "sat" is rejected and replaced by a correction token "ran" sampled from the target, and "on" is discarded because it was conditioned on the rejected token. Three tokens are emitted for the cost of one target pass, and the emitted sequence "the cat ran" is exactly what the target model alone would have produced.</desc>
+<rect width="880" height="470" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">Speculative decoding: same tokens, fewer target passes</text>
+
+<!-- legend -->
+<g font-size="11" fill="#6b6250">
+  <rect x="24" y="46" width="14" height="10" fill="#b8791f" fill-opacity="0.35" stroke="#b8791f"/>
+  <text x="42" y="55">target pass</text>
+  <rect x="140" y="46" width="14" height="10" fill="#2f6d7d" fill-opacity="0.35" stroke="#2f6d7d"/>
+  <text x="158" y="55">draft step</text>
+  <rect x="250" y="46" width="14" height="10" fill="#4f7d2c" fill-opacity="0.35" stroke="#4f7d2c"/>
+  <text x="268" y="55">accepted / emitted</text>
+  <rect x="410" y="46" width="14" height="10" fill="#a4462e" fill-opacity="0.35" stroke="#a4462e"/>
+  <text x="428" y="55">rejected / discarded</text>
+</g>
+
+<!-- Panel A: ordinary decode -->
+<text x="24" y="78" font-size="14" font-weight="600" fill="#221c12">Ordinary decode &#8212; one target-model forward pass per token</text>
+
+<g>
+  <rect x="60" y="90" width="130" height="46" rx="4" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f"/>
+  <text x="125" y="117" font-size="12" text-anchor="middle" fill="#221c12">target pass</text>
+  <text x="125" y="150" font-size="12" font-family="SF Mono, Menlo, Consolas, monospace" text-anchor="middle" fill="#6b6250">token 1</text>
+
+  <rect x="210" y="90" width="130" height="46" rx="4" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f"/>
+  <text x="275" y="117" font-size="12" text-anchor="middle" fill="#221c12">target pass</text>
+  <text x="275" y="150" font-size="12" font-family="SF Mono, Menlo, Consolas, monospace" text-anchor="middle" fill="#6b6250">token 2</text>
+
+  <rect x="360" y="90" width="130" height="46" rx="4" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f"/>
+  <text x="425" y="117" font-size="12" text-anchor="middle" fill="#221c12">target pass</text>
+  <text x="425" y="150" font-size="12" font-family="SF Mono, Menlo, Consolas, monospace" text-anchor="middle" fill="#6b6250">token 3</text>
+
+  <rect x="510" y="90" width="130" height="46" rx="4" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f"/>
+  <text x="575" y="117" font-size="12" text-anchor="middle" fill="#221c12">target pass</text>
+  <text x="575" y="150" font-size="12" font-family="SF Mono, Menlo, Consolas, monospace" text-anchor="middle" fill="#6b6250">token 4</text>
+
+  <rect x="660" y="90" width="130" height="46" rx="4" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f"/>
+  <text x="725" y="117" font-size="12" text-anchor="middle" fill="#221c12">target pass</text>
+  <text x="725" y="150" font-size="12" font-family="SF Mono, Menlo, Consolas, monospace" text-anchor="middle" fill="#6b6250">token 5</text>
+</g>
+
+<line x1="60" y1="162" x2="792" y2="162" stroke="#8d8370" stroke-width="1"/>
+<polygon points="792,162 784,158 784,166" fill="#8d8370"/>
+<text x="800" y="166" font-size="11" fill="#8d8370">time</text>
+
+<line x1="24" y1="178" x2="856" y2="178" stroke="#ddd3bd" stroke-width="1"/>
+
+<!-- Panel B: speculative decoding -->
+<text x="24" y="200" font-size="14" font-weight="600" fill="#221c12">Speculative decoding, &#947; = 4 &#8212; one target pass verifies all four drafts</text>
+
+<g>
+  <rect x="60" y="212" width="50" height="40" rx="4" fill="#2f6d7d" fill-opacity="0.18" stroke="#2f6d7d"/>
+  <text x="85" y="237" font-size="13" text-anchor="middle" fill="#221c12">the</text>
+
+  <rect x="126" y="212" width="50" height="40" rx="4" fill="#2f6d7d" fill-opacity="0.18" stroke="#2f6d7d"/>
+  <text x="151" y="237" font-size="13" text-anchor="middle" fill="#221c12">cat</text>
+
+  <rect x="192" y="212" width="50" height="40" rx="4" fill="#2f6d7d" fill-opacity="0.18" stroke="#2f6d7d"/>
+  <text x="217" y="237" font-size="13" text-anchor="middle" fill="#221c12">sat</text>
+
+  <rect x="258" y="212" width="50" height="40" rx="4" fill="#2f6d7d" fill-opacity="0.12" stroke="#2f6d7d" stroke-dasharray="3,3"/>
+  <text x="283" y="237" font-size="13" text-anchor="middle" fill="#6b6250">on</text>
+</g>
+
+<!-- connecting lines from draft to target verify -->
+<line x1="85" y1="252" x2="85" y2="290" stroke="#4f7d2c" stroke-width="1.5"/>
+<line x1="151" y1="252" x2="151" y2="290" stroke="#4f7d2c" stroke-width="1.5"/>
+<line x1="217" y1="252" x2="217" y2="290" stroke="#a4462e" stroke-width="1.5" stroke-dasharray="4,3"/>
+<line x1="283" y1="252" x2="283" y2="290" stroke="#a4462e" stroke-width="1" stroke-dasharray="1,3" opacity="0.5"/>
+
+<!-- target verify box -->
+<rect x="60" y="290" width="248" height="64" rx="4" fill="#b8791f" fill-opacity="0.18" stroke="#b8791f" stroke-width="1.5"/>
+<text x="184" y="308" font-size="12" font-weight="600" text-anchor="middle" fill="#221c12">ONE target forward pass</text>
+<text x="184" y="324" font-size="11" text-anchor="middle" fill="#6b6250">verifies all 4 positions at once</text>
+<text x="85" y="345" font-size="13" text-anchor="middle" fill="#4f7d2c">&#10003;</text>
+<text x="151" y="345" font-size="13" text-anchor="middle" fill="#4f7d2c">&#10003;</text>
+<text x="217" y="345" font-size="13" text-anchor="middle" fill="#a4462e">&#10007;</text>
+<text x="283" y="345" font-size="11" text-anchor="middle" fill="#6b6250">&#8212;</text>
+
+<!-- correction box -->
+<line x1="308" y1="322" x2="328" y2="322" stroke="#a4462e" stroke-width="1.5"/>
+<polygon points="328,322 320,318 320,326" fill="#a4462e"/>
+<rect x="328" y="290" width="90" height="64" rx="4" fill="#4f7d2c" fill-opacity="0.18" stroke="#4f7d2c" stroke-width="1.5"/>
+<text x="373" y="314" font-size="14" font-weight="600" text-anchor="middle" fill="#221c12">ran</text>
+<text x="373" y="330" font-size="10" text-anchor="middle" fill="#6b6250">correction,</text>
+<text x="373" y="342" font-size="10" text-anchor="middle" fill="#6b6250">from target</text>
+
+<text x="440" y="372" font-size="11" text-anchor="middle" fill="#6b6250">3 tokens this round &#8212; &#8220;the&#8221; + &#8220;cat&#8221; accepted, &#8220;ran&#8221; is the correction; &#8220;on&#8221; discarded.</text>
+
+<!-- emit arrow -->
+<line x1="239" y1="354" x2="400" y2="380" stroke="#8d8370" stroke-width="1"/>
+<polygon points="400,380 391,377 393,385" fill="#8d8370"/>
+
+<!-- final emitted row -->
+<rect x="285" y="384" width="90" height="38" rx="4" fill="#4f7d2c" fill-opacity="0.18" stroke="#4f7d2c"/>
+<text x="330" y="408" font-size="13" text-anchor="middle" fill="#221c12">the</text>
+<rect x="395" y="384" width="90" height="38" rx="4" fill="#4f7d2c" fill-opacity="0.18" stroke="#4f7d2c"/>
+<text x="440" y="408" font-size="13" text-anchor="middle" fill="#221c12">cat</text>
+<rect x="505" y="384" width="90" height="38" rx="4" fill="#4f7d2c" fill-opacity="0.18" stroke="#4f7d2c"/>
+<text x="550" y="408" font-size="13" text-anchor="middle" fill="#221c12">ran</text>
+
+<text x="440" y="440" font-size="11" text-anchor="middle" fill="#6b6250">1 target pass &#8594; 3 tokens here, vs. 1 token per pass in ordinary decode above.</text>
+<text x="440" y="454" font-size="11" font-style="italic" text-anchor="middle" fill="#6b6250">Losslessness: the accepted prefix is exactly what the target would have produced alone.</text>
+</svg>

@@ -7,6 +7,8 @@
 > modern kernel stack: FlashAttention 1→4, FlashDecoding, FlashInfer, FlashMLA.
 > After this chapter, "the attention kernel" stops being a black box.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="kernels"></div>
+
 This course keeps repeating that decode is **memory-bound** — limited by memory
 bandwidth, not arithmetic ([Inference Arithmetic](#/inference-arithmetic) made it
 quantitative). Here that claim gets cashed out in code: we take attention, the
@@ -56,12 +58,31 @@ becomes the limit; at 64, attention sits at barely a fifth of that, tensor cores
 idling while the memory bus wheezes. **Attention isn't compute-heavy. It's
 IO-heavy.** The score matrix is the reason.
 
+> [!bridge] You already know this — from the Linux course
+> "Memory-bound" is a verdict you have made before: `perf` showing low IPC next
+> to a high cache-miss count says the CPU is waiting on memory, not computing.
+> The reasoning here is identical, only you reach the verdict from a ratio
+> (FLOPs per byte) instead of a counter, because the GPU's cost model is
+> predictable enough to compute in advance.
+> [→ Linux: /proc, strace, perf & eBPF](../#/observability)
+
 ## The dream, and the thing blocking it
 
 So don't write the score matrix. Load a block of `Q`, `K`, and `V` into SRAM;
 compute their little score tile *there*; use it and throw it away; move on. HBM
 only ever sees `Q`, `K`, `V` and the output `O` — each just `N×d`, kilobytes not
 gigabytes. The `N×N` matrix never touches main memory.
+
+![Naive attention round-trips the N×N score matrix through HBM four times, while FlashAttention keeps the score tiles inside SRAM and moves only Q, K, V and O across the HBM boundary](assets/diagrams/flash-tiling.svg)
+
+> [!bridge] You already know this — from the Linux course
+> This is cache blocking, one level down. You met the ladder — registers, L1 at
+> ~1 ns, RAM at ~100 ns — and the rule it implies: restructure the loop so the
+> working set fits the fast tier and the slow tier is touched once. SRAM and HBM
+> are the same ladder with different labels, except nothing is automatic: there
+> is no hardware cache line pulling tiles in for you, so the kernel author
+> schedules every load by hand.
+> [→ Linux: The Machine Underneath](../#/prereq-hardware)
 
 One thing blocks this, and it's not small. **Softmax needs a whole row at once.**
 To turn scores into weights it divides by the sum of `exp(score)` across *every*
@@ -130,6 +151,8 @@ the correction factor for everything we already have is `exp(3 − 4) = 0.368`.
 ```text
   O = o / ℓ = 40.088 / 1.553 = 25.81
 ```
+
+![Four states of the online-softmax walkthrough for scores 3, 1, 4, 2: initial accumulators, tile one, the rescale when the running max moves from 3 to 4, and the folded-in final result 25.81](assets/diagrams/online-softmax.svg)
 
 Compute the plain softmax over all four scores `[3, 1, 4, 2]` the textbook way
 and you get `ℓ = 1.553`, `O = 25.81`. **Identical.** We never held more than two
@@ -214,6 +237,8 @@ its `ℓ`, sum. The same online-softmax math — only now the tiles are spread a
 well-built engine saturates the GPU on long-context decode even at batch 1:
 split-KV manufactures the parallelism the single query row couldn't provide.
 
+![Without split-KV a single query row keeps one SM busy while the rest idle; FlashDecoding splits the KV cache into chunks, computes a partial output and log-sum-exp per chunk in parallel, then merges them in one reduction](assets/diagrams/flash-decoding.svg)
+
 ## FlashInfer: where the block table finally meets a kernel
 
 Back in [PagedAttention & Prefix Caching](#/paged-kv-cache) you learned that the
@@ -279,6 +304,50 @@ fast forward pass.
   **block-sparse attention** and JIT-generates variants — it's how the paged
   cache's block tables get consumed, and the shared backend under vLLM, SGLang,
   and TRT-LLM. **FlashMLA** is DeepSeek's MLA decode kernel, now in cuDNN.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>If FlashAttention is exact, why do my logits shift slightly when I change attention backend?</summary>
+
+Because "exact" means the same function, not the same rounding. Floating-point
+addition isn't associative, and FA2, FA3, FlashInfer and FlashMLA each sum the
+tiles in a different order with different tile sizes — so the last bit or two of
+each logit moves. That is normally invisible, but at temperature 0 a shift of
+1e-6 can flip two near-tied tokens and send a generation down a different path.
+If you need bit-reproducible outputs, pin the backend and the batch size, not
+just the model weights.
+
+</details>
+
+<details>
+<summary>Does FlashAttention save memory as well as time?</summary>
+
+It saves *activation* memory, dramatically: the `N×N` score matrix never exists,
+so attention's footprint drops from `O(N²)` to `O(N·d)` — that ~2 GiB per head
+at 32K context simply isn't allocated. For serving, though, that saving is
+mostly a prefill story. Once you are decoding, the KV cache dominates your memory
+budget and FlashAttention doesn't shrink it at all; that is what MLA, GQA and KV
+quantization are for.
+
+</details>
+
+<details>
+<summary>Do I ever pick an attention backend by hand, or does the engine decide?</summary>
+
+The engine decides well by default — vLLM and SGLang choose FlashInfer, FA2/FA3
+or FlashMLA based on your GPU, dtype and model architecture, and the default is
+right nearly always. You override in three situations: a new GPU generation where
+the fast backend isn't wired up yet, a model whose attention variant (sinks,
+sliding window, a custom mask) only one backend supports, and debugging, where
+forcing a simpler backend tells you whether a numerical problem is the kernel or
+the model. Treat an override as a temporary diagnosis, not a tuning knob.
+
+</details>
+
+</div>
 
 ```quiz
 [

@@ -9,6 +9,8 @@
 > piecewise CUDA graphs with torch.compile" reads as an obvious engineering
 > choice, not an incantation.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="kernels,runner"></div>
+
 The [previous chapter](#/flashattention) took one kernel apart down to the
 online-softmax recurrence. But attention is a single stop on a long assembly
 line. Generating **one token** — a single decode step — runs *hundreds* of
@@ -48,6 +50,15 @@ kernel from Python costs a fixed **few microseconds** of CPU work — argument
 marshalling, driver call, stream bookkeeping — regardless of how much math the
 kernel then does. That fixed cost is your syscall boundary.
 
+> [!bridge] You already know this — from the Linux course
+> A `read()` costs a few hundred nanoseconds of boundary crossing whether it
+> moves one byte or a megabyte, which is why the fix was always "do more work
+> per crossing," never "make the crossing faster." A kernel launch is the same
+> shape at roughly ten times the price — and worse, the CPU here isn't the thing
+> doing the work, so every microsecond it spends dispatching is a microsecond
+> the GPU has nothing to run.
+> [→ Linux: Kernel, User Space & Syscalls](../#/kernel-vs-userspace)
+
 Now do the arithmetic that makes it hurt. At **batch size 1**, decode is
 brutally [memory-bound](#/inference-arithmetic): each little matmul streams its
 weights from HBM and does almost no arithmetic, so the *GPU* finishes a kernel
@@ -70,6 +81,8 @@ instruction. You bought a $30,000 accelerator and it is blocked on a Python
 The fix is the `io_uring` fix: **stop paying the per-launch cost.** Submit the
 whole batch of work in one crossing.
 
+![Timeline comparison: launching four kernels eagerly leaves the GPU idle in the gaps between CPU dispatches, while a single CUDA graph replay fires the same four kernels back to back with no gaps](assets/diagrams/launch-gap.svg)
+
 ## CUDA graphs: record once, replay in one launch
 
 The kernel sequence for a decode step is almost entirely **fixed**. Same
@@ -87,6 +100,15 @@ nothing, and the GPU stops starving.
 In production this recovers on the order of **25–30% of per-step decode
 latency** ([Inside vLLM](https://vllm.ai/blog/2025-09-05-anatomy-of-vllm)) —
 free speed, from doing nothing new, just describing it once.
+
+> [!bridge] You already know this — from the Linux course
+> `io_uring` beat `read()`-per-request by moving the *description* of the work
+> into a shared ring, so one crossing submits many operations. A CUDA graph goes
+> a step further: the description is not just batched but **recorded once and
+> reused**, because a decode step replays the identical DAG thousands of times.
+> That is only legal because the shape is fixed — the constraint `io_uring`
+> never had, and the reason the next two sections exist.
+> [→ Linux: Modern I/O & io_uring](../#/modern-io)
 
 The catch is in the word *fixed*. A captured graph bakes in the exact tensor
 shapes it saw. But batch size changes constantly under
@@ -146,6 +168,8 @@ bytes, so it *raises arithmetic intensity* — dragging a clump of memory-bound
 elementwise ops rightward, toward the compute-bound side where the hardware
 actually earns its FLOP rating. That is the whole economic case for a compiler
 in this stack.
+
+![Unfused, RMSNorm, RoPE and a residual add each read from and write to HBM — six crossings and 6N bytes; fused into one kernel the intermediates stay in registers and SRAM, leaving one read and one write for 2N bytes](assets/diagrams/kernel-fusion.svg)
 
 Beyond the automatic elementwise fusions, engines add **custom passes** for the
 fusions a general compiler won't find — for example fusing a GEMM with the
@@ -288,6 +312,52 @@ faster and the bottleneck simply moves somewhere you never profiled.*
 - **Blackwell** hands kernel authors **TMA** (async tile DMA), **FP4 tensor
   cores with hardware block scaling** (dequant inside the GEMM), and **TMEM** —
   and made tensor cores so fast that softmax's `exp()` became the bottleneck.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>How do I tell whether I'm actually launch-bound rather than just slow?</summary>
+
+Two cheap signals. First, watch GPU utilization during batch-1 decode: if it sits
+well under 100% while a CPU core is pegged, the dispatcher is the bottleneck, not
+the math. Second, run the same workload with CUDA graphs disabled and enabled —
+if the gap is small, launch overhead was never your problem and you should look
+at bandwidth instead. A profiler timeline makes it unambiguous: you are looking
+for regular gaps between kernels that scale with the *number* of kernels rather
+than their size.
+
+</details>
+
+<details>
+<summary>Why is the first request after startup so much slower than the rest?</summary>
+
+Because `torch.compile` and CUDA graph capture both happen lazily, at first use.
+The compiler traces the model, lowers it and compiles the fused kernels, then the
+engine captures a graph for every batch-size bucket it plans to serve — tens of
+seconds to several minutes depending on model size and bucket count. This is why
+production deployments warm up with synthetic requests before joining the load
+balancer, and why engines ship a compile cache so a restart doesn't repeat the
+work.
+
+</details>
+
+<details>
+<summary>Should I write my own Triton kernel for my model?</summary>
+
+Almost certainly not, and the reason is the fusion section above: `torch.compile`
+already finds the elementwise fusions, and the matmul and attention paths are
+already at or near peak from CUTLASS and FlashAttention. Custom kernels pay off
+when you have a shape the compiler can't reason about — an unusual quantization
+format, a novel attention variant, a fused op with a hand-proved algebraic
+identity. Profile first and confirm the kernel you want to write is actually a
+measurable fraction of your step time; on most models the honest answer is that
+your bottleneck is HBM bandwidth, which no kernel rewrite will change.
+
+</details>
+
+</div>
 
 ```quiz
 [

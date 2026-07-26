@@ -1,13 +1,13 @@
-# Disaggregated Serving & the KV Fabric
+# Disaggregated Serving
 
-> **Goal of this chapter:** see the moment the KV cache stopped being a
-> per-GPU buffer and became the field's central *distributed object*. You
-> will understand why serious 2026 deployments run prefill and decode on
-> separate GPU pools, what it costs to ship KV between them, and how the
-> whole datacenter — routers, tiered memory, transfer libraries — reorganizes
-> itself around cache placement. After this chapter, "the KV cache is the
-> center of gravity of modern serving" is not a slogan; it is an architecture
-> you can draw.
+> **Goal of this chapter:** understand why serious 2026 deployments stop running
+> prefill and decode on the same GPUs, and be able to decide — with arithmetic,
+> not vibes — whether your deployment is one of them. By the end you can derive
+> what it costs to ship a KV cache between pools, compare that against both
+> recomputing it and against the interference you were suffering, and name the
+> four regimes where disaggregation is the wrong answer.
+
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="router,scheduler,kv"></div>
 
 Two chapters set up this one. [Inference Arithmetic](#/inference-arithmetic)
 proved the field's founding asymmetry: **prefill is compute-bound** (it crunches
@@ -21,12 +21,45 @@ On one GPU, prefill and decode are roommates fighting over the same sink.
 
 This chapter is the radical alternative. **Give each phase its own GPU
 pool** — its own count, its own parallelism, even its own hardware tier — so
-prefill machines never steal a decode machine's bandwidth. The catch is the
-whole rest of the chapter: the prefill pool computes a prompt's KV cache, but
-the *decode* pool is the one that needs it. Somebody has to **ship the KV cache
-across the network**. The instant you say that sentence, your distributed-systems
-instincts should light up: a local buffer just became a piece of state that must
-be transferred, placed, and located. That is exactly what happened to the field.
+prefill machines never steal a decode machine's bandwidth. The catch is the rest
+of the chapter: the prefill pool computes a prompt's KV cache, but the *decode*
+pool is the one that needs it. Somebody has to **ship the KV cache across the
+network**, and whether that is a good trade is a question with a numerical
+answer.
+
+## Why the two phases want different machines
+
+Go back to the roofline and read it as a shopping list. The ridge point on an
+H100 is `990 TFLOP/s ÷ 3.35 TB/s ≈ 295 FLOP/byte`, and the two phases sit on
+opposite sides of it.
+
+**Prefill** runs at arithmetic intensity ≈ `T`, the prompt length — a thousand
+tokens share every weight read, so it is comfortably compute-bound. What prefill
+wants is FLOP/s: the newest silicon, low precision, large batches, aggressive
+tensor parallelism to cut the latency of one big matmul. It does not much care
+about memory bandwidth, because it is not bandwidth-limited. It does not need
+much HBM capacity either — a prompt's KV is written once and handed off.
+
+**Decode** runs at intensity ≈ `B`, the batch size, which in a latency-sensitive
+service is nowhere near 295. What decode wants is bytes per second and bytes of
+capacity: high HBM bandwidth so each token's weight sweep is fast, and enough HBM
+to hold the KV caches of every concurrent sequence, because
+[KV capacity is what caps concurrency](#/paged-kv-cache). Its FLOP/s go almost
+entirely unused.
+
+Now the observation that motivates everything: **a GPU that satisfies both is
+paying for one of them twice.** Buy compute-dense silicon and its bandwidth idles
+during decode; buy bandwidth-dense silicon and its FLOP/s idle during prefill.
+Colocated serving buys both on every GPU in the fleet, and then has the two
+phases fight over the result.
+
+They also scale differently. Prefill work scales with *tokens in* — roughly
+`2·P·T` FLOPs for a prompt of length T, a quantity you can shed by batching or
+delay by queueing. Decode work scales with *tokens out × concurrency*, and it is
+a hard real-time commitment: every live sequence needs a token every TPOT
+milliseconds or your inter-token-latency SLO breaks. One is throughput work with
+a deadline at the end; the other is a heartbeat. Sizing a single pool to satisfy
+both means sizing for the worse of two unrelated curves.
 
 ## Disaggregation: the core trade
 
@@ -53,6 +86,15 @@ You already saw the production shape in [Serving MoE at Scale](#/moe-serving):
 DeepSeek runs prefill as EP32 across 4 nodes and decode as EP144 across 18 —
 two differently-shaped machines for two differently-shaped jobs, wired together.
 
+> [!bridge] You already know this — from the distributed systems course
+> This is the stateless-tier / stateful-tier split you have drawn before: one
+> service cut in two so each half can be sized, scaled, and placed against its
+> own bottleneck instead of a compromise between them. What differs is the
+> state. It is not a database you replicate once and read many times — it is one
+> request's KV cache, useful to exactly one consumer, and it has to arrive
+> before that consumer's first token.
+> [→ Distributed: Real-World Architectures](../distributed/#/real-world-architectures)
+
 The foundational research made the case twice, from two angles:
 
 - **DistServe** (OSDI 2024) optimized for **goodput** — not raw throughput,
@@ -69,7 +111,33 @@ The foundational research made the case twice, from two angles:
   both on every GPU is waste. Combined, these lines of work reported 2–7×
   throughput at fixed latency.
 
-### The transfer-cost math — when it actually wins
+### Goodput is the metric that makes this legible
+
+It is worth dwelling on why DistServe framed the problem around goodput rather
+than throughput, because the choice of metric is what makes disaggregation look
+like a win at all.
+
+Raw throughput rewards the wrong behavior. You can maximize tokens per second on
+a colocated pool by batching aggressively and letting TTFT drift to several
+seconds — a configuration that posts an excellent number and violates every
+latency promise you made. **Goodput counts only the requests that met their
+SLO**, which means a request served late contributes nothing, exactly as it
+contributes nothing to a user.
+
+Under that metric, the colocated pool's real problem becomes visible: it is a
+**single knob controlling two SLOs that pull in opposite directions**. Turning up
+the prefill chunk size improves TTFT and degrades inter-token latency. Turning it
+down does the reverse. There is one setting, and two constraints, and any traffic
+mix that moves puts you on the wrong side of one of them.
+
+Disaggregation's actual contribution is that it **turns one knob into two**. The
+prefill pool is sized and tuned for its TTFT target; the decode pool for its ITL
+target; and the prefill:decode ratio absorbs the traffic mix. That is the whole
+argument, and note that it is an argument about *provisioning*, not about
+efficiency — a disaggregated fleet does not do less work, it just stops being
+forced to compromise.
+
+## The transfer-cost math
 
 Disaggregation is not free, and the price is one number: **the cost of moving
 the KV.** Every request pays it. The decision is a comparison:
@@ -96,6 +164,72 @@ transfer can rival the decode time it was meant to protect. **Transfer cost
 scales with prompt length; the benefit scales with how much interference you
 were suffering.** When those cross, disaggregation stops paying.
 
+> [!bridge] You already know this — from the distributed systems course
+> Every distributed design eventually collapses to the same two questions: what
+> does it cost to move these bytes, and what happens when the link is slower
+> than you assumed. Same questions here. What differs is that the transfer sits
+> on the critical path of a latency SLO you have already promised, so there is
+> no retry budget and no eventual-consistency window to hide it in — a slow
+> fabric shows up directly as time-to-first-token.
+> [→ Distributed: The Network Is Hostile](../distributed/#/the-network-is-hostile)
+
+### Against recomputation, and against colocation
+
+Two comparisons hide inside that inequality, and conflating them is the most
+common confusion about disaggregation. Do them separately.
+
+**Transfer versus recompute.** If moving the KV were more expensive than making
+it again, disaggregation would be dead on arrival — the decode pool could just
+re-run the prefill locally. Check. Recomputing a 4,000-token prefill of a 70B
+model costs `2 × 70e9 × 4,000 ≈ 5.6 × 10^14` FLOPs, i.e. 560 TFLOP. An H100 at a
+realistic 40% prefill MFU delivers ~400 TFLOP/s, so:
+
+```text
+  recompute:  560 TFLOP ÷ 400 TFLOP/s  ≈  1.4 s   (one GPU)
+  transfer:   1.3 GB    ÷ 50 GB/s      ≈  26 ms
+```
+
+Transfer is roughly **50× cheaper than recomputation**, and it also does not
+consume a prefill slot. At 128K the gap is similar in shape: ~18,400 TFLOP of
+recompute against 0.86 s of transfer. **KV is expensive to make and cheap to
+move.** That asymmetry is the load-bearing fact of this whole module, and it is
+why the answer is a fabric rather than a policy of recomputing everywhere.
+
+**Transfer versus colocation.** This is the comparison that actually decides
+anything, and it is much less flattering. The alternative to shipping the KV is
+not recomputing it — it is *never having moved it*, by running decode on the same
+GPU that did the prefill. Against that baseline, the transfer is pure added cost,
+and it only pays if the interference you escaped was worth more. So the real
+question is never "is transfer cheap?" (it is) but "**was colocation actually
+hurting me?**"
+
+Which is why the fabric's speed is a first-order design input rather than a
+detail. The same 1.3 GB transfer, on three different links:
+
+```text
+  NVLink 4, intra-node   900 GB/s  →   1.4 ms   (free, ignore it)
+  InfiniBand NDR         ~50 GB/s  →    26 ms   (fine)
+  25 GbE                 ~3.1 GB/s →   420 ms   (fatal)
+```
+
+That 20–40× cliff between NVLink and the inter-node network is the same cliff you
+met in [Parallelism for Inference](#/parallelism-for-inference), and it has the
+same consequence: **the topology decides the architecture.** A pool boundary that
+sits inside an NVLink domain is nearly free to cross. One that sits across
+commodity Ethernet is not a pool boundary you should have drawn. If your cluster
+has no RDMA fabric, this chapter is describing a system you cannot build, and
+that is a legitimate answer.
+
+> [!bridge] You already know this — from the distributed systems course
+> "Draw the boundary where crossing it is cheap" is the partitioning rule,
+> restated in hardware: a shard boundary you cross on every request is not a
+> boundary, it is a bottleneck. What differs is who picks it. In a database you
+> choose the key and inherit the cost; here the fabric fixes the cost first, and
+> the legal places to put a pool boundary are whatever survives it.
+> [→ Distributed: Partitioning & Sharding](../distributed/#/partitioning)
+
+## When it does not pay
+
 > **Common trap:** "disaggregation is strictly better, always turn it on." It
 > is a *regime*, not a religion. At **low load** there is little interference
 > to eliminate, so you pay the transfer tax for nothing — plain colocation
@@ -106,192 +240,138 @@ were suffering.** When those cross, disaggregation stops paying.
 > 1P4D — or, at low enough load, not disaggregating at all. Match the pool
 > ratio to your actual prompt:generation shape, or you are buying idle silicon.
 
-## Mooncake: the KV cache as fleet-wide storage
+Four regimes where the answer is no, each for its own reason. Learn them as a
+checklist, because they cover most deployments.
 
-Once KV is a movable object, a bigger idea appears. Look across your whole
-serving fleet: every node has **spare CPU DRAM and idle SSD** sitting next to
-its GPUs. Individually trivial; summed over hundreds of nodes, it is a
-*enormous* pool of memory that could hold KV — far more than all your HBM
-combined. **Mooncake** (Moonshot AI, the system behind the Kimi assistant)
-took that literally and built a **KVCache-centric** architecture:
+**1. Short contexts.** Prefill interference is proportional to prefill work, and
+prefill work is `2·P·T`. A 512-token prompt on a 70B model is 72 TFLOP — under
+200 ms of GPU time, sliced by chunked prefill into pieces that barely dent
+anyone's ITL. There is nothing to escape. You would be building a distributed
+system to avoid a problem you do not have.
 
-```text
-   ┌─────────────┐     ┌──────────────────────────────┐     ┌─────────────┐
-   │  PREFILL    │ ──► │   DISAGGREGATED KVCACHE POOL  │ ──► │   DECODE    │
-   │  cluster    │     │  (spare CPU DRAM + SSD, fleet │     │  cluster    │
-   └─────────────┘     │   wide, RDMA-addressable)     │     └─────────────┘
-                       └──────────────────────────────┘
-                       a KVCache-centric scheduler places,
-                       reuses, and locates every block
-```
+**2. Small models.** Two effects compound. The KV per token is smaller but so is
+everything else, and crucially the *granularity* gets wrong: an 8B model fits on
+one GPU, so a disaggregated deployment's smallest unit is one prefill GPU plus
+one decode GPU, and the ratio can only be tuned in whole machines. At that scale
+the quantization error in your provisioning is larger than the win. Small models
+also prefill fast enough that chunked prefill genuinely does absorb the
+interference.
 
-The scheduler's job is no longer "which GPU is free" but "**where is the KV
-this request needs, and where should its new KV live**." Prefill writes blocks
-into the pool; decode reads them; a hot prefix computed for one user is a cache
-hit for the next, served from pooled DRAM instead of recomputed. Under overload
-Mooncake adds a distinctly systems-flavored move: **prediction-based early
-rejection** — estimate whether an incoming request can still hit its SLO given
-current queue and cache state, and shed it *early* rather than admit it, thrash,
-and miss everyone's latency. Mooncake reported large gains (a simulated 525%
-ceiling; ~75% more real requests served) and won the **FAST 2025 Best Paper**.
-Its **Transfer Engine** and **Mooncake Store** were open-sourced in March 2025
-and now ship as a KV connector inside vLLM and TensorRT-LLM — the fleet-wide KV
-pool is in the standard stack.
+**3. Low load.** Interference requires contention, and contention requires
+concurrency. A pool running at 20% occupancy has idle slots for prefill chunks;
+they are not stealing bandwidth from anyone because nobody is asking for it. The
+benefit term in the inequality goes to zero while the transfer cost stays fixed
+per request, so the trade inverts. This is also the regime where a disaggregated
+fleet's *fixed* costs bite: two pools mean two sets of weights resident, two
+warm-up costs, and a floor of at least one GPU on each side even when traffic
+would fit on half of one.
 
-## NVIDIA Dynamo: an "inference OS" above the engines
+**4. A fabric too slow to carry the KV.** Covered above and worth repeating as a
+hard gate: check `KV_size / link_bandwidth` against your TTFT budget *before*
+anything else. If shipping a typical prompt's KV eats a meaningful fraction of
+your time-to-first-token allowance, no amount of pool tuning will save it.
 
-vLLM and SGLang ([Anatomy of a Serving Engine](#/anatomy-of-an-engine)) each
-run *one* replica well; nobody was orchestrating a *fleet* of them with KV in
-mind. **NVIDIA Dynamo** (1.0 GA, March 2026) is that missing layer — an
-orchestrator *above* vLLM/SGLang/TensorRT-LLM, treating each as a worker. Three
-pillars matter here:
+And a fifth, which is really the reasoning-model case generalized: **whenever the
+prompt:generation ratio is extreme in either direction**, the symmetric split
+wastes silicon. Decode-heavy traffic (long chain-of-thought, agentic loops)
+starves the prefill pool; prefill-heavy traffic (classification, embedding,
+document scoring with short outputs) starves the decode pool. The fix is the
+asymmetric ratio, and the ratio is a function of *your* traffic that must be
+measured, not inherited from a paper.
 
-- **Smart Router — KV-aware routing.** Instead of round-robin, it scores every
-  candidate replica by roughly `cache_overlap(prefix) − load`, and sends your
-  request to the worker that **already holds your prefix**. Routing *is* cache
-  management now (more below).
-- **KV Block Manager (KVBM).** Fleet-wide tracking of KV blocks — who holds
-  what, what can be reused — plus **tiered offload** of cold blocks down the
-  memory hierarchy. It is the paged block table of [chapter 5](#/paged-kv-cache),
-  lifted from one GPU to the datacenter.
-- **NIXL** (NVIDIA Inference Xfer Library) — the plumbing. A uniform transfer
-  API over **RDMA/RoCE, NVMe-oF, and TCP**, doing **non-blocking VRAM→VRAM**
-  moves so a GPU ships KV without stalling its compute stream. NIXL is what
-  makes "ship the KV" a line of code instead of a research project.
+The honest summary is that disaggregation is a **high-load, long-context,
+large-model, fast-fabric** technique. That describes a frontier-scale serving
+fleet very well and most deployments not at all. If you are running one model on
+eight GPUs behind moderate traffic, the correct answer is chunked prefill and a
+good scheduler, and this chapter is background reading rather than a plan.
 
-> **State of play (mid-2026):** Dynamo 1.0 went GA in March 2026 (NVIDIA quotes
-> up to 7× on Blackwell for disaggregated MoE — a vendor figure, treat as a
-> ceiling). Named adopters include Cursor, Perplexity, Baseten, Deep Infra,
-> Fireworks, ByteDance, and Meituan, with the major clouds and neoclouds
-> (CoreWeave, Together, Nebius) offering it. **llm-d** is the Kubernetes-native
-> counterpart (Red Hat–led, Google/NVIDIA/IBM/CoreWeave): vLLM workers behind
-> the official K8s **Inference Gateway** — model-aware, KV-cache-aware routing
-> and PD disaggregation expressed as Gateway-API extensions rather than a
-> bespoke control plane. Same ideas, two front doors.
+## What comes next
 
-## KV tiering: the memory hierarchy, one level up
+Say yes to disaggregation, and you have made a decision with a consequence larger
+than the one you were considering. The KV cache is no longer a buffer inside a
+GPU; it is **a piece of state that travels**. The moment that is true, every
+distributed-systems question arrives at once: where does it live, who holds a
+copy, how is it found, what happens when it is evicted, and which machine should
+a request go to given where its bytes already are.
 
-You have internalized memory hierarchies since the kernel course — each tier
-slower and larger than the last. The KV fabric is that hierarchy rebuilt for
-cache blocks:
-
-```text
-   HBM        hot   — active KV, last ~30 s of a live request   (fastest, tiny)
-   CPU DRAM   warm  — reusable prefixes, ~30 s to minutes        (PCIe hop away)
-   NVMe SSD   cold  — long-tail prefixes, minutes+               (big, cheap)
-   recompute  gone  — not stored; pay prefill FLOPs to rebuild   (last resort)
-```
-
-**LMCache** is the standard open layer that implements this for vLLM
-(HBM → CPU DRAM → SSD → remote, with cross-node P2P sharing). The key question
-at every boundary: **is restoring a block cheaper than recomputing it?** Do the
-arithmetic. Our 70B/128K KV is ≈ 43 GB; PCIe Gen5 moves ~64 GB/s, so restoring
-it from CPU DRAM to HBM costs:
-
-```text
-  43 GB ÷ 64 GB/s ≈ 670 ms  (restore)
-```
-
-Recomputing that same 128K prefill from scratch is a **compute-bound pass over
-128K tokens** — seconds of GPU time on a large model, and it burns a prefill
-slot you could have given a new request. Hundreds of milliseconds of PCIe
-traffic to skip seconds of compute is a trade you take. That is the whole case
-for tiering: **KV is expensive to make and cheap to move**, so keep it and
-haul it rather than rebuild it.
-
-> **Common trap: the physical-vs-logical hit-rate gap.** A router can report a
-> "99% logical hit rate" — 99% of requests *had* a reusable prefix somewhere —
-> while delivering nothing, because HBM was full and the block had already been
-> **evicted**, forcing a recompute. A logical hit that isn't physically
-> resident is a miss with extra steps. Tiering exists precisely to turn logical
-> hits into physical ones: catch the evicted block in DRAM or NVMe instead of
-> recomputing it. Measure the hit rate that ends in *restored bytes*, not the
-> one that ends in *found a match*.
-
-## Routing and autoscaling: why the old playbook breaks
-
-A classic HTTP load balancer treats replicas as interchangeable and spreads
-requests evenly. For LLM serving that is actively harmful: **round-robin throws
-away prefix caches.** Send a request whose 800-token system prompt is cached on
-replica A over to replica B, and B re-runs the entire prefill — you paid for the
-cache and routed around it. So the modern router is **cache-aware** (SGLang's
-`sgl-router`, Dynamo's Smart Router, the Inference Gateway): it tracks which
-replica holds which prefix and sends matches home. **Routing has become cache
-management.**
-
-That creates a tension you must name: **affinity vs balance.** Pure affinity —
-always route to the best-cached replica — overloads whichever one owns the
-popular system prompt; pure balance kills the cache. Production routers split
-the difference with that `overlap − load` score and **spill** to a colder
-replica when the hot one saturates.
-
-Autoscaling is where LLM serving diverges hardest from ordinary services, for
-three reasons that are each a trap:
-
-- **GPU utilization is a useless scaling signal.** Continuous batching pins it
-  near 100% whenever *anything* is running, busy or starving. Scale on **queue
-  depth, TTFT, and achieved throughput** instead — signals that reflect whether
-  you are meeting SLOs, not whether the silicon is warm.
-- **Scaling *down* is dangerous.** Retiring a replica does not just drop
-  capacity; it **destroys that replica's warm KV cache** and kills its
-  in-flight sequences — a cache flush plus a batch of dropped requests,
-  reversible only by expensive recompute elsewhere.
-- **Cold starts are measured in minutes.** A new replica must load tens to
-  hundreds of GB of weights before it serves a single token. You cannot meet a
-  traffic spike by booting GPUs; you keep **pre-warmed pools**, because
-  scale-to-zero is a fantasy when zero-to-one is a multi-minute weight load.
-
-## Closing the module's arc
-
-Step back and look at what just happened, because it is the same story you
-already know — told one level up.
-
-In [PagedAttention](#/paged-kv-cache), the problem was **fragmentation inside a
-single GPU**: contiguous KV reservations wasted 60–80% of HBM, and the fix was
-the operating system's own move — paging, a block table, a shared pool. Kernel
-memory management, rediscovered in one GPU.
-
-This chapter is that identical story at **datacenter scale**. The block table
-became fleet-wide block tracking (KVBM, Mooncake's scheduler). The free-page
-pool became a tiered hierarchy across HBM, DRAM, and NVMe (LMCache). Demand
-paging between tiers became KV *transfer* over RDMA (NIXL, Transfer Engine).
-Cache-affine process scheduling became cache-aware *request* routing. The
-kernel virtualized memory over scattered frames; the KV fabric virtualizes KV
-over scattered *machines*. Fragmentation → paging → tiering → transfer →
-routing is one continuous idea, and the object it all orbits is the KV cache.
-
-That is the payoff of the whole course's central asymmetry. Because prefill and
-decode want different things, the KV cache had to leave the GPU — and once it
-left, it became the distributed object the entire serving stack is built
-around. Everything the [next chapter](#/agentic-serving) says about agent
-economics is downstream of this: when the cache is the center of gravity, cache
-hit rate is the metric that turns architecture into dollars.
+That is [The KV Fabric](#/the-kv-fabric) — Mooncake's fleet-wide pool, NVIDIA
+Dynamo and NIXL, the memory hierarchy rebuilt across machines, and the routing
+and autoscaling rules that fall out of it. This chapter decided whether to move
+the KV. The next one is about everything that happens because you did.
 
 ## What to remember
 
-- **PD disaggregation** gives prefill (compute-bound) and decode
-  (memory-bound) their own GPU pools, parallelism, and hardware — at the cost
-  of **shipping KV** between pools. **The decision is arithmetic:**
-  disaggregate when interference saved > `KV_size / link_bandwidth`. A 4K-token
-  70B prompt ships in ~26 ms over RDMA (easy); a 128K context is ~43 GB and can
-  rival decode time. A **regime, not a religion** — low load and decode-heavy
-  reasoning models often want colocation or asymmetric (1P3D) ratios.
-- **DistServe** = goodput-driven independent provisioning; **Splitwise** =
-  heterogeneous hardware per phase; **Mooncake** = a fleet-wide KV pool from
-  spare DRAM/SSD, KVCache-centric scheduling, early rejection under overload.
-- **Dynamo** is an inference OS above the engines: **Smart Router**
-  (`overlap − load`), **KV Block Manager** (fleet-wide + tiered offload),
-  **NIXL** (non-blocking VRAM→VRAM over RDMA/RoCE/NVMe-oF). **llm-d** is the
-  K8s-native equivalent via the Inference Gateway.
-- **KV tiering** is the memory hierarchy one level up: HBM → DRAM → NVMe →
-  recompute. **LMCache** is the standard open layer; restoring often beats
-  recompute. Beware the **physical-vs-logical hit-rate gap** — an evicted "hit"
-  is a miss. **Routing is cache management** (round-robin destroys prefix
-  caches); autoscaling is hard because GPU util is useless, scale-down flushes
-  warm cache, and cold starts are minutes of weight loading.
-- The module's arc: **fragmentation → paging** was kernel memory inside one
-  GPU; **tiering → transfer → routing** is the same story at datacenter scale.
-  The KV cache is the center of gravity of modern serving.
+- **The two phases want different machines.** Prefill is compute-bound (intensity
+  ≈ T): it wants FLOP/s, big batches, new silicon. Decode is memory-bound
+  (intensity ≈ B): it wants HBM bandwidth and HBM capacity. A GPU that serves
+  both is paying for one of them twice, and they scale on unrelated curves —
+  tokens-in versus tokens-out × concurrency.
+- **PD disaggregation** gives each phase its own pool, count, parallelism, and
+  hardware tier, at the cost of **shipping KV** between them.
+- **Goodput** — throughput counting only SLO-meeting requests — is the metric that
+  makes the case. Colocation is one knob (chunk size) controlling two opposed
+  SLOs; disaggregation turns it into two knobs plus a pool ratio. **DistServe** =
+  goodput-driven independent provisioning; **Splitwise** = heterogeneous hardware
+  per phase; together, 2–7× at fixed latency.
+- **The decision is arithmetic:** disaggregate when interference saved >
+  `KV_size / link_bandwidth`. A 4K-token 70B prompt is 1.3 GB → ~26 ms over
+  50 GB/s RDMA; a 128K context is ~43 GB → ~0.9 s and can rival decode time.
+- **Two different comparisons.** Transfer beats *recompute* by ~50× (26 ms vs
+  ~1.4 s of prefill FLOPs) — KV is expensive to make and cheap to move. But the
+  real baseline is *colocation*, against which transfer is pure added cost, so
+  the question is always whether colocation was actually hurting you.
+- **The fabric decides.** 1.3 GB is 1.4 ms on NVLink, 26 ms on InfiniBand NDR,
+  420 ms on 25 GbE. The 20–40× intra-node/inter-node cliff sets where a pool
+  boundary can legitimately go.
+- **Four regimes where it does not pay:** short contexts (no interference to
+  escape), small models (granularity too coarse), low load (no contention), and a
+  slow fabric (transfer eats the TTFT budget). Plus extreme prompt:generation
+  ratios, which want asymmetric pools (**1P3D**, 1P4D) rather than a 1:1 split.
+  A **regime, not a religion**.
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>If transfer is 50× cheaper than recomputing, why not always disaggregate?</summary>
+
+Because recomputation is the wrong baseline. The alternative to shipping the KV
+is not rebuilding it somewhere else — it is having run decode on the GPU that
+already holds it, which costs nothing to "transfer" at all. Against colocation,
+the transfer is pure overhead, and it only pays for itself if the prefill/decode
+interference it removes was costing you more than the transfer costs. The
+recompute comparison tells you *why a fabric exists* rather than *whether you
+need one*.
+
+</details>
+
+<details>
+<summary>Doesn't chunked prefill already solve the interference problem?</summary>
+
+It manages it; it does not remove it. Chunked prefill slices a prompt so it rides
+along in decode batches instead of blocking them, which converts a large stall
+into many small ones — much better tail latency, same total bandwidth stolen.
+Every chunk still consumes HBM traffic and SM cycles that a decode token wanted.
+For most deployments that is a good enough answer, which is exactly why
+disaggregation is a high-load technique rather than a default.
+
+</details>
+
+<details>
+<summary>How do I actually pick the prefill:decode pool ratio?</summary>
+
+From your traffic, by measuring the two phases' GPU-seconds separately. Prefill
+work per request is roughly `2·P·T_in` FLOPs divided by your achieved prefill
+rate; decode work is `T_out` steps at your measured TPOT and batch size. The
+ratio of those totals over a representative traffic sample is your starting pool
+ratio, and then you tune it against goodput. Expect it to move: a product change
+that lengthens outputs (turning on extended reasoning, say) can shift a workload
+from 1P1D to 1P4D without a single line of serving code changing.
+
+</details>
+
+</div>
 
 ```quiz
 [
@@ -329,26 +409,26 @@ hit rate is the metric that turns architecture into dollars.
     "explain": "Disaggregation is a regime, not a religion. When generation vastly outweighs prompt length, the workload is overwhelmingly decode, so a 1:1 pool ratio starves the prefill pool. Matching the ratio to the real prompt:generation shape (1P3D, 1P4D) or colocating at low load recovers the wasted silicon."
   },
   {
-    "q": "Mooncake's KVCache-centric architecture builds a fleet-wide KV pool. Out of what?",
+    "q": "DistServe optimized for goodput rather than throughput. Why does that choice of metric matter for the disaggregation argument?",
     "choices": [
-      "Extra HBM added to every decode GPU",
-      "The spare CPU DRAM and idle SSD sitting next to GPUs across the whole fleet, made RDMA-addressable as one pooled KV store",
-      "A single dedicated storage server with terabytes of RAM",
-      "Compressed KV blocks kept only in each GPU's local HBM"
+      "Goodput is easier to measure than throughput on production hardware",
+      "Goodput counts only SLO-meeting requests, which exposes that a colocated pool has one knob (chunk size) trading TTFT against inter-token latency; disaggregation turns that into two independently provisioned pools plus a ratio",
+      "Goodput ignores latency entirely, so disaggregated fleets score better on it",
+      "Throughput cannot be measured when prefill and decode run on different machines"
     ],
     "answer": 1,
-    "explain": "Mooncake's insight is that summed across hundreds of nodes, spare DRAM and SSD dwarf total HBM. Pooling it into an RDMA-addressable KVCache store lets a prefix computed for one request be reused by another, with a KVCache-centric scheduler placing and locating blocks and rejecting requests early under overload."
+    "explain": "Raw throughput rewards batching until TTFT drifts into seconds — a great number and a broken promise. Goodput scores a late request as zero. Under that metric the colocated pool's structural problem is visible: one setting, two opposed SLOs. Disaggregation's contribution is provisioning freedom — each pool tuned to its own target — not doing less work."
   },
   {
-    "q": "Why is round-robin load balancing actively harmful for LLM serving, and why is GPU utilization a bad autoscaling signal?",
+    "q": "Shipping a 4K-token 70B prompt's KV (1.3 GB) takes ~26 ms over 50 GB/s RDMA, while recomputing that prefill costs ~560 TFLOP, or ~1.4 s on one H100 at 40% MFU. What does this comparison establish, and what does it not?",
     "choices": [
-      "Round-robin is too slow; GPU utilization updates too infrequently",
-      "Round-robin ignores which replica already holds a request's prefix (re-running prefills it could have reused), and continuous batching pins GPU utilization near 100% whenever anything runs, so it never signals SLO pressure",
-      "Round-robin overloads the network; GPU utilization double-counts KV transfers",
-      "Both are fine; the real problem is only cold starts"
+      "It establishes that disaggregation is always worth turning on",
+      "It establishes that KV is expensive to make and cheap to move — justifying a transfer fabric over recompute-everywhere — but not that you should disaggregate, since the real baseline is colocation, against which transfer is pure added cost",
+      "It establishes that recomputation should be preferred whenever the fabric is slower than 50 GB/s",
+      "It establishes that prefill should always run on the decode pool"
     ],
     "answer": 1,
-    "explain": "Prefix caches make replicas non-interchangeable, so routing must be cache-aware (score cache overlap minus load) — round-robin throws the cache away. And because batching keeps the GPU busy whether it is meeting SLOs or starving, you must scale on queue depth, TTFT, and throughput, not utilization."
+    "explain": "Two different comparisons live inside the decision. Transfer vs recompute is lopsided in transfer's favor (~50×), which is why the field built fabrics and tiering rather than recomputing on miss. Transfer vs colocation is the one that decides your deployment: colocation moves nothing, so the transfer only pays if the interference it escapes was worth more than 26 ms per request."
   }
 ]
 ```

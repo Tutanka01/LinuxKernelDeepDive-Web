@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" font-family="Iowan Old Style, Palatino, Georgia, serif">
+<title>Speculative decoding speedup vs. batch size</title>
+<desc>Line chart of speculative-decoding wall-clock speedup (y-axis, 0 to 2.5x) against batch size on a log2 x-axis from 1 to 256. The curve starts at 2.30x at batch 1, falls roughly linearly in log-batch space, crosses 1.0x at batch 32 — the point this course's rule of thumb says many teams disable speculation — and continues down to 0.22x at batch 256. The region below 1.0x is shaded to mark where speculative decoding is a net slowdown. At batch 1 the GPU has spare FLOPs so verification is nearly free; past B_crit the GPU is compute-bound and the wasted draft and rejected-token FLOPs are pure overhead subtracted from throughput.</desc>
+<rect width="880" height="460" rx="8" fill="#f6f1e6"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#221c12">The curve nobody else draws: speedup inverts with batch size</text>
+
+<!-- plot area -->
+<line x1="80" y1="80" x2="80" y2="380" stroke="#221c12" stroke-width="1"/>
+<line x1="80" y1="380" x2="820" y2="380" stroke="#221c12" stroke-width="1"/>
+
+<!-- horizontal gridlines -->
+<g stroke="#ddd3bd" stroke-width="1">
+  <line x1="80" y1="80" x2="820" y2="80"/>
+  <line x1="80" y1="140" x2="820" y2="140"/>
+  <line x1="80" y1="200" x2="820" y2="200"/>
+  <line x1="80" y1="260" x2="820" y2="260"/>
+  <line x1="80" y1="320" x2="820" y2="320"/>
+</g>
+<g font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#8d8370" text-anchor="end">
+  <text x="72" y="84">2.5&#215;</text>
+  <text x="72" y="144">2.0&#215;</text>
+  <text x="72" y="204">1.5&#215;</text>
+  <text x="72" y="264">1.0&#215;</text>
+  <text x="72" y="324">0.5&#215;</text>
+  <text x="72" y="384">0&#215;</text>
+</g>
+
+<!-- shaded "costs you" zone below 1.0x -->
+<rect x="80" y="260" width="740" height="120" fill="#a4462e" fill-opacity="0.14"/>
+<text x="600" y="254" font-size="10" fill="#a4462e" text-anchor="start">shaded: speculation now costs more than it saves</text>
+
+<!-- x tick labels -->
+<g font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#8d8370" text-anchor="middle">
+  <text x="80" y="398">1</text>
+  <text x="172.5" y="398">2</text>
+  <text x="265" y="398">4</text>
+  <text x="357.5" y="398">8</text>
+  <text x="450" y="398">16</text>
+  <text x="542.5" y="398">32</text>
+  <text x="635" y="398">64</text>
+  <text x="727.5" y="398">128</text>
+  <text x="820" y="398">256</text>
+</g>
+<text x="450" y="420" font-size="12" fill="#6b6250" text-anchor="middle">batch size (log scale, concurrent requests)</text>
+<text x="30" y="230" font-size="12" fill="#6b6250" text-anchor="middle" transform="rotate(-90 30 230)">wall-clock speedup vs. no speculation</text>
+
+<!-- B_crit dashed line -->
+<line x1="542.5" y1="80" x2="542.5" y2="380" stroke="#221c12" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>
+<text x="548" y="95" font-size="11" fill="#221c12">B_crit &#8776; 32 &#8212; "disable above ~32" rule of thumb</text>
+
+<!-- the speedup curve -->
+<polyline points="80,104 172.5,135.2 265,166.4 357.5,197.6 450,228.8 542.5,260 635,291.2 727.5,322.4 820,353.6"
+  fill="none" stroke="#b8791f" stroke-width="2.5"/>
+<g fill="#b8791f">
+  <circle cx="80" cy="104" r="4"/>
+  <circle cx="172.5" cy="135.2" r="4"/>
+  <circle cx="265" cy="166.4" r="4"/>
+  <circle cx="357.5" cy="197.6" r="4"/>
+  <circle cx="450" cy="228.8" r="4"/>
+  <circle cx="542.5" cy="260" r="4"/>
+  <circle cx="635" cy="291.2" r="4"/>
+  <circle cx="727.5" cy="322.4" r="4"/>
+  <circle cx="820" cy="353.6" r="4"/>
+</g>
+
+<!-- annotations -->
+<text x="90" y="100" font-size="11" fill="#6b6250">Batch 1: spare FLOPs &#8212; verification rides free (&#8776;2.3&#215;)</text>
+<text x="460" y="300" font-size="11" fill="#6b6250">Past B_crit: GPU is compute-bound.</text>
+<text x="460" y="316" font-size="11" fill="#6b6250">Wasted draft/verify FLOPs come straight out of throughput.</text>
+
+<text x="450" y="444" font-size="11" font-style="italic" fill="#6b6250" text-anchor="middle">Same &#947; = 4 draft, same target model &#8212; only the batch changes. Long context flips this curve back up (not shown).</text>
+</svg>

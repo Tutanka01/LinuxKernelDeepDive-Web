@@ -7,6 +7,8 @@
 > for free. After this chapter, the phrase "cached input tokens, 10× cheaper"
 > stops being a pricing gimmick and becomes a data structure you can draw.
 
+<div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="kv"></div>
+
 You already know the KV cache from [Inference Arithmetic](#/inference-arithmetic):
 every token a model has seen leaves behind a key and a value vector per layer,
 and every future token reads all of them. You know from
@@ -51,7 +53,17 @@ reservation for growth that never happens (internal), plus unusable gaps
 between slabs (external). You bought an 80 GB GPU and got the KV capacity of a
 16 GB one.
 
+> [!bridge] You already know this — from the Linux course
+> Both halves of that waste have names you have already used. Reserved-but-never-written
+> is internal fragmentation; gaps too small for the next allocation are external
+> fragmentation; and the cure for both was to stop handing out variable-size
+> contiguous regions and hand out fixed-size ones instead. The only thing that
+> changed is the unit: 4 KiB pages of RAM there, 16-token blocks of HBM here.
+> [→ Linux: Virtual Memory](../#/memory)
+
 The kernel abandoned segmentation for the same reason. The fix has a name.
+
+![Left, contiguous pre-allocation: four KV slabs each sized for the 2048-token maximum, mostly reserved and never written, with a free gap between them too small to hold another slab. Right, PagedAttention: one pool of fixed 16-token blocks, coloured by owning sequence and scattered through the pool, addressed by per-sequence block tables.](assets/diagrams/paged-attention.svg)
 
 ## Paging, rediscovered
 
@@ -134,6 +146,16 @@ majority — stays shared for the whole request, because completed KV blocks are
 never rewritten. The KV cache is, if anything, a *friendlier* case for COW than
 the kernel's: it is append-only.
 
+> [!bridge] You already know this — from the Linux course
+> `fork()` copies almost nothing: `dup_mmap()` duplicates the VMA tree and the
+> page tables, marks the shared pages read-only, and lets the first write to
+> each page take a fault that performs the copy. Swap "page table" for "block
+> table" and "write-protect bit" for "refcount > 1" and you have parallel
+> sampling exactly. The one thing the kernel does not get for free is the part
+> that makes this cheap here — completed KV blocks are immutable, so the fault
+> can only ever fire on the last, partly-filled block.
+> [→ Linux: Processes & Threads](../#/processes)
+
 ## Computing a prefix once: prefix caching
 
 COW shares blocks *within* one request. The bigger prize is sharing *across*
@@ -183,6 +205,16 @@ The beautiful part: in vLLM V1 this is **on by default and essentially free
 even at a 0% hit rate** — the only cost is a hash per completed block and a dict
 insert, well under 1% throughput ([V1 alpha](https://vllm.ai/blog/2025-01-27-v1-alpha-release)).
 There is no reason not to run it, so everyone does.
+
+> [!bridge] You already know this — from the Linux course
+> A prefix cache is the page cache with a different key. The kernel caches file
+> pages by `(inode, offset)` so a second `read()` of the same bytes never
+> reaches the disk; vLLM caches KV blocks by chained content hash so a second
+> request over the same prefix never reaches the GPU. Both reclaim by LRU under
+> pressure, and both are worth running even when they mostly miss, because a
+> miss costs a lookup. The difference is the key: file offsets are stable, while
+> a KV block's identity depends on every token before it.
+> [→ Linux: Lab — Watch the Page Cache Work](../#/lab-page-cache)
 
 ## RadixAttention: the trie variant
 
@@ -246,6 +278,70 @@ The through-line: the KV cache started as a naive contiguous buffer, became
 paged memory, and — you can already see where this goes — is on its way to
 becoming a distributed, tiered storage system. The kernel's whole memory
 hierarchy, replayed one layer at a time inside the serving stack.
+
+## Watch the pool
+
+A block pool is a thing you should see move. In the simulator below, the bottom
+panel is the pool — one cell per block, coloured by the sequence that owns it,
+green where a block is shared between sequences, empty where it is free. Load
+preset 3 ("Agent, no prefix cache") and tick **prefix caching** on: the green
+shared blocks appear and TTFT collapses. Then load preset 4 and drag the **KV
+pool** slider down until allocation starts failing — the rust flashes are
+sequences losing their blocks and restarting from their prompt, which is
+preemption-by-recompute happening in front of you.
+
+<div class="inf-widget" data-widget="engine-simulator">
+<p class="inf-widget-fallback">Interactive serving-engine simulator — needs JavaScript enabled.</p>
+</div>
+
+## Frequently asked
+
+<div class="faq">
+
+<details>
+<summary>Should I change block_size from the default 16?</summary>
+
+Usually not, and never as a first move. A bigger block means fewer block-table
+entries and slightly less per-block bookkeeping, but it also coarsens
+everything: internal waste grows to at most one bigger partial block per
+sequence, and prefix sharing can only match at those coarser boundaries, so two
+prompts that diverge at token 40 share less with 64-token blocks than with
+16-token ones. Engines do sometimes raise it for very long-context workloads
+where the bookkeeping is the bottleneck; measure the hit rate before and after,
+because that is the number you are trading.
+
+</details>
+
+<details>
+<summary>My prefix cache hit rate is far lower than I expected. What is usually wrong?</summary>
+
+Almost always something at the front of the prompt that varies per request: a
+timestamp, a session id, a shuffled retrieval order, a user name injected into
+the system message. The hash chains from position zero, so one differing token
+poisons that block and every block after it. Check in this order — is the
+variable content before the stable content, is anything reordering your few-shot
+examples or retrieved documents, and is your router sending the same
+conversation to the same replica? The cache is per-worker; a round-robin load
+balancer will scatter a multi-turn chat across replicas that each hold a
+different piece of it.
+
+</details>
+
+<details>
+<summary>Can a cache hit change my output?</summary>
+
+Not in the way people fear, but not never either. The KV for a given prefix is
+mathematically determined by those tokens, so a hit hands back the values the
+model would have computed — this is reuse, not approximation. What can differ is
+floating-point reduction order: KV computed inside a large prefill batch and KV
+computed in a different batch shape can disagree in the last bits, and a
+sampling decision that was nearly a tie can land differently. If you need
+byte-reproducible outputs you are already fighting batch-shape nondeterminism
+for other reasons; prefix caching does not add a new class of problem.
+
+</details>
+
+</div>
 
 ## What to remember
 
