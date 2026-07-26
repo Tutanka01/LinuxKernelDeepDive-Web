@@ -361,3 +361,31 @@ html[data-theme="paper"] .article-body img {
   .inf-widget-head { padding: 0.7rem 0.85rem 0.6rem; }
   .article-body details > *:not(summary) { margin-left: 0.9rem; }
 }
+
+/* phone: everything that can overflow must be reined in */
+@media (max-width: 600px) {
+  /* widgets — full-width on phone, no horizontal waste */
+  .inf-controls {
+    grid-template-columns: 1fr;
+    gap: 0.7rem;
+  }
+  .inf-results {
+    grid-template-columns: 1fr;
+    gap: 0.7rem;
+  }
+  .inf-widget-body { padding: 0.8rem 0.8rem 1rem; }
+  .inf-widget-head { padding: 0.65rem 0.8rem 0.5rem; }
+
+  /* callout boxes — less internal padding so the text column breathes */
+  .article blockquote.inf-callout { padding: 0.75rem 0.95rem; }
+  .article-body .exercise { padding: 0.85rem 0.95rem 0.3rem; }
+
+  /* diagrams: prevent any accidental overflow, keep the rounded look */
+  .article-body img { margin-left: 0; margin-right: 0; }
+
+  /* glossary — single column */
+  .article-body .glossary dd { margin-left: 0; }
+
+  /* stack map — same treatment as diagrams */
+  .article-body .inf-stackmap { margin-left: 0; margin-right: 0; }
+}

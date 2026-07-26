@@ -107,6 +107,11 @@ button, input {
 
 html { scroll-behavior: smooth; }
 
+/* nothing may push the page sideways. `clip` rather than `hidden` so the
+   sticky sidebar and on-this-page rail keep working (hidden would turn the
+   root into a scroll container and break them). */
+html, body { overflow-x: clip; max-width: 100%; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -430,7 +435,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
    Article
    ============================================================ */
 
-.content { flex: 1; min-width: 0; }
+.content { flex: 1; min-width: 0; max-width: 100%; }
 
 .article {
   max-width: var(--measure);
@@ -440,6 +445,9 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 }
 
 .loading { color: var(--text-faint); font-style: italic; }
+
+/* long unbroken tokens in a heading (paths, identifiers) must not widen the page */
+.article h1, .article h2, .article h3, .article h4 { overflow-wrap: break-word; }
 
 .article h1 {
   font-size: 2rem;
@@ -558,8 +566,10 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   border-radius: 6px;
   padding: 1rem 1.2rem;
   overflow-x: auto;
+  max-width: 100%;
   margin: 0 0 1.4rem;
   line-height: 1.55;
+  -webkit-overflow-scrolling: touch;
 }
 
 .article pre code {
@@ -573,6 +583,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 /* tables — wrapped by JS in .table-scroll so wide tables scroll on touch */
 .table-scroll {
   overflow-x: auto;
+  max-width: 100%;
   margin: 0 0 1.4rem;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
@@ -602,6 +613,11 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 .article tbody tr:last-child td { border-bottom: none; }
 
 .article img { max-width: 100%; height: auto; }
+/* anything else that can arrive with intrinsic pixel dimensions */
+.article svg, .article canvas, .article video, .article iframe, .article embed, .article object {
+  max-width: 100%;
+}
+.article iframe, .article video { height: auto; }
 
 /* ============================================================
    Chapter meta — a single quiet line of context.
@@ -1100,13 +1116,38 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 
   .article pre { padding: 0.8rem 0.9rem; -webkit-overflow-scrolling: touch; }
   .article pre code { font-size: 0.8rem; }
+  /* code lines scroll inside the block; they never wrap and never widen it */
+  .article pre, .article pre code { white-space: pre; overflow-wrap: normal; word-break: normal; }
 
-  .article blockquote { margin: 1.1rem 0; }
-  .article table { font-size: 0.84rem; }
-  .article th, .article td { padding: 0.4rem 0.6rem; }
+  /* inline code is prose, so it must break rather than push the column wide */
+  .article code { overflow-wrap: anywhere; word-break: break-word; }
+  .article a { overflow-wrap: anywhere; }
+
+  .article blockquote { margin: 1.1rem 0; padding-left: 0.9rem; }
+  .article blockquote.callout-simple,
+  .article blockquote.callout-nuance { padding: 0.8rem 0.9rem; }
+
+  .article ul, .article ol { padding-left: 1.25rem; }
+
+  /* a table that JS did not manage to wrap still scrolls on its own */
+  .article table {
+    display: block;
+    width: max-content;
+    min-width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.84rem;
+  }
+  /* inside the wrapper the wrapper does the scrolling — let the table be wide */
+  .table-scroll table { display: table; max-width: none; overflow-x: visible; }
+  .article th, .article td { padding: 0.4rem 0.6rem; overflow-wrap: break-word; }
+
+  .article details > *:not(summary) { padding: 0 0.8rem; }
+  .article details summary { padding: 0.55rem 0.8rem; }
 
   /* search modal: breathing room instead of edge-to-edge */
-  .search-box { margin: 8vh 0.9rem 0; }
+  .search-box { margin: 8vh 0.9rem 0; max-width: none; }
 
   .pager { flex-direction: column; gap: 0.5rem; padding: 0.9rem 1.15rem 0; }
   .pager a { max-width: 100%; padding: 0.55rem 0; }
@@ -1115,6 +1156,13 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   .page-footer { padding: 1rem 1.15rem calc(2rem + env(safe-area-inset-bottom)); }
 
   .toc-part { font-size: 0.66rem; }
+
+  /* the meta line wraps instead of forcing the button off the right edge */
+  .chapter-meta { gap: 0.35rem 0.8rem; }
+  .meta-read-btn { margin-left: 0; }
+
+  .article pre.mermaid { padding: 0.8rem 0.5rem; }
+  .article pre.mermaid svg { max-width: 100%; height: auto; }
 }
 
 /* ============================================================
@@ -1129,6 +1177,25 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   .article h1 { font-size: 1.42rem; }
   .article h2 { font-size: 1.12rem; }
   .article h3 { font-size: 1rem; }
+  .article pre { padding: 0.7rem 0.7rem; }
   .article pre code { font-size: 0.76rem; }
+  .article table { font-size: 0.8rem; }
   .article th, .article td { padding: 0.34rem 0.45rem; }
+
+  .article ul, .article ol { padding-left: 1.1rem; }
+  .article blockquote { padding-left: 0.75rem; }
+  .article blockquote.callout-simple,
+  .article blockquote.callout-nuance { padding: 0.7rem 0.75rem; }
+
+  .article details > *:not(summary) { padding: 0 0.65rem; }
+  .article details summary { padding: 0.55rem 0.65rem; font-size: 0.8rem; }
+
+  .pager, .page-footer { padding-left: 1rem; padding-right: 1rem; }
+  .search-box { margin: 6vh 0.6rem 0; }
+  #search-input { font-size: 1rem; padding: 0.85rem 0.9rem; }
+  .search-result { padding: 0.5rem 0.55rem; }
+  .search-footer { padding: 0.5rem 0.9rem; font-size: 0.6rem; }
+
+  /* the drawer must leave a visible sliver of page behind it */
+  .sidebar { width: min(88vw, 320px); }
 }

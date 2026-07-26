@@ -24,6 +24,7 @@ html[data-theme="paper"] {
   max-width: var(--measure);
   margin: 0 auto;
   padding: 3.25rem var(--gutter) 2rem;
+  overflow-wrap: break-word;
 }
 
 .home.fade-in { animation: fadeIn 0.35s ease-out; }
@@ -68,7 +69,8 @@ html[data-theme="paper"] {
 .hero-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .hero-hint { color: var(--text-faint); font-size: 0.85rem; font-style: italic; }
 
-.hero-ring { position: relative; flex-shrink: 0; }
+.hero-ring { position: relative; flex-shrink: 0; max-width: 100%; }
+.hero-ring svg { display: block; max-width: 100%; height: auto; }
 .ring-track { fill: none; stroke: var(--rule); stroke-width: 6; }
 .ring-fill {
   fill: none;
@@ -125,7 +127,7 @@ html[data-theme="paper"] {
   font-size: 0.9rem;
 }
 
-.module-head h2 { margin: 0 0 0.15rem; color: var(--ink); font-size: 1.4rem; }
+.module-head h2 { margin: 0 0 0.15rem; color: var(--ink); font-size: 1.4rem; overflow-wrap: break-word; min-width: 0; }
 .module-blurb { margin: 0 0 0.35rem; color: var(--text-dim); font-size: 0.86rem; font-style: italic; }
 .module-head .lvl-badge { margin-left: auto; flex-shrink: 0; }
 
@@ -144,7 +146,7 @@ html[data-theme="paper"] {
   white-space: nowrap;
 }
 
-.chapter-grid { display: grid; gap: 0.65rem; }
+.chapter-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.65rem; }
 .chapter-card {
   display: flex;
   align-items: center;
