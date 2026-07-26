@@ -13,19 +13,27 @@
   --bg-code:     #14110d;
   --bg-inline:   #262019;
 
-  /* ink — hierarchy comes from these, not from the accent */
-  --ink:         #f0e8d8;   /* headings: bright warm cream */
-  --text:        #d4cbb7;   /* body */
-  --text-dim:    #978d7c;   /* secondary text */
-  --text-faint:  #6d6456;   /* nav labels, meta, anything recessive */
+  /* ink — hierarchy comes from these, not from the accent.
+     Every tier clears 4.5:1 on both surfaces: the recessive layer carries
+     the whole orientation system (chapter numbers, breadcrumbs, the
+     on-this-page rail, the meta line) and reading it is not optional. */
+  --ink:         #f0e8d8;   /* headings: bright warm cream   14.7:1 */
+  --text:        #d4cbb7;   /* body                          11.1:1 */
+  --text-dim:    #a39785;   /* secondary text                 6.2:1 */
+  --text-faint:  #8c8271;   /* nav labels, meta, recessive    4.7:1 */
 
-  /* the single accent */
+  /* the single accent. --accent-dim is one notch toward the page in both
+     themes (it used to invert polarity, which made every label built on it
+     fail contrast on paper). */
   --accent:      #d9a05b;   /* amber — links, active state, brand */
-  --accent-dim:  #a4783f;
+  --accent-dim:  #c49456;
   --accent-soft: rgba(217, 160, 91, 0.09);
 
-  /* structure */
-  --rule:        #2c2720;   /* hairlines */
+  /* structure — three weights, because one hairline cannot serve a table
+     rule, a card edge and a form control all at once. */
+  --rule:        #2c2720;   /* hairlines: tables, dividers */
+  --rule-mid:    #423a31;   /* card and panel edges */
+  --rule-strong: #736a5a;   /* form controls & state indicators — 3:1 */
   --rule-soft:   #231f19;
 
   /* level dots */
@@ -43,6 +51,15 @@
   --selection: rgba(217, 160, 91, 0.22);
   --code-ink:  #e3c79a;
   --scrim:     rgba(12, 10, 8, 0.72);
+  /* shadows were the only colour declarations that bypassed the token
+     layer, so they stayed pure black on ivory stock */
+  --shadow:    rgba(0, 0, 0, 0.45);
+
+  /* Height of the sticky bar the reader is currently under. Zero on wide
+     screens, set by the drawer breakpoint. One number now drives the
+     anchor offset, the scroll-spy line and heading scroll-margin, which
+     used to be three unrelated constants. */
+  --sticky-h: 0px;
 
   color-scheme: dark;
 }
@@ -61,23 +78,29 @@ html[data-theme="paper"] {
 
   --ink:         #221c12;
   --text:        #383022;
-  --text-dim:    #6b6250;
-  --text-faint:  #877d68;
+  --text-dim:    #5f5745;
+  --text-faint:  #726852;
 
-  --accent:      #8f5d1a;
-  --accent-dim:  #b08a4e;
+  /* a touch deeper than the original #8f5d1a: the active TOC / theme /
+     course-chip states set accent text on accent-soft, which landed at
+     4.27:1 and is now 4.51:1 */
+  --accent:      #8a5917;
+  --accent-dim:  #7d5016;
   --accent-soft: rgba(143, 93, 26, 0.08);
 
   --rule:        #ddd3bd;
+  --rule-mid:    #cec1a6;
+  --rule-strong: #8a7d61;
   --rule-soft:   #e7dfcc;
 
-  --lvl-core:      #4f7d2c;
+  --lvl-core:      #416b20;
   --lvl-mechanism: #8f5d1a;
-  --lvl-internals: #a4462e;
+  --lvl-internals: #9f412a;
 
   --selection: rgba(143, 93, 26, 0.18);
   --code-ink:  #6d4a10;
   --scrim:     rgba(52, 44, 30, 0.4);
+  --shadow:    rgba(52, 44, 30, 0.22);
 
   color-scheme: light;
 }
@@ -97,6 +120,29 @@ button, input {
   font: inherit;
   color: inherit;
 }
+/* …but a checkbox, a radio and a slider ARE their native appearance. The
+   rule above stripped all three: checkboxes were rendering 0x0, so the
+   simulator's four switches ("chunked prefill", "prefix caching",
+   "speculative decoding", "inject a 10K prompt") had no box and no tick
+   and the reader flipped them blind. accent-color only works on a control
+   that still has an appearance, which is why the earlier accent-color
+   lines looked correct and did nothing. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  -webkit-appearance: auto;
+  appearance: auto;
+  accent-color: var(--accent);
+}
+/* thumb-sized on touch, and never a hairline on WebKit, which draws an
+   appearance-stripped range as nothing at all */
+input[type="range"] { height: 24px; cursor: pointer; }
+
+/* a link is amber everywhere, not only inside .article — the guided-course
+   home pages were rendering browser-default #0000EE */
+a { color: var(--accent); }
+
+::placeholder { color: var(--text-faint); opacity: 1; }
 
 ::selection { background: var(--selection); color: var(--ink); }
 
@@ -129,15 +175,55 @@ body {
   border-radius: 2px;
 }
 
+/* Skip link — the article used to sit 64 tab stops behind the sidebar, and
+   that toll was paid again on every navigation. */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -3rem;
+  z-index: 10001;
+  padding: 0.6rem 1rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent);
+  border-radius: 0 0 6px 6px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus { top: 0; }
+
+/* The article is focused programmatically after every navigation so the
+   next Tab starts at the content, not at stop #1. That focus is a
+   bookkeeping move, not a request for a ring around the whole chapter. */
+.content:focus, .article:focus, #view:focus, [tabindex="-1"]:focus { outline: none; }
+
+/* Live-region announcements ("Chapter loaded", search result counts) are
+   for assistive tech only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* reading-progress hairline — echoes the one amber gesture per page */
 #progress-bar {
   position: fixed;
-  top: 0;
+  top: env(safe-area-inset-top, 0px);
   left: 0;
   height: 2px;
   width: 0;
   background: var(--accent);
-  z-index: 9998;
+  /* above the page, below the drawer and the scrim it used to paint over */
+  z-index: 50;
 }
 
 @keyframes fadeIn {
@@ -159,7 +245,7 @@ html.theme-switching * {
               border-color 0.25s ease !important;
 }
 
-.layout { display: flex; min-height: 100vh; }
+.layout { display: flex; min-height: 100vh; min-height: 100dvh; }
 
 /* ============================================================
    Sidebar — recedes. Same warmth as the page, one hairline,
@@ -282,7 +368,10 @@ html.theme-switching * {
 .course-chip {
   display: block;
   padding: 0.38rem 0.6rem;
-  margin: 0 -0.6rem;
+  /* left only: a symmetric negative margin pushed the chip 9px into the
+     sidebar's right padding, one value away from a horizontal scrollbar,
+     and left the chip and TOC highlights with different right edges */
+  margin: 0 0 0 -0.6rem;
   border-left: 2px solid transparent;
   border-radius: 4px;
   text-decoration: none;
@@ -324,6 +413,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   line-height: 1.5;
 }
 
+.topbar { display: none; }
 #sidebar-toggle { display: none; }
 .sidebar-scrim { display: none; }
 
@@ -340,7 +430,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   height: 1.85rem;
   flex-shrink: 0;
   background: var(--bg-raised);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 6px;
   color: var(--text-faint);
   font-family: var(--serif);
@@ -362,13 +452,13 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   gap: 0.4rem;
   padding: 0.42rem 0.72rem;
   background: var(--bg-raised);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 8px;
   color: var(--accent);
   font-family: var(--serif);
   font-size: 0.9rem;
   cursor: pointer;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 3px 12px var(--shadow);
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 .sidebar-show:hover { border-color: var(--accent-dim); color: var(--ink); }
@@ -384,8 +474,9 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   width: 100%;
   margin: 1.1rem 0 0.25rem;
   padding: 0.45rem 0.7rem;
+  min-height: 2.4rem;
   background: transparent;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 6px;
   color: var(--text-faint);
   font-family: var(--serif);
@@ -399,7 +490,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   margin-left: auto;
   font-family: var(--mono);
   font-size: 0.66rem;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 4px;
   padding: 0.05rem 0.35rem;
   color: var(--text-faint);
@@ -409,7 +500,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 .theme-switch {
   display: flex;
   margin: 0.6rem 0 0;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -417,6 +508,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   flex: 1;
   background: transparent;
   border: none;
+  min-height: 2.4rem;
   padding: 0.42rem 0;
   color: var(--text-faint);
   font-family: var(--mono);
@@ -427,7 +519,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease;
 }
-.theme-btn + .theme-btn { border-left: 1px solid var(--rule); }
+.theme-btn + .theme-btn { border-left: 1px solid var(--rule-strong); }
 .theme-btn:hover { color: var(--text); }
 .theme-btn.active { color: var(--accent); background: var(--accent-soft); }
 
@@ -479,29 +571,57 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   font-weight: 700;
 }
 
+/* h3 used to be 5% larger than the paragraph under it and h4 was
+   *smaller* than the body at every width above 600px (1rem against an
+   18px body on tablets), so the bottom two levels of the scale carried no
+   size signal at all — only weight. h3 now steps clearly above the body;
+   h4 stops competing on size and becomes a mono eyebrow instead, which
+   reads as a different rank rather than a failed one. */
 .article h3 {
-  font-size: 1.12rem;
+  font-size: 1.26rem;
+  line-height: 1.35;
   color: var(--ink);
-  margin: 2.1rem 0 0.6rem;
+  margin: 2.3rem 0 0.6rem;
   font-weight: 700;
+  letter-spacing: -0.005em;
 }
 
 .article h4 {
-  font-size: 1rem;
-  color: var(--text);
-  margin: 1.6rem 0 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+  margin: 1.8rem 0 0.5rem;
+  font-family: var(--mono);
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+}
+
+/* Deep links used to land the target heading 33px behind the sticky
+   "Contents" bar on every phone and tablet. One token drives it now. */
+.article h1, .article h2, .article h3, .article h4,
+.article-body h1, .article-body h2, .article-body h3, .article-body h4 {
+  scroll-margin-top: calc(var(--sticky-h) + 1rem);
 }
 
 .article p { margin: 0 0 1.15rem; }
 
+/* A link carried colour alone (1.43:1 against the body text in dark,
+   2.32:1 on paper) with an underline that only arrived on hover, so a
+   colour-blind reader could not see which words were links and a keyboard
+   reader never got the cue at all. The rule is now always drawn, faint,
+   and firms up on hover or focus — the printed-book treatment rather than
+   the animated one. */
 .article a {
   color: var(--accent);
-  text-decoration: none;
-  background: linear-gradient(var(--accent-dim), var(--accent-dim)) 0 100% / 0 1px no-repeat;
-  transition: background-size 0.25s ease;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-dim);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  transition: text-decoration-color 0.15s ease;
 }
-.article a:hover { background-size: 100% 1px; }
+.article a:hover,
+.article a:focus-visible { text-decoration-color: var(--accent); }
 
 .article strong { color: var(--ink); font-weight: 700; }
 .article em { color: var(--text); }
@@ -562,7 +682,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 
 .article pre {
   background: var(--bg-code);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-mid);
   border-radius: 6px;
   padding: 1rem 1.2rem;
   overflow-x: auto;
@@ -570,6 +690,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   margin: 0 0 1.4rem;
   line-height: 1.55;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 .article pre code {
@@ -578,7 +699,17 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   color: var(--text);
   font-size: 0.82rem;
 }
-.article pre code.hljs { background: transparent; padding: 0; }
+/* highlight.js's stylesheet sets `display:block; overflow-x:auto` on
+   .hljs, which quietly moved the scroll container from the <pre> we
+   style and label to the <code> inside it — so the block scrolled with
+   no border, no focus ring and no "there is more" marker. Give the frame
+   back to the <pre>. */
+.article pre code.hljs {
+  background: transparent;
+  padding: 0;
+  display: block;
+  overflow-x: visible;
+}
 
 /* tables — wrapped by JS in .table-scroll so wide tables scroll on touch */
 .table-scroll {
@@ -586,10 +717,84 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   max-width: 100%;
   margin: 0 0 1.4rem;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   scrollbar-width: thin;
-  scrollbar-color: var(--rule) transparent;
+  scrollbar-color: var(--rule-strong) transparent;
 }
 .table-scroll table { margin-bottom: 0; }
+
+/* ------------------------------------------------------------
+   Scrollable evidence.
+
+   The widest table in the book is 6.4 screens across on a phone and the
+   arithmetic blocks are routinely cut mid-token, with nothing to say so.
+   Worse, none of these containers was reachable by keyboard at all: a
+   reader without a mouse simply could not see the right-hand columns.
+
+   Every overflowing block is now a labelled, focusable region carrying a
+   quiet mono marker that names the direction. The marker is set by JS
+   (`data-overflow`) only on blocks that actually overflow, and only where
+   a scrollbar is not already doing the job.
+   ------------------------------------------------------------ */
+
+.scroll-x { position: relative; }
+
+.scroll-x[data-overflow="1"]::after {
+  content: "scroll →";
+  position: absolute;
+  right: 0.15rem;
+  bottom: -1.05rem;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.scroll-x[data-overflow="1"] { margin-bottom: 2.3rem; }
+/* a figure already carries "open full size" on the right of the same
+   line, so its scroll marker goes left rather than on top of it */
+.figure-scroll[data-overflow="1"]::after { left: 0.15rem; right: auto; }
+/* once the reader has moved it, stop saying so */
+.scroll-x[data-overflow="1"][data-scrolled="1"]::after { content: "◂ scroll ▸"; }
+
+/* the focus ring belongs on the frame, not 3px outside it */
+.scroll-x:focus-visible { outline-offset: 1px; }
+
+/* ------------------------------------------------------------
+   Figures.
+
+   A phone rendered the 880px-wide inference diagrams at 0.37 scale and
+   Mermaid at 0.28, so 9-14px labels landed at 3-4 CSS px: not a degraded
+   diagram, an absent one. Rather than shrink to fit, a figure now holds a
+   legible minimum width and scrolls inside its own frame, which is the
+   same contract the code blocks and tables already had.
+   ------------------------------------------------------------ */
+
+.figure-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 1.9rem 0;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+.figure-scroll img { display: block; margin: 0 auto; }
+
+/* Full size in a new tab: a diagram whose smallest label is 9px deserves
+   an escape hatch, and an <a> is the whole implementation. */
+.figure-full {
+  display: block;
+  margin: 0.35rem 0 0;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-align: right;
+  text-decoration: none;
+}
+.figure-full:hover, .figure-full:focus-visible { color: var(--accent); }
 
 .article table {
   border-collapse: collapse;
@@ -623,6 +828,24 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
    Chapter meta — a single quiet line of context.
    A small coloured dot replaces the loud pill.
    ============================================================ */
+
+/* Breadcrumb — where this chapter sits, and how far in it is. The guided
+   courses had this from the start; the 56-chapter course had nothing. */
+.chapter-crumb {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  margin: 1.1rem 0 0.2rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+.crumb-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
 
 .chapter-meta {
   display: flex;
@@ -669,7 +892,8 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   font-family: var(--mono);
   font-size: 0.68rem;
   letter-spacing: 0.04em;
-  padding: 0.16rem 0;
+  min-height: 2.2rem;
+  padding: 0.5rem 0;
   cursor: pointer;
   border-bottom: 1px solid transparent;
   transition: color 0.15s ease, border-color 0.15s ease;
@@ -717,7 +941,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 
 .article details {
   margin: 0.4rem 0 1.1rem;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-mid);
   border-radius: 6px;
   background: var(--rule-soft);
 }
@@ -794,21 +1018,28 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   backdrop-filter: blur(3px);
 }
 .search-modal.open { display: block; }
+/* `hidden` is what assistive tech reads; keep the two in step so a closed
+   dialog is closed for everyone */
+.search-modal[hidden] { display: none; }
+body.modal-open { overflow: hidden; }
 .search-box {
   max-width: 600px;
   margin: 12vh auto 0;
   background: var(--bg-raised);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: 10px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 20px 60px var(--shadow);
   overflow: hidden;
 }
 #search-input {
   width: 100%;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--rule);
-  outline: none;
+  border-bottom: 1px solid var(--rule-strong);
+  /* `outline: none` here was the only one in the codebase, and it beat the
+     global *:focus-visible on ID specificity — the sole control inside the
+     search dialog had no focus indicator at all. */
+  outline-offset: -3px;
   padding: 1rem 1.15rem;
   color: var(--ink);
   font-family: var(--serif);
@@ -826,7 +1057,14 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   border-radius: 6px;
   cursor: pointer;
 }
-.search-result:hover, .search-result.selected { background: var(--accent-soft); }
+.search-result:hover { background: var(--accent-soft); }
+/* The tint alone measured 1.17:1 (dark) and 1.10:1 (paper) — below the
+   threshold of perception, and it was the only signal for which of twelve
+   results Enter would open. */
+.search-result.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .sr-title { display: block; color: var(--accent); font-weight: 700; font-size: 0.94rem; }
 /* which part or module the hit lives in — orientation, not decoration */
 .sr-part {
@@ -859,6 +1097,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
   padding: 3.4rem 1.5rem 2rem 0.5rem;
   scrollbar-width: thin;
@@ -877,7 +1116,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 .page-toc li.lvl-3 a { padding-left: 1.7rem; }
 .page-toc a {
   display: block;
-  padding: 0.24rem 0 0.24rem 0.9rem;
+  padding: 0.42rem 0 0.42rem 0.9rem;
   margin-left: -1px;
   color: var(--text-faint);
   text-decoration: none;
@@ -889,22 +1128,98 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 .page-toc a:hover { color: var(--text-dim); }
 .page-toc a.active { color: var(--accent); border-left-color: var(--accent); }
 
-@media (max-width: 1279px) { .page-toc { display: none; } }
+@media (max-width: 1279.98px) { .page-toc { display: none; } }
+
+/* ------------------------------------------------------------
+   …and the same outline, inline, for everyone under 1280px.
+
+   The rail was built on every render and then hidden from every phone,
+   every tablet in both orientations and any laptop window under 1280px —
+   so a 5,900-word chapter with 25 headings had no in-chapter navigation
+   at all. Same data, collapsed, above the text.
+   ------------------------------------------------------------ */
+
+.page-toc-inline {
+  margin: 1.6rem 0 2rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: 6px;
+  background: var(--bg-raised);
+}
+@media (min-width: 1280px) { .page-toc-inline { display: none; } }
+
+.page-toc-inline > summary {
+  cursor: pointer;
+  padding: 0.7rem 1rem;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  list-style: none;
+}
+.page-toc-inline > summary::-webkit-details-marker { display: none; }
+.page-toc-inline > summary::marker { content: ""; }
+.page-toc-inline > summary::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 1.1rem;
+  transition: transform 0.15s ease;
+}
+.page-toc-inline[open] > summary::after { transform: rotate(90deg); }
+.page-toc-inline > summary:hover { color: var(--accent); }
+
+.page-toc-inline ul {
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem 1rem 0.9rem;
+  border-top: 1px solid var(--rule);
+}
+.page-toc-inline li.lvl-3 a { padding-left: 1.4rem; }
+.page-toc-inline a {
+  display: block;
+  padding: 0.42rem 0;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.page-toc-inline a:hover, .page-toc-inline a:focus-visible { color: var(--accent); }
 
 /* ============================================================
    Heading anchors
    ============================================================ */
 
+/* The section anchor was an 8x16 target at opacity 0 in --rule (1.21:1
+   even when revealed), which made it an invisible tab stop on a desktop
+   and completely unreachable on a touch device — so section-level
+   sharing, a first-class feature of the #/slug@heading URL scheme, did
+   not exist on phones. It now has a real hit area, reveals on focus as
+   well as hover, and stays visible wherever hover is not available. */
 .article .hlink {
-  margin-left: 0.4rem;
-  color: var(--rule);
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.35rem;
+  color: var(--text-faint);
   font-size: 0.8em;
+  text-decoration: none;
   background: none;
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease;
 }
-.article h2:hover .hlink, .article h3:hover .hlink, .article h4:hover .hlink { opacity: 1; }
-.article .hlink:hover { color: var(--accent); }
+.article h2:hover .hlink,
+.article h3:hover .hlink,
+.article h4:hover .hlink,
+.article .hlink:focus-visible { opacity: 1; }
+.article .hlink:hover, .article .hlink:focus-visible { color: var(--accent); }
+
+@media (hover: none) {
+  .article .hlink { opacity: 0.75; padding: 0.2rem 0.5rem; }
+}
 
 /* ============================================================
    Reading-progress summary (sidebar footer)
@@ -938,12 +1253,57 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 
 .article pre.mermaid {
   background: var(--bg-code);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-mid);
   border-radius: 6px;
   padding: 1.1rem;
   text-align: center;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
 }
-.article pre.mermaid svg { max-width: 100%; height: auto; }
+/* Mermaid bakes width/max-width onto the SVG it emits, so `max-width:100%`
+   used to squeeze a 1100px flowchart into 310px on a phone — scale 0.28,
+   14px labels at 3.9px. Hold a legible floor and let the frame scroll
+   instead; on a wide screen `max-width` still keeps it in the column. */
+.article pre.mermaid svg {
+  max-width: 100% !important;
+  height: auto;
+}
+@media (max-width: 900px) {
+  .article pre.mermaid svg {
+    min-width: 560px;
+    max-width: none !important;
+  }
+}
+
+/* ============================================================
+   Wide evidence on a wide screen.
+
+   The reading measure is right for prose and much too narrow for a
+   1500px comparison table or a 12-column ASCII diagram: at 1440px the
+   code column was 632px with 106px of empty page on either side. Code,
+   tables and figures step outside the measure once — and only once —
+   there is genuinely room for them. Below 1400px nothing changes.
+   ============================================================ */
+
+.article > pre,
+.article > .table-scroll,
+.article > .figure-scroll,
+.article-body > pre,
+.article-body > .table-scroll,
+.article-body > .figure-scroll {
+  width: calc(100% + 2 * var(--bleed, 0px));
+  /* .article pre carries max-width:100%, which would clamp the widened
+     box straight back to the measure */
+  max-width: calc(100% + 2 * var(--bleed, 0px));
+  margin-left: calc(-1 * var(--bleed, 0px));
+  margin-right: calc(-1 * var(--bleed, 0px));
+}
+
+@media (min-width: 1400px) { .article, .article-body { --bleed: 56px; } }
+@media (min-width: 1600px) { .article, .article-body { --bleed: 130px; } }
+@media (min-width: 1800px) { .article, .article-body { --bleed: 200px; } }
 
 /* ============================================================
    Responsive — tuned around the reading column and touch.
@@ -957,13 +1317,18 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
    ============================================================ */
 
 /* ---- collapsed sidebar (applies on every screen wider than the drawer) ---- */
-@media (min-width: 901px) {
+@media (min-width: 900.02px) {
   .nav-collapsed .sidebar { display: none; }
   .nav-collapsed .sidebar-show { display: inline-flex; }
 }
 
-/* ---- iPad landscape & mid widths: give the reading column room ---- */
-@media (min-width: 901px) and (max-width: 1279px) {
+/* ---- iPad landscape & mid widths: give the reading column room ----
+   The measure used to *shrink* by 83px as the window grew across 900→901
+   (44rem in the tablet band, then a 264px sidebar eating the width before
+   720px could be reached). Holding 44rem into this band keeps the reading
+   column monotonic. */
+@media (min-width: 900.02px) and (max-width: 1279.98px) {
+  :root { --measure: 44rem; }
   .sidebar { width: 264px; padding-right: 1rem; }
   .article { padding-left: 3rem; padding-right: 3rem; }
 }
@@ -972,33 +1337,68 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
 
-  #sidebar-toggle {
+  /* the height of the sticky bar, so anchors and the scroll-spy agree
+     with the thing that is actually covering the text */
+  :root { --sticky-h: 3.25rem; }
+
+  /* ------------------------------------------------------------
+     The mobile top bar.
+
+     It used to be a single button reading "☰ Contents" — the only chrome
+     a phone reader had once scrolled, and it never said which chapter
+     they were in. The button keeps its job; the bar now also carries the
+     chapter title, which is the one piece of orientation a long scroll
+     destroys.
+     ------------------------------------------------------------ */
+  .topbar {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.1rem;
     position: sticky;
     top: 0;
     z-index: 60;
     width: 100%;
     min-height: 3.25rem;
-    text-align: left;
     background: var(--bg-raised);
+    border-bottom: 1px solid var(--rule-mid);
+    padding-top: env(safe-area-inset-top);
+    transition: transform 0.3s ease;
+    will-change: transform;
+  }
+  /* slides up out of view on scroll-down, back on scroll-up (wired in JS) */
+  .topbar.hide { transform: translateY(-100%); }
+
+  #sidebar-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-shrink: 0;
+    min-height: 3.25rem;
+    text-align: left;
+    background: transparent;
     color: var(--accent);
     border: none;
-    border-bottom: 1px solid var(--rule);
-    padding: max(0.9rem, env(safe-area-inset-top)) 1.2rem 0.9rem
-             max(1.2rem, env(safe-area-inset-left));
+    padding: 0.9rem 0.9rem 0.9rem max(1.15rem, env(safe-area-inset-left));
     font-family: var(--serif);
     font-size: 1.02rem;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
-    transition: transform 0.3s ease;
-    will-change: transform;
   }
   #sidebar-toggle:active { background: var(--accent-soft); }
-  /* slides up out of view on scroll-down, back on scroll-up (wired in app.js) */
-  #sidebar-toggle.hide { transform: translateY(-100%); }
+
+  .topbar-title {
+    min-width: 0;
+    flex: 1;
+    padding-right: max(1.15rem, env(safe-area-inset-right));
+    color: var(--text-dim);
+    font-size: 0.86rem;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .topbar-title:empty { display: none; }
 
   /* the sidebar slides over the page from the left */
   .sidebar {
@@ -1009,8 +1409,13 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
     height: 100%;
     height: 100dvh;
     max-height: none;
-    visibility: visible;
+    /* Closed, the drawer kept 63 focusable links in the tab order: a
+       keyboard or switch user tabbing past "Contents" fell into 56
+       invisible chapter links. `visibility` is animatable, so the slide
+       still works. */
+    visibility: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     z-index: 80;
     border-right: 1px solid var(--rule);
@@ -1019,11 +1424,13 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
              calc(2rem + env(safe-area-inset-bottom))
              max(1.5rem, env(safe-area-inset-left));
     transform: translateX(-100%);
-    transition: transform 0.28s ease;
+    transition: transform 0.28s ease, visibility 0s linear 0.28s;
   }
   .sidebar.open {
+    visibility: visible;
     transform: translateX(0);
-    box-shadow: 0 0 44px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 0 44px var(--shadow);
+    transition: transform 0.28s ease, visibility 0s;
   }
 
   /* dimmed backdrop; tapping it closes the drawer (wired in app.js) */
@@ -1075,7 +1482,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 }
 
 /* ---- iPad / tablet portrait: the priority — larger, calmer type ---- */
-@media (min-width: 601px) and (max-width: 900px) {
+@media (min-width: 600.02px) and (max-width: 900px) {
   body { font-size: 18px; line-height: 1.75; }
   :root { --measure: 44rem; }
 
@@ -1147,13 +1554,26 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   .article details summary { padding: 0.55rem 0.8rem; }
 
   /* search modal: breathing room instead of edge-to-edge */
-  .search-box { margin: 8vh 0.9rem 0; max-width: none; }
+  .search-box {
+    margin: 8vh max(0.9rem, env(safe-area-inset-right)) 0
+            max(0.9rem, env(safe-area-inset-left));
+    max-width: none;
+  }
 
-  .pager { flex-direction: column; gap: 0.5rem; padding: 0.9rem 1.15rem 0; }
+  .pager {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.9rem max(1.15rem, env(safe-area-inset-right)) 0
+             max(1.15rem, env(safe-area-inset-left));
+  }
   .pager a { max-width: 100%; padding: 0.55rem 0; }
   .pager .next { text-align: left; margin-left: 0; }
 
-  .page-footer { padding: 1rem 1.15rem calc(2rem + env(safe-area-inset-bottom)); }
+  .page-footer {
+    padding: 1rem max(1.15rem, env(safe-area-inset-right))
+             calc(2rem + env(safe-area-inset-bottom))
+             max(1.15rem, env(safe-area-inset-left));
+  }
 
   .toc-part { font-size: 0.66rem; }
 
@@ -1168,7 +1588,7 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 /* ============================================================
    Small phone (≤ 420px)
    ============================================================ */
-@media (max-width: 420px) {
+@media (max-width: 420.98px) {
   body { font-size: 15.5px; }
   .article {
     padding-left: max(1rem, env(safe-area-inset-left));
@@ -1190,7 +1610,10 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   .article details > *:not(summary) { padding: 0 0.65rem; }
   .article details summary { padding: 0.55rem 0.65rem; font-size: 0.8rem; }
 
-  .pager, .page-footer { padding-left: 1rem; padding-right: 1rem; }
+  .pager, .page-footer {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
   .search-box { margin: 6vh 0.6rem 0; }
   #search-input { font-size: 1rem; padding: 0.85rem 0.9rem; }
   .search-result { padding: 0.5rem 0.55rem; }

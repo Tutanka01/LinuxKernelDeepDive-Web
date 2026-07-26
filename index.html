@@ -13,9 +13,13 @@
        around to swapping the href, long after first paint. Highlighting is
        JS-driven anyway, so injecting its stylesheet from JS costs nothing. */
     (function () {
-      var theme = "dark";
+      /* An explicit choice always wins; with none stored, follow the OS
+         rather than assuming everyone wants the terminal theme. */
+      var theme = window.matchMedia &&
+                  window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
       try {
-        if (localStorage.getItem("ldd-theme") === "paper") theme = "paper";
+        var saved = localStorage.getItem("ldd-theme");
+        if (saved === "paper" || saved === "dark") theme = saved;
         if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
       } catch (e) {}
       if (theme === "paper") document.documentElement.dataset.theme = "paper";
@@ -27,19 +31,26 @@
       document.head.appendChild(link);
     })();
   </script>
-  <link rel="stylesheet" href="assets/style.css?v=20260725">
-  <link rel="stylesheet" href="assets/course.css?v=20260725">
+  <link rel="stylesheet" href="assets/style.css?v=20260726">
+  <link rel="stylesheet" href="assets/course.css?v=20260726">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div id="progress-bar"></div>
   <div class="layout">
 
-    <button id="sidebar-toggle" aria-label="Toggle table of contents">☰ Contents</button>
+    <!-- The bar a phone reader sees once scrolled. The button keeps its
+         job; the title beside it is the orientation a long scroll eats. -->
+    <header id="topbar" class="topbar">
+      <button id="sidebar-toggle" type="button"
+              aria-label="Table of contents" aria-controls="sidebar" aria-expanded="false">☰ Contents</button>
+      <span id="topbar-title" class="topbar-title"></span>
+    </header>
 
     <button id="sidebar-show" class="sidebar-show" type="button"
             aria-label="Show sidebar" title="Show contents ( [ )">☰ Contents</button>
 
-    <nav id="sidebar" class="sidebar">
+    <nav id="sidebar" class="sidebar" aria-label="Chapters">
       <button id="sidebar-collapse" class="sidebar-collapse" type="button"
               aria-label="Collapse sidebar" title="Hide contents ( [ )" aria-expanded="true">«</button>
       <div class="site-title">
@@ -67,7 +78,7 @@
         </a>
         <a class="course-chip" href="inference/">
           <span class="chip-title">Inference Engineering</span>
-          <span class="chip-desc">23 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
+          <span class="chip-desc">24 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
         </a>
       </nav>
 
@@ -79,11 +90,11 @@
       </div>
     </nav>
 
-    <main class="content">
+    <main id="main" class="content" tabindex="-1">
       <article id="article" class="article">
         <p class="loading">Loading…</p>
       </article>
-      <nav id="pager" class="pager"></nav>
+      <nav id="pager" class="pager" aria-label="Chapter navigation"></nav>
       <footer class="page-footer">
         <p>The Linux Deep Dive — a personal field guide to Linux internals.</p>
       </footer>
@@ -91,15 +102,20 @@
 
     <aside id="page-toc" class="page-toc" aria-label="On this page"></aside>
 
-    <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
+    <p id="live-region" class="sr-only" role="status" aria-live="polite"></p>
+
+  <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
 
   </div>
 
-  <div id="search-modal" class="search-modal" role="dialog" aria-label="Search">
+  <div id="search-modal" class="search-modal" role="dialog" aria-modal="true"
+       aria-label="Search" hidden>
     <div class="search-box">
       <input id="search-input" type="text" placeholder="Search all chapters…"
-             autocomplete="off" spellcheck="false">
-      <ul id="search-results"></ul>
+             autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="true" aria-autocomplete="list"
+             aria-controls="search-results">
+      <ul id="search-results" role="listbox" aria-label="Search results"></ul>
       <p class="search-footer">↑↓ navigate · Enter open · Esc close</p>
     </div>
   </div>
@@ -107,6 +123,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
-  <script src="assets/app.js?v=20260725"></script>
+  <script src="assets/reader-ui.js?v=20260726"></script>
+  <script src="assets/app.js?v=20260726"></script>
 </body>
 </html>

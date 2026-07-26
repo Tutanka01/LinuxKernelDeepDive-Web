@@ -1,12 +1,12 @@
 # Deep Dive Courses
 
-Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **86 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
+Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **93 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
 
 | Course | Chapters | URL | Scope |
 |---|---:|---|---|
 | The Linux Deep Dive | 56 | `/` | Kernel internals from processes and virtual memory through containers, checkpoint/restore, eBPF and KVM, pinned to Linux 6.12 |
 | Distributed Systems | 13 | `/distributed/` | A guided course from partial failure and logical clocks through replication, consensus and CRDTs |
-| Inference Engineering | 17 | `/inference/` | A guided course on LLM serving: the roofline, KV cache, batching, quantization, kernels and disaggregated fleets |
+| Inference Engineering | 24 | `/inference/` | A guided course on LLM serving: the roofline, KV cache, batching, quantization, kernels and disaggregated fleets |
 
 This repository is also the website. Chapters are plain Markdown files under each course's `content/` directory; a small client-side application fetches and renders them with no framework and no build step.
 

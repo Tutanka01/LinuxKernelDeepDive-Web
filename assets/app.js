@@ -264,7 +264,7 @@ const MERMAID_THEME = {
     theme: "neutral",
     themeVariables: {
       background: "#f6f1e6",
-      primaryColor: "#efe8d7",
+      primaryColor: "#f1ebdd",   /* --bg-raised; #efe8d7 matched no token */
       primaryTextColor: "#383022",
       primaryBorderColor: "#8f5d1a",
       lineColor: "#6b6250",
@@ -275,8 +275,12 @@ const MERMAID_THEME = {
 };
 
 function currentTheme() {
-  try { return localStorage.getItem(THEME_KEY) === "paper" ? "paper" : "dark"; }
-  catch { return "dark"; }
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "paper" || saved === "dark") return saved;
+  } catch {}
+  return window.matchMedia &&
+         window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
 }
 
 function applyTheme(theme, rerenderDiagrams = false) {
@@ -379,6 +383,7 @@ function refreshReadButton(slug) {
   const isRead = readSet().has(slug);
   btn.textContent = isRead ? "✓ read" : "mark as read";
   btn.classList.toggle("is-read", isRead);
+  btn.setAttribute("aria-pressed", String(isRead));
 }
 
 /* ---------------- scroll memory: keep your place across reloads ---------------- */
@@ -446,18 +451,20 @@ function updateToggleBar() {
   const delta = y - toggleLastY;
   toggleLastY = y;
 
+  const bar = document.getElementById("topbar") || toggleEl;
+
   /* always visible near the top or while the drawer is open */
   if (y < 64 || sidebarEl.classList.contains("open")) {
     toggleAcc = 0;
-    toggleEl.classList.remove("hide");
+    bar.classList.remove("hide");
     return;
   }
   /* a change of direction starts the count fresh */
   if ((delta > 0 && toggleAcc < 0) || (delta < 0 && toggleAcc > 0)) toggleAcc = 0;
   toggleAcc += delta;
 
-  if (toggleAcc > 48) { toggleEl.classList.add("hide"); toggleAcc = 48; }         // scrolled down enough → hide
-  else if (toggleAcc < -24) { toggleEl.classList.remove("hide"); toggleAcc = -24; } // nudged up → reveal
+  if (toggleAcc > 48) { bar.classList.add("hide"); toggleAcc = 48; }         // scrolled down enough → hide
+  else if (toggleAcc < -24) { bar.classList.remove("hide"); toggleAcc = -24; } // nudged up → reveal
 }
 
 /* auto-mark a chapter read when the reader reaches the end */
@@ -489,6 +496,25 @@ function parseFrontmatter(md) {
   return { meta, body: md.slice(end + 4).replace(/^\s*\n/, "") };
 }
 
+/* Position in the book, for the breadcrumb. The guided courses have said
+   "Course home / Module" at the head of every chapter since they were
+   written; the largest of the three courses said nothing at all, and
+   nothing anywhere said "chapter N of M". */
+function chapterIndex(slug) {
+  return FLAT.findIndex(ch => ch.slug === slug);
+}
+
+function crumbHtml(slug) {
+  const i = chapterIndex(slug);
+  const part = PART_OF[slug] || "";
+  return `<nav class="chapter-crumb" aria-label="Breadcrumb">` +
+    `<a class="crumb" href="#/">Course home</a>` +
+    `<span class="crumb-sep" aria-hidden="true">/</span>` +
+    `<span class="crumb-here">${part}</span>` +
+    (i >= 0 ? `<span class="crumb-count">Chapter ${i + 1} of ${FLAT.length}</span>` : "") +
+    `</nav>`;
+}
+
 function metaBannerHtml(meta, slug) {
   const bits = [];
   if (meta.level && LEVEL_LABEL[meta.level]) {
@@ -504,7 +530,7 @@ function metaBannerHtml(meta, slug) {
     prereqs = `<p class="meta-prereqs">Before this chapter: ` +
       reqs.map(s => `<a href="#/${s}">${TITLE_OF[s]}</a>`).join(" · ") + `</p>`;
   }
-  return `<div class="chapter-meta">${bits.join("")}</div>${prereqs}`;
+  return `${crumbHtml(slug)}<div class="chapter-meta">${bits.join("")}</div>${prereqs}`;
 }
 
 /* ---------------- chapter source ----------------
@@ -621,11 +647,14 @@ function updatePageTocSpy() {
   if (!pageTocEl || !pageTocEl.firstChild) return;
   const heads = [...articleEl.querySelectorAll("h2, h3")];
   let active = null;
+  const line = stickyOffset() + 58;
   for (const h of heads) {
-    if (h.getBoundingClientRect().top <= 90) active = h.id; else break;
+    if (h.getBoundingClientRect().top <= line) active = h.id; else break;
   }
-  pageTocEl.querySelectorAll("a").forEach(a => {
-    a.classList.toggle("active", a.dataset.target === active);
+  document.querySelectorAll(".page-toc a, .page-toc-inline a").forEach(a => {
+    const on = a.dataset.target === active;
+    a.classList.toggle("active", on);
+    if (on) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
   });
 }
 
@@ -670,7 +699,11 @@ function scrollKey() {
 
 function markActive(slug) {
   tocEl.querySelectorAll("a").forEach(a => {
-    a.classList.toggle("active", a.dataset.slug === slug);
+    const on = a.dataset.slug === slug;
+    a.classList.toggle("active", on);
+    /* the visual active state had no programmatic equivalent, so a
+       screen-reader user tabbing 56 entries could not tell where they were */
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   const active = tocEl.querySelector("a.active");
   if (active && sidebarEl.scrollHeight > sidebarEl.clientHeight) {
@@ -699,6 +732,7 @@ function renderPager(slug) {
 
 let lastSlug = null;
 let renderToken = 0;          // guards against a slow fetch landing after a newer one
+let placeholderTimer = null;  // only the current navigation may paint Loading…
 
 async function loadChapter(slug, anchor) {
   markActive(slug);
@@ -709,10 +743,14 @@ async function loadChapter(slug, anchor) {
   }
 
   const token = ++renderToken;
+  /* A previous request may still be fetching. Its delayed placeholder must
+     never paint over this navigation. */
+  clearTimeout(placeholderTimer);
 
   /* Only announce the load if it is slow enough to notice: a warm fetch
      lands well inside this and the reader never sees a flash. */
-  const placeholder = setTimeout(() => {
+  placeholderTimer = setTimeout(() => {
+    if (token !== renderToken) return;
     articleEl.className = "article";
     articleEl.innerHTML = `<p class="loading">Loading ${TITLE_OF[slug]}…</p>`;
     pagerEl.innerHTML = "";
@@ -722,6 +760,8 @@ async function loadChapter(slug, anchor) {
   try {
     const raw = await fetchChapterSource(slug);
     if (token !== renderToken) return;      // a newer navigation already won
+    clearTimeout(placeholderTimer);
+    placeholderTimer = null;
     const { meta, body } = parseFrontmatter(raw);
 
     articleEl.className = "article";       // the home view borrows this element
@@ -729,7 +769,7 @@ async function loadChapter(slug, anchor) {
 
     /* insert the meta banner right after the H1 */
     const h1 = articleEl.querySelector("h1");
-    if (h1 && (meta.level || meta.minutes || meta.kernel || meta.requires)) {
+    if (h1) {
       h1.insertAdjacentHTML("afterend", metaBannerHtml(meta, slug));
       const btn = document.getElementById("mark-read-btn");
       btn.addEventListener("click", () => {
@@ -751,9 +791,26 @@ async function loadChapter(slug, anchor) {
     buildPageToc();
     renderPager(slug);
 
+    if (window.ReaderUI) {
+      /* make every scrollable block reachable and signposted, and give the
+         narrow-screen reader the outline the 1280px rail withholds */
+      ReaderUI.prepareContent(articleEl);
+      const heads = [...articleEl.querySelectorAll("h2, h3")];
+      const meta = articleEl.querySelector(".chapter-meta");
+      ReaderUI.buildInlineToc(heads, slug, meta || articleEl.querySelector("h1"));
+      ReaderUI.setTopbarTitle(TITLE_OF[slug]);
+    }
+
     if (anchor) scrollToAnchor(anchor);
     else if (!booted) restoreScroll(slug);                   // reload: keep your place
     else window.scrollTo({ top: 0, behavior: "instant" });   // new chapter: start at top
+
+    /* A navigation replaced the whole page. Move focus to it so the next
+       Tab starts at the chapter rather than 64 stops away, and say so. */
+    if (booted && window.ReaderUI) {
+      ReaderUI.focusMain();
+      ReaderUI.announce(`${TITLE_OF[slug]} loaded.`);
+    }
     booted = true;
 
     autoReadArmed = true;
@@ -761,6 +818,9 @@ async function loadChapter(slug, anchor) {
     lastSlug = slug;              // only a chapter that actually rendered counts as loaded
     preloadNeighbours(slug);      // ←/→ from here should not have to wait
   } catch (err) {
+    if (token !== renderToken) return;
+    clearTimeout(placeholderTimer);
+    placeholderTimer = null;
     lastSlug = null;              // …so clicking the same entry again retries instead of no-oping
     renderLoadError(slug, anchor, err);
   }
@@ -784,6 +844,11 @@ python3 -m http.server 8000</code></pre>
     .addEventListener("click", () => loadChapter(slug, anchor));
   renderPager(slug);              // a dead end otherwise: keep prev/next reachable
   if (pageTocEl) pageTocEl.innerHTML = "";
+  if (window.ReaderUI) {
+    ReaderUI.setTopbarTitle(TITLE_OF[slug] || "");
+    ReaderUI.buildInlineToc([], null, null);
+    ReaderUI.announce("This chapter could not be loaded.");
+  }
 }
 
 /* ---------------- course home ----------------
@@ -792,6 +857,11 @@ python3 -m http.server 8000</code></pre>
    longer drops a first-time visitor into the middle of a chapter. */
 
 function renderHome() {
+  /* Returning home is also a navigation: invalidate any chapter fetch and
+     its delayed placeholder before either can replace the home view. */
+  renderToken += 1;
+  clearTimeout(placeholderTimer);
+  placeholderTimer = null;
   markActive(null);
   lastSlug = null;                    // the home view replaces the article element
   autoReadArmed = false;
@@ -887,17 +957,30 @@ function renderHome() {
 
   pagerEl.innerHTML = "";
   if (pageTocEl) pageTocEl.innerHTML = "";
+  if (window.ReaderUI) {
+    ReaderUI.setTopbarTitle("Course home");
+    ReaderUI.buildInlineToc([], null, null);
+    if (booted) { ReaderUI.focusMain(); ReaderUI.announce("Course home loaded."); }
+  }
 
   if (!booted) restoreScroll(HOME_KEY);                    // reload: keep your place
   else window.scrollTo({ top: 0, behavior: "instant" });
   booted = true;
 }
 
+/* The sticky "Contents" bar is 3.25rem tall on a phone and the old -24px
+   offset put every deep-linked heading 33px behind it. --sticky-h is the
+   single source for that number now (0 on wide screens). */
+function stickyOffset() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue("--sticky-h");
+  return (parseFloat(v) || 0) + 16;
+}
+
 function scrollToAnchor(anchor) {
   const el = document.getElementById(anchor);
   if (el) {
-    const y = el.getBoundingClientRect().top + window.scrollY - 24;
-    window.scrollTo({ top: y });
+    const y = el.getBoundingClientRect().top + window.scrollY - stickyOffset();
+    window.scrollTo({ top: Math.max(0, y), behavior: "instant" });
   }
 }
 
@@ -905,10 +988,18 @@ function scrollToAnchor(anchor) {
 
 const scrimEl = document.getElementById("sidebar-scrim");
 
+let drawerWasOpen = false;
+
 function setSidebar(open) {
   sidebarEl.classList.toggle("open", open);
   document.body.classList.toggle("nav-open", open);
   toggleEl.setAttribute("aria-expanded", String(open));
+  /* Opening left focus on <body> and closing left it nowhere, so Escape
+     out of the drawer restarted the tab order at stop #1. */
+  if (open === drawerWasOpen || !window.ReaderUI) return;
+  drawerWasOpen = open;
+  if (open) ReaderUI.openDrawer(sidebarEl, toggleEl);
+  else ReaderUI.closeDrawer();
 }
 
 function route() {
@@ -1080,7 +1171,8 @@ function renderSearchResults(q) {
     return;
   }
   searchList.innerHTML = results.map((r, i) =>
-    `<li class="search-result${i === 0 ? " selected" : ""}" data-slug="${r.doc.slug}">
+    `<li id="sr-${i}" class="search-result${i === 0 ? " selected" : ""}"
+         role="option" aria-selected="${i === 0}" data-slug="${r.doc.slug}">
        <span class="sr-title">${r.doc.title}</span>
        ${r.doc.part ? `<span class="sr-part">${r.doc.part}</span>` : ""}
        <span class="sr-snippet">${snippet(r.doc, r.firstHit, terms)}</span>
@@ -1091,11 +1183,34 @@ function renderSearchResults(q) {
       location.hash = `#/${li.dataset.slug}`;
     });
   });
+  syncSearchSelection();
+  /* nothing used to be announced at all: a screen-reader user typed a
+     query and heard silence */
+  if (window.ReaderUI) {
+    ReaderUI.announce(`${results.length} result${results.length === 1 ? "" : "s"} for ${q}.`);
+  }
+}
+
+/* keep the visual selection, aria-selected and aria-activedescendant in step */
+function syncSearchSelection() {
+  const items = [...searchList.querySelectorAll(".search-result")];
+  items.forEach((li, i) => {
+    const on = i === searchSel;
+    li.classList.toggle("selected", on);
+    li.setAttribute("aria-selected", String(on));
+  });
+  const active = items[searchSel];
+  if (active) searchInput.setAttribute("aria-activedescendant", active.id);
+  else searchInput.removeAttribute("aria-activedescendant");
 }
 
 async function openSearch() {
+  if (searchModal.classList.contains("open")) return;
+  searchModal.hidden = false;
   searchModal.classList.add("open");
   searchInput.value = "";
+  /* trap first, so the element focus returns to is the one that opened it */
+  if (window.ReaderUI) ReaderUI.trapFocus(searchModal, document.getElementById("search-open"));
   searchInput.focus();
   /* Read the cache before the first paint of the modal: a returning reader
      should never see the indexing hint at all. */
@@ -1104,7 +1219,13 @@ async function openSearch() {
   await buildSearchIndex();
   renderSearchResults(searchInput.value);   // honour anything typed while indexing
 }
-function closeSearch() { searchModal.classList.remove("open"); }
+function closeSearch() {
+  if (!searchModal.classList.contains("open")) return;
+  searchModal.classList.remove("open");
+  searchModal.hidden = true;
+  searchInput.removeAttribute("aria-activedescendant");
+  if (window.ReaderUI) ReaderUI.releaseFocus();
+}
 
 searchInput.addEventListener("input", () => renderSearchResults(searchInput.value));
 
@@ -1114,7 +1235,7 @@ searchInput.addEventListener("keydown", e => {
     e.preventDefault();
     if (!items.length) return;
     searchSel = (searchSel + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-    items.forEach((li, i) => li.classList.toggle("selected", i === searchSel));
+    syncSearchSelection();
     items[searchSel].scrollIntoView({ block: "nearest" });
   } else if (e.key === "Enter" && items[searchSel]) {
     closeSearch();
@@ -1158,6 +1279,10 @@ document.addEventListener("keydown", e => {
   if (typing || searchModal.classList.contains("open")) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    /* code blocks and wide tables are focusable scroll regions now, and
+       ←/→ is how you scroll them — turning the page instead would lose
+       the reader's place */
+    if (window.ReaderUI && ReaderUI.inScrollRegion()) return;
     const i = FLAT.findIndex(ch => ch.slug === currentSlug());
     const target = FLAT[i + (e.key === "ArrowRight" ? 1 : -1)];
     if (target) location.hash = `#/${target.slug}`;

@@ -561,10 +561,10 @@
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = label;
-    b.style.cssText = "padding:.34rem .7rem;border:1px solid var(--rule);border-radius:4px;" +
-      "background:var(--bg);color:var(--text-dim);font-family:var(--mono);font-size:.76rem;cursor:pointer;";
-    b.addEventListener("mouseenter", function () { b.style.borderColor = "var(--accent-dim)"; b.style.color = "var(--ink)"; });
-    b.addEventListener("mouseleave", function () { b.style.borderColor = "var(--rule)"; b.style.color = "var(--text-dim)"; });
+    /* 33px tall in a wrapped row of nine was the densest control cluster on
+       the site; the hover feedback was also JS-only, so keyboard users got
+       none of it. Both now come from a class in inf.css. */
+    b.className = "inf-btn";
     b.addEventListener("click", onClick);
     parent.appendChild(b);
     return b;
@@ -575,12 +575,17 @@
       seed: 20260726, mode: "continuous", workload: opts.workload || "chat",
       arrival: 6, chunked: true, chunk: 512, prefixCache: true,
       bcrit: 295, pool: 5000, spec: false, alpha: 0.8, gamma: 4,
-      giant: false, speed: 1, playing: true,
+      giant: false, speed: 1,
+      /* A reader who asked the OS for no motion should not land on a
+         continuously animating canvas and have to find the Pause button.
+         Everything still works: Step and the scenario presets drive it. */
+      playing: !(window.InfWidgets && InfWidgets.reducedMotion()),
     };
     const sim = new Sim(cfg);
 
+    const headingTag = el.closest(".article-body")?.querySelector("h2") ? "h3" : "h2";
     el.innerHTML =
-      '<div class="inf-widget-head"><h4>Serving-engine simulator</h4>' +
+      '<div class="inf-widget-head"><' + headingTag + '>Serving-engine simulator</' + headingTag + '>' +
       '<p>Requests arrive, the scheduler batches them, the KV pool fills. Turn a knob; watch a chapter\'s claim happen.</p></div>';
     const body = document.createElement("div");
     body.className = "inf-widget-body";
@@ -597,8 +602,10 @@
     body.appendChild(caption);
 
     /* --- canvases --- */
-    const stage = InfWidgets.canvas(body, 0.62);
-    const spark = InfWidgets.canvas(body, 0.14);
+    const stage = InfWidgets.canvas(body, 0.62,
+      "Live view of the serving engine: the request queue, the current batch and the KV block pool. The seven meters below carry the same state as text.");
+    const spark = InfWidgets.canvas(body, 0.14,
+      "Sparklines of TTFT, worst inter-token latency and throughput over the last two minutes. The meters below carry the current values as text.");
 
     /* --- meters --- */
     const results = document.createElement("div");
@@ -653,7 +660,7 @@
     const actions = document.createElement("div");
     actions.className = "inf-toggles";
     toggles.appendChild(actions);
-    const bPlay = button(actions, "Pause", function () {
+    const bPlay = button(actions, cfg.playing ? "Pause" : "Play", function () {
       cfg.playing = !cfg.playing;
       bPlay.textContent = cfg.playing ? "Pause" : "Play";
     });
@@ -691,7 +698,10 @@
           s.dispatchEvent(new Event("input", { bubbles: true }));
         });
         caption.textContent = p.note;
-        cfg.playing = true; bPlay.textContent = "Pause";
+        /* A preset should configure the paused scene, not override the
+           reader's OS-level reduced-motion preference. */
+        cfg.playing = !(window.InfWidgets && InfWidgets.reducedMotion());
+        bPlay.textContent = cfg.playing ? "Pause" : "Play";
         sim.reset();
         draw();
       });
