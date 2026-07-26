@@ -100,7 +100,7 @@
 
   function markScrollable(el, label) {
     el.classList.add("scroll-x");
-    const overflows = el.scrollWidth - el.clientWidth > 4;
+    const overflows = el.scrollWidth > el.clientWidth;
     if (!overflows) {
       el.removeAttribute("tabindex");
       el.removeAttribute("role");
@@ -163,12 +163,24 @@
      final until its content is. */
   function refreshScrollables(root) {
     if (!root) return;
-    root.querySelectorAll("pre").forEach(pre => {
-      markScrollable(pre, pre.classList.contains("mermaid") ? "Diagram" : "Code block");
+    const candidates = [
+      ...[...root.querySelectorAll("pre")].map(el => ({
+        el, label: el.classList.contains("mermaid") ? "Diagram" : "Code block",
+      })),
+      ...[...root.querySelectorAll(".table-scroll")].map(el => ({ el, label: "Table" })),
+      ...[...root.querySelectorAll(".figure-scroll")].map(el => ({ el, label: "Diagram" })),
+      ...[...root.querySelectorAll(".inf-stackmap")].map(el => ({ el, label: "Architecture diagram" })),
+    ];
+    const totals = candidates.reduce((counts, item) => {
+      counts[item.label] = (counts[item.label] || 0) + 1;
+      return counts;
+    }, {});
+    const seen = {};
+    candidates.forEach(({ el, label }) => {
+      seen[label] = (seen[label] || 0) + 1;
+      const unique = totals[label] > 1 ? `${label} ${seen[label]} of ${totals[label]}` : label;
+      markScrollable(el, unique);
     });
-    root.querySelectorAll(".table-scroll").forEach(el => markScrollable(el, "Table"));
-    root.querySelectorAll(".figure-scroll").forEach(el => markScrollable(el, "Diagram"));
-    root.querySelectorAll(".inf-stackmap").forEach(el => markScrollable(el, "Architecture diagram"));
   }
 
   function prepareContent(root) {

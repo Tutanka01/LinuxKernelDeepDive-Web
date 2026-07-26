@@ -583,8 +583,9 @@
     };
     const sim = new Sim(cfg);
 
+    const headingTag = el.closest(".article-body")?.querySelector("h2") ? "h3" : "h2";
     el.innerHTML =
-      '<div class="inf-widget-head"><h3>Serving-engine simulator</h3>' +
+      '<div class="inf-widget-head"><' + headingTag + '>Serving-engine simulator</' + headingTag + '>' +
       '<p>Requests arrive, the scheduler batches them, the KV pool fills. Turn a knob; watch a chapter\'s claim happen.</p></div>';
     const body = document.createElement("div");
     body.className = "inf-widget-body";
@@ -609,8 +610,6 @@
     /* --- meters --- */
     const results = document.createElement("div");
     results.className = "inf-results";
-    results.setAttribute("role", "status");
-    results.setAttribute("aria-live", "polite");
     body.appendChild(results);
     const METERS = [
       ["TTFT p50", "queue + prefill"], ["TTFT p99", "the tail users feel"],
@@ -699,7 +698,10 @@
           s.dispatchEvent(new Event("input", { bubbles: true }));
         });
         caption.textContent = p.note;
-        cfg.playing = true; bPlay.textContent = "Pause";
+        /* A preset should configure the paused scene, not override the
+           reader's OS-level reduced-motion preference. */
+        cfg.playing = !(window.InfWidgets && InfWidgets.reducedMotion());
+        bPlay.textContent = cfg.playing ? "Pause" : "Play";
         sim.reset();
         draw();
       });

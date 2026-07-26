@@ -247,6 +247,7 @@ html[data-theme="paper"] .article-body img {
   padding: 0.85rem 1.25rem 0.7rem;
   border-bottom: 1px solid var(--rule);
 }
+.inf-widget-head h2,
 .inf-widget-head h3 {
   margin: 0;
   color: var(--ink);

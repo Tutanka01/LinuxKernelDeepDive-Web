@@ -103,8 +103,12 @@ const HLJS_THEME_HREF = {
 };
 
 function currentTheme() {
-  try { return localStorage.getItem(THEME_KEY) === "paper" ? "paper" : "dark"; }
-  catch { return "dark"; }
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "paper" || saved === "dark") return saved;
+  } catch {}
+  return window.matchMedia &&
+         window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
 }
 
 function applyTheme(theme) {
@@ -370,6 +374,8 @@ function moduleIndexLabel(mod, i) {
 }
 
 function renderHome() {
+  /* A pending chapter response must not replace the home route. */
+  renderToken += 1;
   markActive(null);
   lastSlug = null;                     // the home view replaces the chapter markup
   document.title = COURSE_META.homeTitle;
@@ -555,6 +561,7 @@ function syncCompleteButton(btn, slug) {
    in hand renders without touching the network. */
 const mdCache = {};
 let lastSlug = null;
+let renderToken = 0;
 
 async function fetchChapter(slug) {
   if (mdCache[slug] !== undefined) return mdCache[slug];
@@ -590,13 +597,16 @@ async function renderChapter(slug, anchor) {
     return;
   }
 
+  const token = ++renderToken;
   const i = FLAT.findIndex(ch => ch.slug === slug);
   const ch = FLAT[i], prev = FLAT[i - 1], next = FLAT[i + 1];
 
   let md;
   try {
     md = await fetchChapter(slug);
+    if (token !== renderToken) return;
   } catch (err) {
+    if (token !== renderToken) return;
     lastSlug = null;                    // …so re-selecting this chapter retries
     renderLoadError(slug, anchor, err);
     return;

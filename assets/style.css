@@ -93,9 +93,9 @@ html[data-theme="paper"] {
   --rule-strong: #8a7d61;
   --rule-soft:   #e7dfcc;
 
-  --lvl-core:      #4f7d2c;
+  --lvl-core:      #416b20;
   --lvl-mechanism: #8f5d1a;
-  --lvl-internals: #a4462e;
+  --lvl-internals: #9f412a;
 
   --selection: rgba(143, 93, 26, 0.18);
   --code-ink:  #6d4a10;

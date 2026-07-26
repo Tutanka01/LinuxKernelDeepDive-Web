@@ -275,8 +275,12 @@ const MERMAID_THEME = {
 };
 
 function currentTheme() {
-  try { return localStorage.getItem(THEME_KEY) === "paper" ? "paper" : "dark"; }
-  catch { return "dark"; }
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "paper" || saved === "dark") return saved;
+  } catch {}
+  return window.matchMedia &&
+         window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
 }
 
 function applyTheme(theme, rerenderDiagrams = false) {
@@ -853,6 +857,11 @@ python3 -m http.server 8000</code></pre>
    longer drops a first-time visitor into the middle of a chapter. */
 
 function renderHome() {
+  /* Returning home is also a navigation: invalidate any chapter fetch and
+     its delayed placeholder before either can replace the home view. */
+  renderToken += 1;
+  clearTimeout(placeholderTimer);
+  placeholderTimer = null;
   markActive(null);
   lastSlug = null;                    // the home view replaces the article element
   autoReadArmed = false;
