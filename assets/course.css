@@ -420,11 +420,20 @@ html[data-theme="paper"] {
   background: var(--accent-soft);
 }
 
+/* Three cards *are* the landing page, so their arrow is not a hover reward:
+   at rest it is the only mark that says a card is somewhere to go. The
+   chapter cards can keep theirs hidden — a 56-card grid of arrows is noise. */
+.course-card .card-arrow {
+  align-self: center;
+  opacity: 0.55;
+  transform: translateX(0);
+}
+
 .course-card:hover .card-arrow,
 .course-card:focus-visible .card-arrow {
   color: var(--accent);
   opacity: 1;
-  transform: translateX(0);
+  transform: translateX(3px);
 }
 
 .course-card-body { min-width: 0; flex: 1; }
@@ -459,20 +468,30 @@ html[data-theme="paper"] {
 .course-ring { position: relative; flex-shrink: 0; width: 64px; height: 64px; }
 .course-ring svg { display: block; }
 .course-ring .ring-track,
-.course-ring .ring-fill { stroke-width: 3; }
+.course-ring .ring-fill { stroke-width: 3.5; }
+/* the shared --rule track vanishes at this stroke, and a ring with no visible
+   track reads as "4% of nothing" rather than "4% of the course" */
+.course-ring .ring-track { stroke: var(--rule-mid); }
 
+/* One centred flex item holding one line of text: `align-items: baseline` on a
+   box stretched over the whole ring packed the line at the top of the cross
+   axis, so "4%" sat against the rim instead of in the middle. The "%" is
+   inline *inside* that item, so it keeps the digits' baseline — as a flex
+   sibling it aligned to the ring's edges rather than to the number. */
 .course-ring-label {
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
   color: var(--ink);
   font-family: var(--mono);
   font-size: 0.92rem;
+  line-height: 1;
   pointer-events: none;
 }
 
+.course-ring-label b { font-weight: 400; }
 .course-ring-label span { font-size: 0.58rem; color: var(--text-faint); }
 
 .course-meter {
@@ -499,9 +518,13 @@ html[data-theme="paper"] {
 .chip-all .chip-title { color: var(--accent); }
 
 @media (max-width: 600px) {
-  .course-card { gap: 0.9rem; padding: 1rem; }
+  /* The blurb wraps to five or six lines on a phone, and a centred meter then
+     floated halfway down a tall card, level with nothing. Pin it to the title
+     it measures. */
+  .course-card { gap: 0.9rem; padding: 1rem; align-items: flex-start; }
   .course-card-title { font-size: 1rem; }
-  .course-ring, .course-meter { width: 52px; }
+  .course-ring, .course-meter { width: 52px; margin-top: 0.1rem; }
   .course-ring { height: 52px; }
   .course-ring svg { width: 52px; height: 52px; }
+  .course-card .card-arrow { align-self: flex-start; margin-top: 0.35rem; }
 }

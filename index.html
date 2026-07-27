@@ -35,8 +35,8 @@
       document.head.appendChild(link);
     })();
   </script>
-  <link rel="stylesheet" href="assets/style.css?v=20260726">
-  <link rel="stylesheet" href="assets/course.css?v=20260726">
+  <link rel="stylesheet" href="assets/style.css?v=20260727">
+  <link rel="stylesheet" href="assets/course.css?v=20260727">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -57,9 +57,13 @@
     <nav id="sidebar" class="sidebar" aria-label="Chapters">
       <button id="sidebar-collapse" class="sidebar-collapse" type="button"
               aria-label="Collapse sidebar" title="Hide contents ( [ )" aria-expanded="true">«</button>
+      <!-- This shell serves two routes: the platform landing at "/" and the
+           Linux course everywhere else. The rail used to say "The Linux Deep
+           Dive" over a page headed "How systems really work" — app.js swaps
+           these two nodes per route so the rail names the page you are on. -->
       <div class="site-title">
-        <a href="#/course">The Linux<br>Deep Dive</a>
-        <p class="site-subtitle">how your system really works</p>
+        <a id="site-title-link" href="#/course">The Linux<br>Deep Dive</a>
+        <p class="site-subtitle" id="site-subtitle">how your system really works</p>
       </div>
       <button id="search-open" class="search-open" type="button">
         <span class="search-open-icon">⌕</span> Search
@@ -72,13 +76,17 @@
 
       <nav class="course-switch" aria-label="Courses on this site">
         <p class="course-switch-title">Courses</p>
-        <a class="course-chip chip-all" href="#/">
+        <!-- Both of these are links and neither is marked current in the
+             markup: which one is current depends on the route, and app.js
+             sets it. Hardcoding it on the Linux chip claimed the landing
+             page *was* the Linux course. -->
+        <a class="course-chip chip-all" data-course="all" href="#/">
           <span class="chip-title">All three courses</span>
         </a>
-        <span class="course-chip current" aria-current="page">
+        <a class="course-chip" data-course="linux" href="#/course">
           <span class="chip-title">The Linux Deep Dive</span>
           <span class="chip-desc">56 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
-        </span>
+        </a>
         <a class="course-chip" href="distributed/">
           <span class="chip-title">Distributed Systems</span>
           <span class="chip-desc">13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span>
@@ -89,6 +97,12 @@
         </a>
       </nav>
 
+      <!-- On the landing page the chapter list below belongs to one of the
+           three courses, not to the site: say whose it is. Hidden on the
+           Linux routes, where the rail title already answers that. -->
+      <p class="toc-label" id="toc-label" hidden>
+        Chapters in <a href="#/course">The Linux Deep Dive</a>
+      </p>
       <div id="toc"><!-- table of contents injected by app.js --></div>
 
       <div class="sidebar-footer">
@@ -133,7 +147,7 @@
        diagram, which six of these 56 do not. -->
   <script src="assets/vendor/marked.min.js"></script>
   <script src="assets/vendor/highlight.min.js"></script>
-  <script src="assets/reader-ui.js?v=20260726"></script>
-  <script src="assets/app.js?v=20260726"></script>
+  <script src="assets/reader-ui.js?v=20260727"></script>
+  <script src="assets/app.js?v=20260727"></script>
 </body>
 </html>

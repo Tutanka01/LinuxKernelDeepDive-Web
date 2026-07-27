@@ -231,10 +231,12 @@ const COURSES = [
   { id: "linux", name: "The Linux Deep Dive", href: "#/course", total: 56,
     blurb: "The machinery under the command line: processes, memory, the " +
            "storage and network stacks, containers, checkpoint/restore.",
-    time: "20+ hours", progress: () => {
-      try { return new Set(JSON.parse(localStorage.getItem("ldd-read") || "[]")).size; }
-      catch { return 0; }
-    } },
+    /* Counted the same way the course home counts it — against the chapters
+       that exist. Taking the raw size of the stored set let a renamed or
+       retired chapter linger in it, and the card then disagreed with the ring
+       on the page it links to. */
+    time: "20+ hours",
+    progress: () => { const set = readSet(); return FLAT.filter(ch => set.has(ch.slug)).length; } },
   { id: "distributed", name: "Distributed Systems", href: "distributed/", total: 13,
     blurb: "What breaks once there is more than one machine: hostile " +
            "networks, clocks that lie, replication, consensus, Raft.",
@@ -701,6 +703,37 @@ function scrollKey() {
   return HOME_KEY;
 }
 
+/* The left rail is shared by the platform landing page and the Linux course,
+   so it has to say which of the two you are reading. Marked up as the Linux
+   course, it contradicted the landing page in three places at once: the rail
+   title, the "current" course chip, and 56 unattributed chapter links. */
+const titleLinkEl = document.getElementById("site-title-link");
+const subtitleEl  = document.getElementById("site-subtitle");
+const tocLabelEl  = document.getElementById("toc-label");
+
+const SHELL_ID = {
+  platform: { href: "#/",       title: "How Systems<br>Really Work",
+              subtitle: "three courses, one machine at a time", chip: "all" },
+  course:   { href: "#/course", title: "The Linux<br>Deep Dive",
+              subtitle: "how your system really works",         chip: "linux" },
+};
+
+function setShellContext(kind) {
+  const id = SHELL_ID[kind === "platform" ? "platform" : "course"];
+  if (titleLinkEl && titleLinkEl.getAttribute("href") !== id.href) {
+    titleLinkEl.setAttribute("href", id.href);
+    titleLinkEl.innerHTML = id.title;
+  }
+  if (subtitleEl) subtitleEl.textContent = id.subtitle;
+  if (tocLabelEl) tocLabelEl.hidden = id.chip !== "all";
+
+  document.querySelectorAll(".course-switch .course-chip[data-course]").forEach(chip => {
+    const on = chip.dataset.course === id.chip;
+    chip.classList.toggle("current", on);
+    if (on) chip.setAttribute("aria-current", "page"); else chip.removeAttribute("aria-current");
+  });
+}
+
 function markActive(slug) {
   tocEl.querySelectorAll("a").forEach(a => {
     const on = a.dataset.slug === slug;
@@ -893,7 +926,8 @@ function renderPlatform() {
                      stroke-dashoffset="${(CIRC - (pct / 100) * CIRC).toFixed(1)}"
                      transform="rotate(-90 32 32)"/>
            </svg>
-           <span class="course-ring-label">${pct}<span>%</span></span>
+           <span class="course-ring-label" aria-hidden="true"
+             ><b>${pct}<span>%</span></b></span>
          </div>`
       : `<div class="course-meter">
            <span class="course-meter-n">${c.total}</span>
@@ -906,7 +940,10 @@ function renderPlatform() {
           <span class="course-card-title">${c.name}</span>
           <span class="course-card-desc">${c.blurb}</span>
           <span class="course-card-meta">${done > 0
-            ? `${done} of ${c.total} read &middot; continue`
+            /* the ring shows the share, so the meta line keeps the size of the
+               course: "2 of 56 read" left a started card unable to say how big
+               it is, which is the one thing an unstarted card does say */
+            ? `${done} of ${c.total} chapters read &middot; continue`
             : `~${c.time} of reading`}</span>
         </span>
         <span class="card-arrow" aria-hidden="true">&rarr;</span>
@@ -1112,6 +1149,7 @@ function setSidebar(open) {
 
 function route() {
   const r = currentRoute();
+  setShellContext(r.kind);
   if (r.kind === "platform")   renderPlatform();
   else if (r.kind === "home")  renderHome();
   else loadChapter(r.slug, r.anchor);

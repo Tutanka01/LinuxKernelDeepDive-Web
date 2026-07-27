@@ -286,6 +286,20 @@ html.theme-switching * {
 
 #toc { margin-top: 0.5rem; }
 
+/* Shown only on the platform landing page, where the chapter list below is
+   one course's and the rail title no longer says which. */
+.toc-label {
+  margin: 1.35rem 0 0;
+  padding-top: 1.05rem;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-style: italic;
+}
+.toc-label a { color: var(--text-dim); text-decoration: none; }
+.toc-label a:hover { color: var(--accent); }
+.toc-label[hidden] { display: none; }
+
 .toc-part {
   margin: 1.6rem 0 0.5rem;
   font-size: 0.66rem;
