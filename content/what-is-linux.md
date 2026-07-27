@@ -134,11 +134,12 @@ You have 1 CPU (ok, maybe 8 cores) and hundreds of processes. The kernel slices
 CPU time so each process *believes* it has the machine to itself. It does this
 by **context switching**: the kernel saves one task's register file, stack
 pointer, and program counter into its `task_struct`, then loads another's — and
-the CPU resumes as if it never left. The switch itself (on x86-64, the
-`__switch_to()` path) costs on the order of **1–2 microseconds** of direct
-work, plus an indirect tax: the incoming task finds the CPU caches and TLB full
-of the *previous* task's data. That indirect cost is why the scheduler doesn't
-switch more often than it has to.
+the CPU resumes as if it never left.
+
+The switch itself (on x86-64, the `__switch_to()` path) costs on the order of
+**1–2 microseconds** of direct work, plus an indirect tax: the incoming task
+finds the CPU caches and TLB full of the *previous* task's data. That indirect
+cost is why the scheduler doesn't switch more often than it has to.
 
 Who runs next is the scheduler's decision. Since **kernel 6.6 (late 2023)**,
 the default scheduler for normal tasks is **EEVDF** (Earliest Eligible Virtual
@@ -152,14 +153,17 @@ modern kernels can suppress the tick entirely on idle or isolated CPUs
 The same trick applies to memory: every process sees its own private address
 space, even though they all share the same RAM. The hardware **MMU** (Memory
 Management Unit) rewrites virtual addresses to physical ones on the fly,
-page by page, under the kernel's control. A page is **4 KiB on x86-64** by
-default; **arm64 can be built with 4, 16, or 64 KiB pages** (Apple Silicon
-kernels use 16 KiB). Two processes can both store data at "address
-0x7ffee000" — and each gets a different physical page, because the MMU walks a
-different **page table** for each. This illusion is called **virtualization of
-resources** — and as we'll see, [containers](#/containers-overview) are just
-this idea pushed further, virtualizing PIDs, hostnames, and network stacks the
-same way memory and CPU time already are.
+page by page, under the kernel's control.
+
+A page is **4 KiB on x86-64** by default; **arm64 can be built with 4, 16, or
+64 KiB pages** (Apple Silicon kernels use 16 KiB). Two processes can both store
+data at "address 0x7ffee000" — and each gets a different physical page, because
+the MMU walks a different **page table** for each.
+
+This illusion is called **virtualization of resources** — and as we'll see,
+[containers](#/containers-overview) are just this idea pushed further,
+virtualizing PIDs, hostnames, and network stacks the same way memory and CPU
+time already are.
 
 > **Container link:** a container gets *no* new mechanism from the kernel. It
 > is ordinary multiplexing — namespaces slice the kernel's object namespaces,
@@ -171,12 +175,13 @@ same way memory and CPU time already are.
 The CPU itself has privilege levels. The kernel runs in **privileged mode**
 (ring 0 on x86, EL1 on arm64); normal programs run in **unprivileged mode**
 (ring 3 / EL0). A user program physically *cannot* talk to hardware or touch
-other processes' memory — the CPU forbids it. The enforcement is per-page:
-every page table entry carries a **User/Supervisor bit**, and touching a
-supervisor page from ring 3 raises a page fault. Modern x86 CPUs even protect
-the *other* direction — **SMEP** and **SMAP** stop the kernel from
-accidentally executing or dereferencing user-space memory, closing a whole
-class of exploits.
+other processes' memory — the CPU forbids it.
+
+The enforcement is per-page: every page table entry carries a **User/Supervisor
+bit**, and touching a supervisor page from ring 3 raises a page fault. Modern
+x86 CPUs even protect the *other* direction — **SMEP** and **SMAP** stop the
+kernel from accidentally executing or dereferencing user-space memory, closing a
+whole class of exploits.
 
 If a user program touches memory it shouldn't, the CPU raises an exception,
 the kernel's fault handler runs, finds no valid mapping, and delivers

@@ -87,8 +87,9 @@ place. Instead the kernel calls
 [prepare_creds()](https://elixir.bootlin.com/linux/v6.12/C/ident/prepare_creds)
 to get a private, writable copy, mutates the copy, then publishes it with
 [commit_creds()](https://elixir.bootlin.com/linux/v6.12/C/ident/commit_creds),
-which swaps the `task_struct` pointer under RCU. That copy-and-replace
-discipline (the same RCU idea from
+which swaps the `task_struct` pointer under RCU.
+
+That copy-and-replace discipline (the same RCU idea from
 [Kernel Synchronization](#/kernel-sync)) means another CPU reading credentials
 never observes a half-mutated identity — it sees either the whole old cred or
 the whole new one. Kernel code that needs to act briefly as another identity

@@ -242,12 +242,14 @@ So `ldd` shows libc almost everywhere because almost every program needs *both*
 the standard toolkit and, sooner or later, to ask the kernel for something —
 and libc is the road to both.
 
-### Static vs dynamic linking, in one paragraph
+### Static vs dynamic linking, briefly
 
 Everything above describes **dynamic** linking: the program keeps its
 libraries external and loads them at runtime, so one copy of libc in memory
 serves hundreds of running programs and a security fix to libc protects all of
-them at once. The alternative is **static** linking: bake copies of every
+them at once.
+
+The alternative is **static** linking: bake copies of every
 needed library function *into* the executable at link time. A statically linked
 binary is bigger and self-contained — it has no `.so` dependencies, runs on a
 machine with no libc installed, and never surprises you with a version
@@ -289,8 +291,10 @@ it asks the **kernel** to create a brand-new process. Two kernel operations do
 this, and you'll meet them in full in [Processes & Threads](#/processes):
 **fork** (make a copy of the current process) and **exec** (replace that
 copy's contents with a new program — load the ELF, set up memory, jump to the
-entry point). For now the teaser is enough: *the shell asks the kernel to
-build the process; the kernel loads your ELF into fresh memory and starts it.*
+entry point).
+
+For now the teaser is enough: *the shell asks the kernel to build the process;
+the kernel loads your ELF into fresh memory and starts it.*
 
 The result is a **process**: one running instance of a program, with its own
 private view of memory. That memory has a classic, near-universal layout:
@@ -412,11 +416,14 @@ CPU traps.
 
 So how does *anything* useful happen? The process **asks the kernel**. That
 request is a **system call** (syscall). It's the one doorway from a program's
-private world into the kernel that can actually act on hardware. Print a line?
-That's a `write` syscall. Open a file? `openat`. More memory? `mmap`. The time?
-`clock_gettime`. Start a process? `clone`/`execve`. Everything your program
-accomplishes in the real world is a syscall, usually made on its behalf by
-libc. The mechanism — how the CPU switches modes and how the kernel handles the
+private world into the kernel that can actually act on hardware.
+
+Print a line? That's a `write` syscall. Open a file? `openat`. More memory?
+`mmap`. The time? `clock_gettime`. Start a process? `clone`/`execve`.
+Everything your program accomplishes in the real world is a syscall, usually
+made on its behalf by libc.
+
+The mechanism — how the CPU switches modes and how the kernel handles the
 request — is the entire subject of [Kernel, User Space &
 Syscalls](#/kernel-vs-userspace). Here we just need the fact: **nothing crosses
 the line except through a syscall.**
@@ -448,11 +455,12 @@ Sixty-odd syscalls to list a directory. Every one is `ls` asking the kernel to
 do something it cannot do itself: open the directory, read its entries, get
 file metadata, map in libc, write the formatted output to your terminal. Strip
 away `strace`'s formatting and you are literally watching the boundary between
-a program and the kernel. When something breaks — a permission denied, a
-missing file, a hang — `strace` shows you the exact request and the exact
-answer. It's the most instructive debugging tool you'll meet; there's a whole
-chapter on mastering it and its faster cousins in [/proc, strace, perf &
-eBPF](#/observability).
+a program and the kernel.
+
+When something breaks — a permission denied, a missing file, a hang — `strace`
+shows you the exact request and the exact answer. It's the most instructive
+debugging tool you'll meet; there's a whole chapter on mastering it and its
+faster cousins in [/proc, strace, perf & eBPF](#/observability).
 
 ### File descriptors, and what `>` has been doing all along
 
@@ -617,8 +625,8 @@ next.
 <details><summary>Show answer</summary>
 
 Those are **virtual addresses**. Each process gets its own private address
-space and its own layout starting from low addresses; the CPU's memory-
-management unit translates each process's virtual addresses to *different* real
+space and its own layout starting from low addresses; the CPU's
+memory-management unit translates each process's virtual addresses to *different* real
 locations in physical RAM. So identical virtual addresses in two processes map
 to unrelated physical memory. This illusion is virtual memory — the subject of
 [Virtual Memory](#/memory).

@@ -170,9 +170,10 @@ What the child copies vs. shares, precisely:
 tables, write-protecting every writable page in *both* processes. They
 physically share every page until one of them *writes*; the write triggers a
 page fault, and the fault handler copies that single 4 KiB page (the x86-64
-default page size; arm64 can be built with 4, 16 or 64 KiB pages). Forking
-a 2 GB process is nearly instant and costs almost no RAM — for 2 GB of
-mapped 4 KiB pages, the copied page tables are about 4 MiB (8 bytes per
+default page size; arm64 can be built with 4, 16 or 64 KiB pages).
+
+Forking a 2 GB process is nearly instant and costs almost no RAM — for 2 GB
+of mapped 4 KiB pages, the copied page tables are about 4 MiB (8 bytes per
 PTE). A fork of a small process completes in roughly 50–300 µs on modern
 hardware, dominated by page-table copying.
 
@@ -433,19 +434,21 @@ struct clone_args {
 
 The field that matters here is `set_tid`, added in 5.5. For the kernel's
 entire history it *chose* the PID of every new task — you got the next number
-from the per-namespace allocator and had no say. That's fine until you have
-to **restore** a checkpoint: the processes you're rebuilding had specific PIDs
-when they were dumped, those numbers are baked into their `/proc` paths and
-their own `getpid()` memory, and a tree with different PIDs is a *different
-tree*. Before 5.5, CRIU forced the issue with a race — write the target minus
-one to `/proc/sys/kernel/ns_last_pid`, then immediately `fork()` and pray
-nobody grabbed the number in between. `set_tid` makes it honest: hand
-`clone3()` an array of PIDs, one per PID-namespace level, and the kernel
-assigns exactly those (it costs `CAP_CHECKPOINT_RESTORE`, or `CAP_SYS_ADMIN`).
-This is the cleanest example in the tree of **checkpoint/restore reshaping a
-core kernel interface** — a decades-old refusal reversed because restore
-needed it. The restore side that drives it is
-[CRIU: The Restore](#/criu-restore).
+from the per-namespace allocator and had no say.
+
+That's fine until you have to **restore** a checkpoint: the processes you're
+rebuilding had specific PIDs when they were dumped, those numbers are baked
+into their `/proc` paths and their own `getpid()` memory, and a tree with
+different PIDs is a *different tree*. Before 5.5, CRIU forced the issue with
+a race — write the target minus one to `/proc/sys/kernel/ns_last_pid`, then
+immediately `fork()` and pray nobody grabbed the number in between.
+
+`set_tid` makes it honest: hand `clone3()` an array of PIDs, one per
+PID-namespace level, and the kernel assigns exactly those (it costs
+`CAP_CHECKPOINT_RESTORE`, or `CAP_SYS_ADMIN`). This is the cleanest example
+in the tree of **checkpoint/restore reshaping a core kernel interface** — a
+decades-old refusal reversed because restore needed it. The restore side
+that drives it is [CRIU: The Restore](#/criu-restore).
 
 ### ptrace: controlling another process
 
@@ -461,6 +464,7 @@ a target and delivers a `SIGSTOP` to yank the tracee to a halt. That stop is
 the problem. `SIGSTOP` is *visible* — it changes the tracee's job-control
 state, it races with signals already in flight, and a process that was already
 job-control-stopped becomes indistinguishable from one you stopped yourself.
+
 For a debugger poking at a hung program that's tolerable. For a checkpoint
 tool that must freeze a whole process tree *transparently*, photograph it, and
 let it run on as if nothing happened, it is not.
@@ -471,10 +475,12 @@ signal and job-control state undisturbed. When you actually want it stopped
 you send `PTRACE_INTERRUPT` (also 3.4) — a stop that carries no signal and is
 reported as a distinct `PTRACE_EVENT_STOP` rather than masquerading as
 `SIGSTOP`. A companion, `PTRACE_LISTEN`, lets an already group-stopped tracee
-wait quietly under the tracer's control. This trio — seize, interrupt,
-listen — is exactly what made *serious* checkpointing possible: you can grab
-a running process, learn everything about it, and release it with its own
-notion of "am I stopped?" perfectly intact.
+wait quietly under the tracer's control.
+
+This trio — seize, interrupt, listen — is exactly what made *serious*
+checkpointing possible: you can grab a running process, learn everything
+about it, and release it with its own notion of "am I stopped?" perfectly
+intact.
 
 Once attached, you read the tracee's CPU state with `PTRACE_GETREGSET` (since
 2.6.34) — the regset form, which passes a `struct iovec` and generalizes

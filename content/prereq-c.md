@@ -24,8 +24,10 @@ Here is the good news, and it is the whole reason this chapter exists:
 **reading C is a far smaller skill than writing it.** A writer has to get the
 semicolons, the memory management, the undefined behavior, and the build system
 all correct. A reader only has to answer one question per line: *what is this
-saying?* You already read shell scripts and probably some Python; you will find
-that most of C is boringly familiar. The genuinely new ideas are a short list —
+saying?*
+
+You already read shell scripts and probably some Python; you will find that
+most of C is boringly familiar. The genuinely new ideas are a short list —
 pointers, structs, function pointers, and a handful of macros — and this
 chapter is organized around exactly that list, in the order that makes each one
 prepare the next.
@@ -36,9 +38,10 @@ one enormous array of bytes**, each with a numeric **address**, and that we
 write those addresses in **hex**. From
 [From Source Code to Running Process](#/prereq-programs) you should remember
 that a C source file is **compiled** into machine code and that a running
-process has its memory laid out into regions (text, data, heap, stack). Those
-two facts are the ground everything here stands on. If either feels shaky, go
-back — this chapter leans on them hard.
+process has its memory laid out into regions (text, data, heap, stack).
+
+Those two facts are the ground everything here stands on. If either feels
+shaky, go back — this chapter leans on them hard.
 
 ## The shape of C
 
@@ -236,24 +239,27 @@ if (p == NULL)
 
 If code **dereferences** a NULL pointer — does `*p` when `p` is `NULL` — it
 tries to read or write address 0, which is never mapped. In user space that's
-the classic **segmentation fault**. In the kernel it's a **NULL pointer
-dereference**, and it produces the **oops** you met in
-[What Is Linux, Really?](#/what-is-linux) — the kernel prints a backtrace and
-kills the offending context, often taking the machine with it. When a later
-chapter says "this path must check for NULL or it's an oops," this is precisely
-what it means. Tony Hoare, who invented the null reference in 1965, later called
-it his "billion-dollar mistake"; the kernel treats every unchecked pointer as a
-potential one.
+the classic **segmentation fault**.
+
+In the kernel it's a **NULL pointer dereference**, and it produces the **oops**
+you met in [What Is Linux, Really?](#/what-is-linux) — the kernel prints a
+backtrace and kills the offending context, often taking the machine with it.
+
+When a later chapter says "this path must check for NULL or it's an oops," this
+is precisely what it means. Tony Hoare, who invented the null reference in
+1965, later called it his "billion-dollar mistake"; the kernel treats every
+unchecked pointer as a potential one.
 
 ### `void *`: an address of unknown type
 
 You saw `void *buf` in `read()`'s signature. A **`void *`** is "an address,
 type unspecified" — a generic pointer that can hold the address of anything.
 `read()` uses it because it doesn't care whether you're reading into an array of
-chars, a struct, or a network buffer; it just needs somewhere to put bytes. You
-cannot dereference a `void *` directly (the compiler doesn't know how many bytes
-to read), so code casts it to a concrete pointer type first. Think of `void *`
-as "a parcel with an address label but no declared contents."
+chars, a struct, or a network buffer; it just needs somewhere to put bytes.
+
+You cannot dereference a `void *` directly (the compiler doesn't know how many
+bytes to read), so code casts it to a concrete pointer type first. Think of
+`void *` as "a parcel with an address label but no declared contents."
 
 ### Arrays, and `char *` strings
 
@@ -603,11 +609,12 @@ carry:
 The links connect *nodes*, not whole structs. So when the kernel walks the list
 and reaches a node, it uses **`container_of`** to jump from "a pointer to the
 embedded `node`" back to "a pointer to the whole `task`." That is the pairing:
-`list_head` embeds the links, `container_of` recovers the object. One
-`list_head` type can chain *any* struct that embeds one — tasks, files, timers,
-pages — which is why you'll see this exact pattern hundreds of times. Recognize
-the two names together and a huge fraction of kernel data-structure code stops
-being mysterious.
+`list_head` embeds the links, `container_of` recovers the object.
+
+One `list_head` type can chain *any* struct that embeds one — tasks, files,
+timers, pages — which is why you'll see this exact pattern hundreds of times.
+Recognize the two names together and a huge fraction of kernel data-structure
+code stops being mysterious.
 
 ## Bits and flags
 

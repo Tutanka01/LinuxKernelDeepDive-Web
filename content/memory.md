@@ -225,6 +225,7 @@ millisecond even for a 10 GB process. The trick is **copy-on-write (COW)**:
 instead of copying pages, the kernel copies only the *page tables*, marks
 every writable private page **read-only in both parent and child**, and bumps
 each page's reference count. Reads proceed at full speed on shared pages.
+
 The first *write* by either side faults; the fault handler
 ([`do_wp_page()`](https://elixir.bootlin.com/linux/v6.12/C/ident/do_wp_page))
 sees a write to a read-only page inside a writable VMA, copies that one 4 KiB
@@ -376,8 +377,10 @@ Internally, each cached file has a
 hanging off its inode (see [Files, Filesystems & the VFS](#/filesystems)).
 Its `i_pages` field is an **XArray** — a radix-tree-like index mapping *file
 offset → cached page* — and `a_ops` points to the filesystem's read/write
-callbacks. Since the **folio** conversion (kernel 5.16 onward), the page
-cache tracks [`struct folio`](https://elixir.bootlin.com/linux/v6.12/C/ident/folio)
+callbacks.
+
+Since the **folio** conversion (kernel 5.16 onward), the page cache tracks
+[`struct folio`](https://elixir.bootlin.com/linux/v6.12/C/ident/folio)
 objects — a folio is "one or more contiguous pages managed as a unit," which
 lets the cache hold 16 KiB or 64 KiB chunks of a file with one object instead
 of 4–16 separate `struct page`s, cutting per-page overhead on big files.
@@ -435,7 +438,9 @@ Each memory zone has three **watermarks**: `high`, `low`, `min` (derived from
 `vm.min_free_kbytes`, visible in `/proc/zoneinfo`). The kernel daemon
 **kswapd** (one per NUMA node) wakes when free memory dips below `low` and
 reclaims in the background until it's back above `high` — processes don't
-wait. If allocations outrun kswapd and free memory falls below `min`, the
+wait.
+
+If allocations outrun kswapd and free memory falls below `min`, the
 allocating process itself gets drafted: **direct reclaim**, where your
 `malloc`-touching thread synchronously frees pages before its allocation can
 proceed. Direct reclaim is where "the system feels like molasses" lives —
@@ -448,11 +453,12 @@ about it).
 Classically, pages sit on per-node **active/inactive LRU lists** (one pair
 for file pages, one for anonymous). Referenced pages get promoted to the
 active list; reclaim scans the inactive tail, using the hardware
-*accessed* bit to give recently-touched pages a second chance. Since kernel
-6.1 there's a better replacement available: **MGLRU** (multi-generational
-LRU), which sorts pages into generations by recency and scans page tables
-directly instead of chasing the accessed bit page-by-page. It's a build-time
-option (`CONFIG_LRU_GEN`), runtime-toggled at
+*accessed* bit to give recently-touched pages a second chance.
+
+Since kernel 6.1 there's a better replacement available: **MGLRU**
+(multi-generational LRU), which sorts pages into generations by recency and
+scans page tables directly instead of chasing the accessed bit page-by-page.
+It's a build-time option (`CONFIG_LRU_GEN`), runtime-toggled at
 `/sys/kernel/mm/lru_gen/enabled`; several distros ship it on by default as of
 2026 — check yours.
 
@@ -543,8 +549,10 @@ above). **Transparent Huge Pages** (THP) automatically promote suitable
 anonymous regions to 2 MiB pages — both at fault time (a 2 MiB-aligned VMA
 region can be faulted in as one huge page) and in the background, where the
 `khugepaged` thread scans memory and *collapses* runs of 512 contiguous 4 KiB
-pages into one huge page. Since 6.8, **multi-size THP (mTHP)** extends this
-to intermediate sizes (16 KiB, 64 KiB, …) configured per-size under
+pages into one huge page.
+
+Since 6.8, **multi-size THP (mTHP)** extends this to intermediate sizes
+(16 KiB, 64 KiB, …) configured per-size under
 `/sys/kernel/mm/transparent_hugepage/hugepages-*kB/`.
 
 ```bash
@@ -557,12 +565,14 @@ Huge pages improve throughput by cutting TLB misses — commonly 5–15% on
 big-working-set workloads. They can also hurt: compaction stalls while the
 kernel hunts for contiguous 2 MiB blocks, latency spikes when COW must split
 or copy a huge page, and memory bloat when 2 MiB is resident for a structure
-that touches 8 KiB of it. This is why database docs (PostgreSQL, MongoDB,
-Redis) historically said "disable THP" — advice written when `always` mode
-plus aggressive compaction caused multi-millisecond stalls. The modern middle
-ground is `madvise`: only regions the application explicitly marks with
-`madvise(MADV_HUGEPAGE)` get huge pages. The production rule stands: measure
-TLB misses and compaction stalls for *your* workload, don't guess.
+that touches 8 KiB of it.
+
+This is why database docs (PostgreSQL, MongoDB, Redis) historically said
+"disable THP" — advice written when `always` mode plus aggressive compaction
+caused multi-millisecond stalls. The modern middle ground is `madvise`: only
+regions the application explicitly marks with `madvise(MADV_HUGEPAGE)` get
+huge pages. The production rule stands: measure TLB misses and compaction
+stalls for *your* workload, don't guess.
 
 ```bash
 perf stat -e dTLB-load-misses,dTLB-store-misses -p <pid> -- sleep 30
@@ -594,15 +604,16 @@ grep -H '' /sys/kernel/mm/ksm/pages_shared /sys/kernel/mm/ksm/pages_sharing
 If reclaim fails — every page squeezed and still not enough — the kernel must
 choose: deadlock, panic, or kill something. It kills something: the
 **Out-Of-Memory killer** picks the process with the highest *badness* score
-and SIGKILLs it. The score
+and SIGKILLs it.
+
+The score
 ([`oom_badness()`](https://elixir.bootlin.com/linux/v6.12/C/ident/oom_badness))
-is essentially *RSS + swap used + page-table pages*, normalized to
-per-mille of available memory, then shifted by the per-process
-`oom_score_adj` (−1000 to +1000; −1000 means "never kill this"). There is
-no special treatment for root any more — the old 3% `CAP_SYS_ADMIN` bonus
-was removed in 4.17. The kernel then logs a full memory
-autopsy to dmesg — every process's RSS, the zone states, the killer's
-reasoning.
+is essentially *RSS + swap used + page-table pages*, normalized to per-mille
+of available memory, then shifted by the per-process `oom_score_adj` (−1000
+to +1000; −1000 means "never kill this"). There is no special treatment for
+root any more — the old 3% `CAP_SYS_ADMIN` bonus was removed in 4.17. The
+kernel then logs a full memory autopsy to dmesg — every process's RSS, the
+zone states, the killer's reasoning.
 
 ```bash
 sudo dmesg | grep -i "out of memory"      # the OOM killer's confession log

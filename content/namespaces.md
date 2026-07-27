@@ -94,10 +94,12 @@ numbers are hard-coded constants (`PROC_PID_INIT_INO` = 0xEFFFFFFC =
 4026531836 and friends, in `include/linux/proc_ns.h`), which is why the
 numbers above look the same on every Linux machine you'll ever touch. Two
 processes are "in the same container", kernel-wise, exactly when these inode
-numbers match. Non-initial namespaces get inode numbers allocated from an
-increasing counter that starts at `PROC_DYNAMIC_FIRST` = 0xF0000000, so they
-land *at or above* `0xF0000000` — just past the hard-coded init-ns constants
-that sit right below it — and change every boot.
+numbers match.
+
+Non-initial namespaces get inode numbers allocated from an increasing counter
+that starts at `PROC_DYNAMIC_FIRST` = 0xF0000000, so they land *at or above*
+`0xF0000000` — just past the hard-coded init-ns constants that sit right
+below it — and change every boot.
 
 ```mermaid
 graph TD
@@ -350,13 +352,14 @@ namespace, a DoS guard).
 `struct mount` is the *per-namespace* view of a mount; the `struct
 vfsmount` it embeds (`mnt`) plus the `struct super_block` behind it are
 **shared** across namespaces (see
-[Files, Filesystems & the VFS](#/filesystems)). That split is the whole
-trick: creating a mount namespace **copies the mount tree** — every `struct
-mount` is duplicated — but the superblocks, inodes, and page cache underneath
-are not, so two namespaces looking at the same ext4 filesystem share one
-page cache. On a host with 60 mounts that's 60 small allocations: fast, but
-not free, and it's why the new namespace initially looks identical to the
-host.
+[Files, Filesystems & the VFS](#/filesystems)).
+
+That split is the whole trick: creating a mount namespace **copies the mount
+tree** — every `struct mount` is duplicated — but the superblocks, inodes,
+and page cache underneath are not, so two namespaces looking at the same ext4
+filesystem share one page cache. On a host with 60 mounts that's 60 small
+allocations: fast, but not free, and it's why the new namespace initially
+looks identical to the host.
 
 Combined with `pivot_root(2)` — which swaps the namespace's `/` for a
 directory of your choosing and lets you unmount the old root — this gives
@@ -380,13 +383,15 @@ propagation type recorded in flags on its peer/master groups:
 
 Since systemd, distros boot with `/` marked `shared:1` — so a naive
 `unshare --mount` copy would *still propagate* your mounts back to the host
-through the shared peer group! `unshare(1)` saves you by defaulting to
-`--propagation private` (it remounts everything private after unsharing);
-container runtimes do the equivalent, usually making the container's tree a
-`slave` so host mounts (a USB stick, an NFS automount) still appear inside,
-but nothing leaks out. Raw `unshare(CLONE_NEWNS)` from C gives you the
-*leaky* behavior — the copied tree inherits the shared peer groups — unless
-you `mount(MS_REC|MS_PRIVATE)` yourself.
+through the shared peer group!
+
+`unshare(1)` saves you by defaulting to `--propagation private` (it remounts
+everything private after unsharing); container runtimes do the equivalent,
+usually making the container's tree a `slave` so host mounts (a USB stick, an
+NFS automount) still appear inside, but nothing leaks out. Raw
+`unshare(CLONE_NEWNS)` from C gives you the *leaky* behavior — the copied
+tree inherits the shared peer groups — unless you `mount(MS_REC|MS_PRIVATE)`
+yourself.
 
 ```bash
 # The propagation type is the 7th field of each mountinfo line:
@@ -412,12 +417,13 @@ The richest one. A `struct net` is a *complete* instance of the networking
 stack: its own device list (`loopback_dev` plus whatever you add), its own
 routing tables and rule sets (`netns_ipv4 ipv4` / `netns_ipv6 ipv6`), its own
 netfilter hooks and conntrack table, its own port space — even its own
-`/proc/net` and `/sys/class/net`. Subsystems that need per-namespace state
-register a `struct pernet_operations` with `init`/`exit` callbacks and stash
-their data in the `net->gen` (net_generic) array; every module from TCP to
-netfilter to IPsec hangs its per-namespace state there. A new namespace
-contains: a loopback (down), no other interfaces, empty routes, empty
-firewall:
+`/proc/net` and `/sys/class/net`.
+
+Subsystems that need per-namespace state register a `struct
+pernet_operations` with `init`/`exit` callbacks and stash their data in the
+`net->gen` (net_generic) array; every module from TCP to netfilter to IPsec
+hangs its per-namespace state there. A new namespace contains: a loopback
+(down), no other interfaces, empty routes, empty firewall:
 
 ```bash
 sudo unshare --net sh

@@ -484,10 +484,11 @@ That is exactly what CRIU does. It uses ptrace to hijack the frozen process,
 injects a small blob of position-independent code called the **parasite** into
 the target's own memory, and runs it *as the target* to query the
 inside-only state — then cleanly removes it, leaving the process pristine for
-either resumption or the kill that ends the checkpoint. Naming it here is
-enough; the mechanics (how you inject code into a stopped process without
-corrupting it, how the parasite talks back over a socket) are the heart of
-[CRIU: Dumping a Live Process](#/criu-dump).
+either resumption or the kill that ends the checkpoint.
+
+Naming it here is enough; the mechanics (how you inject code into a stopped
+process without corrupting it, how the parasite talks back over a socket) are
+the heart of [CRIU: Dumping a Live Process](#/criu-dump).
 
 **Tier C — held by hardware or a driver, behind an opaque ioctl interface.**
 An open `/dev/nvidia0` references GPU contexts, VRAM allocations, and command
@@ -610,9 +611,11 @@ The significance is bigger than the three bullets. It's a case study in
 process with its original identity" couldn't be met by any existing interface
 without handing out excessive privilege, so the kernel grew a new capability
 *and* a new `clone3()` feature *and* a namespaced view of the PID allocator to
-serve it. The [time namespace](#/namespaces) is the same story from Part IV —
-it exists so `CLOCK_MONOTONIC` survives migration. CRIU didn't just consume
-kernel interfaces; it *caused* several of them. When you see `set_tid` or
+serve it.
+
+The [time namespace](#/namespaces) is the same story from Part IV — it exists
+so `CLOCK_MONOTONIC` survives migration. CRIU didn't just consume kernel
+interfaces; it *caused* several of them. When you see `set_tid` or
 `ns_last_pid`, you're looking at fossilized checkpoint requirements.
 
 The boundary is just as important as the grant: this capability does **not**
@@ -645,8 +648,8 @@ We can now state it exactly, in the vocabulary this chapter built:
 
 That's the entire arc of Part V. This chapter gave you the *what* — the state
 that exists and where it hides. The next two chapters do the *how*:
-[CRIU: Dumping a Live Process](#/criu-dump) performs the freeze-enumerate-
-serialize, parasite and all; [CRIU: Rebuilding From the Image](#/criu-restore)
+[CRIU: Dumping a Live Process](#/criu-dump) performs the
+freeze-enumerate-serialize, parasite and all; [CRIU: Rebuilding From the Image](#/criu-restore)
 performs the dependency-ordered rebuild. Everything else in the part —
 [live migration](#/live-migration), the [snapshot taxonomy](#/snapshot-taxonomy),
 [GPU checkpoint](#/gpu-checkpoint), and the [hands-on labs](#/lab-criu) — builds

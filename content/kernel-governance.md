@@ -131,12 +131,15 @@ up to ~5 weeks) — the kernel refuses long embargoes on principle.
 
 Here the old folklore is now **wrong, and worth correcting**: since **13
 February 2024 the Linux kernel project is an official CVE Numbering Authority
-(CNA)** and assigns its own CVE identifiers. The philosophy Greg KH articulated
-is blunt: because *any* bug can turn out to be a security bug, the project
-assigns CVEs liberally to fixed commits rather than trying to divine intent in
-advance. This produces a large volume of CVEs — deliberately — and pushes the
-industry away from treating a CVE number as a reliable severity signal. The
-kernel does **not** assign scores; downstream consumers decide what matters.
+(CNA)** and assigns its own CVE identifiers.
+
+The philosophy Greg KH articulated is blunt: because *any* bug can turn out to
+be a security bug, the project assigns CVEs liberally to fixed commits rather
+than trying to divine intent in advance.
+
+This produces a large volume of CVEs — deliberately — and pushes the industry
+away from treating a CVE number as a reliable severity signal. The kernel does
+**not** assign scores; downstream consumers decide what matters.
 See the [Linux Security & Confinement](#/security-hardening) and
 [Trusted Computing](#/trusted-computing) chapters for the defensive side.
 
@@ -440,10 +443,12 @@ consequence of governance. Windows guarantees a driver ABI so vendors can ship
 binaries forever; Linux deliberately refuses to, so that internal interfaces
 can be refactored freely — the cost of an out-of-tree driver is *yours* to bear
 at every release, which is precisely the pressure that pushes vendors to
-upstream. The GPLv2 completes the loop: you cannot ship a modified kernel
-binary without offering source, so improvements flow back. FreeBSD's permissive
-BSD license let companies (Sony, Netflix, WhatsApp historically) contribute
-less back; that is a large part of why Linux, not BSD, won servers and Android.
+upstream.
+
+The GPLv2 completes the loop: you cannot ship a modified kernel binary without
+offering source, so improvements flow back. FreeBSD's permissive BSD license
+let companies (Sony, Netflix, WhatsApp historically) contribute less back; that
+is a large part of why Linux, not BSD, won servers and Android.
 
 ## The mailing list is the town square
 

@@ -85,12 +85,13 @@ Read that carefully. The `rw-s` mappings backed by `/dev/nvidia*` are
 **shared device mappings** — windows onto the driver and the card, not onto
 ordinary memory. CRIU can see that the VMA *exists*, but it cannot dump its
 contents: reading those bytes means talking to hardware through the driver, and
-the driver defines what a read even means. That last line — the huge `---p`
-region with no backing and no permissions at a suspiciously round address
-(`0x200000000`) — is a **unified/managed memory reservation**: virtual address
-space the CUDA driver has carved out to migrate pages between host and device
-on demand. It has no file behind it and no readable contents from the host
-side.
+the driver defines what a read even means.
+
+That last line — the huge `---p` region with no backing and no permissions
+at a suspiciously round address (`0x200000000`) — is a **unified/managed
+memory reservation**: virtual address space the CUDA driver has carved out
+to migrate pages between host and device on demand. It has no file behind it
+and no readable contents from the host side.
 
 So enumerate what is *invisible* to a `/proc` walk:
 
@@ -162,12 +163,13 @@ The last block — `HANDLE_DEVICE_VMA`, `UPDATE_VMA_MAP`,
 `DUMP_DEVICES_LATE` — are the *newer*, device-specific hooks added precisely
 so accelerators could be checkpointed cleanly. They exist because a device is
 not just a file; it interacts with the process's *address space* (those
-`rw-s` device VMAs) and with the *freeze timeline*. `HANDLE_DEVICE_VMA` lets a
-plugin claim a VMA that CRIU's normal memory walk cannot handle.
-`UPDATE_VMA_MAP` lets it fix up where a mapping lands on restore.
-`PAUSE_DEVICES` / `CHECKPOINT_DEVICES` / `RESUME_DEVICES_LATE` give the plugin
-three precisely-timed slots in the dump/restore sequence — we'll see below why
-that timing is everything.
+`rw-s` device VMAs) and with the *freeze timeline*.
+
+`HANDLE_DEVICE_VMA` lets a plugin claim a VMA that CRIU's normal memory walk
+cannot handle. `UPDATE_VMA_MAP` lets it fix up where a mapping lands on
+restore. `PAUSE_DEVICES` / `CHECKPOINT_DEVICES` / `RESUME_DEVICES_LATE` give
+the plugin three precisely-timed slots in the dump/restore sequence — we'll
+see below why that timing is everything.
 
 ### The AMD plugin: the upstream existence proof
 
@@ -514,13 +516,17 @@ In NVIDIA's **early Dynamo Snapshot prototype**, upstream CRIU restored the
 6.2/26/129 GiB test checkpoints in **6.8/24/119 s**. Prototype CRIU changes
 (parallel memfd restore plus native AIO) reduced those CRIU-only times to
 **2.4/4.7/15 s**; NVIDIA explicitly says those optimizations were not yet
-shipped in Dynamo Snapshot and awaited upstreaming. A separate proof-of-concept
-GPU Memory Service path restored the 129 GiB workload in under five seconds
-and produced the reported **21×** end-to-end startup reduction. The available
-experimental release was narrower: single-GPU vLLM/SGLang through the non-GMS
-path. These are different data points, not one production result. Modal likewise
-reports workload-specific cold-boot improvements using the CUDA checkpoint API;
-treat all vendor figures as measurements of their stated setup, not guarantees.
+shipped in Dynamo Snapshot and awaited upstreaming.
+
+A separate proof-of-concept GPU Memory Service path restored the 129 GiB
+workload in under five seconds and produced the reported **21×** end-to-end
+startup reduction. The available experimental release was narrower: single-GPU
+vLLM/SGLang through the non-GMS path. These are different data points, not one
+production result.
+
+Modal likewise reports workload-specific cold-boot improvements using the CUDA
+checkpoint API; treat all vendor figures as measurements of their stated setup,
+not guarantees.
 
 Now connect this back to [The Snapshot Taxonomy](#/snapshot-taxonomy), because
 these products live at *different layers* and that placement determines what
@@ -537,13 +543,14 @@ Each trades generality for control. **vLLM sleep mode** is the narrowest and
 the least magical: it operates *inside* the Python process, releasing GPU
 memory (level 1 offloads weights to CPU RAM and drops the KV cache; level 2
 drops both) and reallocating on `wake_up()`. It can avoid much of a reload, but
-only vLLM knows how to do it, and only for its own tensors. The
-**amdgpu** path is the most principled: the checkpoint contract is in the
+only vLLM knows how to do it, and only for its own tensors.
+
+The **amdgpu** path is the most principled: the checkpoint contract is in the
 *mainline kernel*, so upstream CRIU handles it with no proprietary
-intermediary. **Dynamo / CRIU + cuda-checkpoint** is the general
-process-level answer for NVIDIA, at the cost of depending on a closed driver
-utility. **Modal** wraps the same NVIDIA API but underneath its gVisor sandbox,
-buying stronger isolation and a different restore substrate.
+intermediary. **Dynamo / CRIU + cuda-checkpoint** is the general process-level
+answer for NVIDIA, at the cost of depending on a closed driver utility.
+**Modal** wraps the same NVIDIA API but underneath its gVisor sandbox, buying
+stronger isolation and a different restore substrate.
 
 There is no single "GPU snapshot." There is a stack of them, and knowing which
 layer a given product sits at tells you immediately what it can migrate, what

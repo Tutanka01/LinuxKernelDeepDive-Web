@@ -347,13 +347,14 @@ ls /sys/kernel/debug/sched/domains/cpu0/   # inspect the domain hierarchy
 SMT (Hyper-Threading) means two logical CPUs share one physical core's
 execution units and L1 cache. The scheduler knows this and prefers to spread
 tasks across real cores before doubling up on siblings — an idle whole core is
-worth more than an idle sibling of a busy core. The security implication:
-shared L1 enables cache side-channel attacks across siblings (see
-[CPU Vulnerability Mitigations](#/cpu-mitigations)). Deployments that
-can't disable SMT (`nosmt`) can use **core scheduling** (kernel 5.14+,
-`prctl(PR_SCHED_CORE, ...)`): only tasks sharing a cookie may run
-concurrently on siblings of one core, so a tenant's threads never share a core
-with an untrusted one.
+worth more than an idle sibling of a busy core.
+
+The security implication: shared L1 enables cache side-channel attacks across
+siblings (see [CPU Vulnerability Mitigations](#/cpu-mitigations)). Deployments
+that can't disable SMT (`nosmt`) can use **core scheduling** (kernel 5.14+,
+`prctl(PR_SCHED_CORE, ...)`): only tasks sharing a cookie may run concurrently
+on siblings of one core, so a tenant's threads never share a core with an
+untrusted one.
 
 ## Context switches: the price of it all
 
@@ -361,10 +362,11 @@ A switch means saving the old task's registers, switching the address space
 (load a new page table root; TLB flushes are mitigated by PCID on x86-64 and
 ASID on arm64 — see [Virtual Memory](#/memory)), and restoring the new task.
 Threads of the same process skip the address-space switch entirely, which is
-why thread pools are cheaper to switch between than separate processes. Rough
-order: **1–3 µs direct cost**, and often more afterwards in indirect cost —
-cold caches and TLB refills that can cost tens of microseconds of degraded
-throughput before the working set is warm again.
+why thread pools are cheaper to switch between than separate processes.
+
+Rough order: **1–3 µs direct cost**, and often more afterwards in indirect
+cost — cold caches and TLB refills that can cost tens of microseconds of
+degraded throughput before the working set is warm again.
 
 ```bash
 vmstat 1          # 'cs' column = context switches/sec

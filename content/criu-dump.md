@@ -44,10 +44,11 @@ how to encode it lives entirely in userspace, where it can iterate freely.
 The result looks impossible the first time you see it: a program named `criu`,
 running as a normal process, walks up to another live process, and writes an
 image sufficient to reconstruct its **supported** state — memory, open files,
-credentials, threads, pending signals — into a handful of files. It is not magic and it is not a debugger
-trick bolted together. It is a disciplined tour through everything this course
-has already taught you about a process, executed by a program instead of a
-human. This chapter is that tour.
+credentials, threads, pending signals — into a handful of files.
+
+It is not magic and it is not a debugger trick bolted together. It is a
+disciplined tour through everything this course has already taught you about a
+process, executed by a program instead of a human. This chapter is that tour.
 
 ```mermaid
 graph LR
@@ -120,7 +121,9 @@ does *not* use classic `PTRACE_ATTACH`, and the reason is precise:
 B state CRIU will shortly make the victim execute injected syscalls (next
 sections). If the victim installed a **seccomp** filter that denies, say,
 `mmap` or `socket`, those injected syscalls would run through the victim's own
-filter and could fail or kill it. On a capable kernel and with the required
+filter and could fail or kill it.
+
+On a capable kernel and with the required
 privilege, CRIU uses the ptrace option `PTRACE_O_SUSPEND_SECCOMP` to suspend
 those filters while it injects the parasite; it still reads and saves each
 thread's seccomp mode and filter chain with ptrace's seccomp inspection requests
@@ -178,7 +181,9 @@ code into the victim and runs it there. That chunk is the **parasite**.
 Some state simply has no `/proc` interface, or has one that only the task itself
 may use. Pending signal payloads are an instructive counterexample:
 `PTRACE_PEEKSIGINFO` makes those externally inspectable, so they belong to tier
-A. Signal dispositions and alternate signal stacks, terminal (`tty`) settings,
+A.
+
+Signal dispositions and alternate signal stacks, terminal (`tty`) settings,
 some credential details, and operations on the victim's live fds still require
 the task's own context. The parasite can also stream memory through a shared
 pipe. It executes the relevant syscalls with the victim's fd table,
@@ -303,9 +308,11 @@ ranges, and emits two files per task: **`pagemap-<pid>.img`** — the *index*, a
 `pagemap_head` (giving the `pages_id` that names the data file) followed by one
 `pagemap_entry` per contiguous range (`vaddr`, `nr_pages`, and `flags`
 distinguishing present from lazy/swap) — and **`pages-<id>.img`** — the raw
-page *contents*, back to back, that the index points into. Splitting index from
-payload lets restore locate each virtual range efficiently and either stream it
-eagerly or serve it on demand (the foundation of lazy restore).
+page *contents*, back to back, that the index points into.
+
+Splitting index from payload lets restore locate each virtual range
+efficiently and either stream it eagerly or serve it on demand (the foundation
+of lazy restore).
 
 There are two ways to actually get the bytes out, and CRIU uses both:
 
@@ -462,11 +469,13 @@ memory region — all fully describable. But an fd that points at a **device**
 whose state lives on the *hardware* is opaque. The kernel can tell you the fd
 exists and names `/dev/nvidia0`; it cannot hand you the GPU's on-chip memory,
 command queues, or context through `/proc`. The same is true of many special
-device fds. An **io_uring** fd sits on the same boundary: its submission and
-completion rings are kernel-internal state no `/proc` interface exposes, and
-CRIU has no dumper for them — dump aborts on the anonymous-inode fd (`Can't
-dump file … anon [io_uring]`), so the practical rule is *close the ring before
-you checkpoint*.
+device fds.
+
+An **io_uring** fd sits on the same boundary: its submission and completion
+rings are kernel-internal state no `/proc` interface exposes, and CRIU has no
+dumper for them — dump aborts on the anonymous-inode fd
+(`Can't dump file … anon [io_uring]`), so the practical rule is *close the
+ring before you checkpoint*.
 
 CRIU's answer is not to guess but to **delegate**. At dump time, when it meets
 an fd it doesn't understand, it fires the plugin hook
@@ -474,12 +483,13 @@ an fd it doesn't understand, it fires the plugin hook
 (one of a family alongside `DUMP_EXT_MOUNT`, `HANDLE_DEVICE_VMA`,
 `PAUSE_DEVICES`, `CHECKPOINT_DEVICES`, and their restore counterparts). A
 loaded plugin claims the fd, serializes whatever device-specific state it can
-reach through the driver, and stashes it alongside the CRIU images. This is
-exactly the seam the NVIDIA GPU-checkpoint plugin plugs into — the subject of
-[GPU & Device Checkpoint](#/gpu-checkpoint). For now the load-bearing point is
-architectural: the core dumper handles the generic process; hardware state is a
-plugin's job, mediated by a documented hook, so the userspace core never grows
-a per-device dependency.
+reach through the driver, and stashes it alongside the CRIU images.
+
+This is exactly the seam the NVIDIA GPU-checkpoint plugin plugs into — the
+subject of [GPU & Device Checkpoint](#/gpu-checkpoint). For now the
+load-bearing point is architectural: the core dumper handles the generic
+process; hardware state is a plugin's job, mediated by a documented hook, so
+the userspace core never grows a per-device dependency.
 
 ## Follow the code (CRIU & kernel v6.12)
 

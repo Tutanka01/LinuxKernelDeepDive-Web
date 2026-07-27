@@ -1,0 +1,102 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Tier 1 — structural. Parses the repo's own files and asserts its
+  # invariants: slugs resolve, links resolve, quizzes parse, frontmatter
+  # is valid, chapter counts agree, no dead assets, no theme-locked
+  # Mermaid, no CDN. Zero npm dependencies, well under a second.
+  # ------------------------------------------------------------------
+  tier1:
+    name: tier 1 — structural
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run structural tests
+        working-directory: tests
+        run: node --test "tier1/*.test.js"
+
+  # ------------------------------------------------------------------
+  # Tier 2 — the browser smoke test. Every one of the 93 chapters is
+  # rendered in headless Chromium and checked for the failure that
+  # shipped once already: a chapter replaced by its own loading
+  # placeholder after it had finished rendering (audit finding C1).
+  # ------------------------------------------------------------------
+  tier2:
+    name: tier 2 — browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: npm ci || npm install --no-audit --no-fund
+
+      # The browser download is ~100 MB; keyed on the resolved Playwright
+      # version so a dependency bump invalidates it and nothing else does.
+      - name: Resolve Playwright version
+        id: pw
+        working-directory: tests
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: tests
+        run: npx playwright install-deps chromium
+
+      - name: Run browser tests
+        working-directory: tests
+        run: npx playwright test
+
+      # The list reporter already names the course and chapter; the HTML
+      # report carries the screenshot and trace for anything that failed.
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/playwright-report/
+            tests/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

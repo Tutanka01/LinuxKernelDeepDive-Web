@@ -6,7 +6,8 @@
 > introduced here are the launchpad for the consistency-models chapter.
 
 **Replication** means keeping copies of the same data on several nodes. The
-motivations are exactly our three founding reasons: survive node failures
+motivations are exactly the three founding reasons from [What Is a
+Distributed System?](#/what-is-a-distributed-system): survive node failures
 (fault tolerance), serve reads from many machines (scale), serve them near
 users (latency).
 
@@ -15,22 +16,30 @@ done. **The entire difficulty is writes** — getting every change applied to
 every copy, in the face of crashing nodes, lost messages and concurrent
 writers.
 
+> One modern variant is worth knowing because it breaks an assumption made
+> everywhere in this chapter. In [The KV
+> Fabric](../inference/#/the-kv-fabric), the replicated object is an LLM's
+> attention cache — state that can always be *recomputed* from the prompt.
+> A missing replica therefore costs GPU seconds, not correctness, and the
+> whole design collapses into one arithmetic question: restore the block
+> from a peer, or rebuild it locally? Every trade-off below gets easier when
+> losing a copy is merely expensive.
+
 ## Architecture 1: leader-follower (single-leader)
 
 The workhorse of the industry — PostgreSQL, MySQL, MongoDB, Redis, Kafka
-all use it.
+all use it. One direction for writes, any direction for reads:
 
-```text
-                      writes
-   clients ───────────────▶ ┌────────┐
-                            │ LEADER │
-   clients ──── reads ────▶ └───┬────┘
-        │                       │ replication log
-        │              ┌────────┼────────┐
-        ▼              ▼                 ▼
-   ┌──────────┐   ┌──────────┐    ┌──────────┐
-   │FOLLOWER 1│   │FOLLOWER 2│    │FOLLOWER 3│ ── reads ──▶ clients
-   └──────────┘   └──────────┘    └──────────┘
+```mermaid
+graph TD
+    C["clients writing"] -->|"all writes"| L["LEADER"]
+    L -->|"replication log"| F1["follower 1"]
+    L -->|"replication log"| F2["follower 2"]
+    L -->|"replication log"| F3["follower 3"]
+    L -->|"reads"| R["clients reading"]
+    F1 -->|"reads"| R
+    F2 -->|"reads"| R
+    F3 -->|"reads"| R
 ```
 
 One node is the **leader**: all writes go to it. It records each write in a
@@ -71,18 +80,22 @@ reading from followers:
 
 These aren't bugs in the database; they're properties of asynchronous
 replication that the application must handle — e.g. route a user's reads to
-the leader right after their writes, or pin a session to one replica. The
-next chapter gives these guarantees proper names and a framework.
+the leader right after their writes, or pin a session to one replica.
+[Consistency Models & CAP](#/consistency-models) gives these two anomalies
+proper names (*read-your-writes* and *monotonic reads*) and a framework to
+price them.
 
 ### The hard part: failover
 
 Followers crashing is easy (catch up on the log when back). The **leader**
 crashing is the hard case:
 
-1. *Detect* the failure — timeouts, with all the ambiguity of the failure
-   detection chapter.
+1. *Detect* the failure — timeouts, with all the ambiguity of [Failure
+   Models & Detection](#/failure-models).
 2. *Choose* a new leader — ideally the most up-to-date follower… chosen
-   how? By whom? (This is consensus knocking; Module 4 answers.)
+   how? By whom? (This is consensus knocking; [The Consensus
+   Problem](#/consensus) answers, and [Raft](#/raft) makes "most up-to-date
+   follower" an enforceable voting rule.)
 3. *Reconfigure* — clients and followers must switch; the old leader, if it
    returns, must **step down**, not keep accepting writes.
 
@@ -90,11 +103,16 @@ Every step has teeth. Promote a lagging follower and the missing writes are
 lost — or worse, conflict with history (GitHub's 2012 incident replayed
 already-used auto-increment IDs, leaking private data across accounts). And
 a paused-not-dead old leader plus a new leader equals **split-brain**: two
-nodes accepting writes. The cure is the fencing tokens you already know.
+nodes accepting writes. The cure is the [fencing tokens](#/failure-models)
+you already know, for the exact reason [Time, Clocks & Why They
+Lie](#/time-and-clocks) gave: the old leader's clock cannot be trusted to
+tell it that it has been deposed.
 
 > Single-leader replication doesn't *eliminate* the hard problems — it
 > concentrates them all into one rare event: failover. Systems like
-> etcd/ZooKeeper (Module 4 and 5) exist largely to do failover *correctly*.
+> etcd/ZooKeeper ([The Consensus Problem](#/consensus), and in production
+> form in [Real-World Architectures](#/real-world-architectures)) exist
+> largely to do failover *correctly*.
 
 ## Architecture 2: multi-leader
 
@@ -103,18 +121,31 @@ use case is **multi-datacenter**: a leader per region, so local writes are
 fast (no cross-ocean round trip per write) and each region survives the
 others' outages.
 
+```mermaid
+graph LR
+    CE["EU clients"] -->|"write x=1"| EU["leader EU"]
+    CU["US clients"] -->|"write x=2"| US["leader US"]
+    EU -->|"replicate"| US
+    US -->|"replicate"| EU
+```
+
+Both leaders acknowledged their write before hearing about the other. `x` is
+now 1 in Europe and 2 in America, and neither client can be told "no" after
+the fact — that is the whole difficulty in one picture.
+
 The price is steep: two leaders can accept **conflicting writes to the same
 data simultaneously** — and both have already told their clients "OK", so
 rejection is off the table. Conflicts must be *resolved* after the fact:
 
 - **Last-write-wins** — convergent, but silently discards data on lying
-  clocks (chapter 4's warning made real).
-- **Keep all versions** and let the application merge (vector clocks,
-  chapter 5).
+  clocks ([Time, Clocks & Why They Lie](#/time-and-clocks) made real).
+- **Keep all versions** and let the application merge ([vector
+  clocks](#/logical-clocks)).
 - **Avoid conflicts structurally:** route each record's writes to one home
   region — single-leader per record, multi-leader in aggregate. The most
   common production answer.
-- **CRDTs** — data types that merge automatically and correctly (Module 5).
+- **CRDTs** — data types that merge automatically and correctly ([CRDTs,
+  Gossip & Anti-Entropy](#/crdts-and-gossip)).
 
 If you can't articulate your conflict-resolution story, you're not ready
 for multi-leader. (Same maths applies to offline-first apps: every device
@@ -126,19 +157,20 @@ Dynamo-style systems (Cassandra, Riak, ScyllaDB) abolish the leader: clients
 write to **many replicas directly**, read from many, and reconcile.
 
 The coordination tool is the **quorum**. With `n` replicas, write to `w` of
-them, read from `r` of them, choosing:
+them, read from `r` of them, choosing `w + r > n`:
 
-```text
-                w + r > n
-   ┌───────────────────────────────────┐
-   │ n=3, w=2, r=2:                    │
-   │ write reaches {A, B}              │
-   │ read contacts {B, C}  ── B is in  │
-   │ both sets: the read MUST see the  │
-   │ write. Overlap is guaranteed by   │
-   │ arithmetic, not luck.             │
-   └───────────────────────────────────┘
+```mermaid
+graph LR
+    W["write, w=2"] --> A["replica A"]
+    W --> B["replica B"]
+    R["read, r=2"] --> B
+    R --> C["replica C"]
 ```
+
+With `n=3, w=2, r=2` the write lands on {A, B} and the read contacts
+{B, C}. Replica B is in both sets — and it *had* to be, because two sets of
+size 2 drawn from 3 cannot miss each other. The overlap is arithmetic, not
+luck, and it is the entire guarantee.
 
 Any write-set and read-set of those sizes **must intersect**, so every read
 touches at least one replica with the latest value (version metadata tells
@@ -152,13 +184,14 @@ replicas drift apart, healed in the background by:
 
 - **Read repair:** a read that sees a stale replica writes the fresh value
   back to it.
-- **Anti-entropy:** background processes diff replicas (via Merkle trees,
-  Module 5) and sync differences.
+- **Anti-entropy:** background processes diff replicas (via [Merkle
+  trees](#/crdts-and-gossip)) and sync differences.
 
 > Even `w + r > n` has fine print under failures and concurrency — "sloppy
 > quorums", interrupted writes. Leaderless quorums give *probably very
 > fresh* reads, not linearizability. The precise statement of what each
-> system guarantees is exactly what the next chapter is about.
+> system guarantees is exactly what [Consistency Models &
+> CAP](#/consistency-models) is about.
 
 ## Choosing: the one-table summary
 
@@ -185,8 +218,9 @@ replicas drift apart, healed in the background by:
   overlap; no failover, but conflicts are routine and guarantees are
   subtler than they look.
 - Running themes promoted to next chapters: naming the anomalies
-  (consistency models), doing failover right (consensus), merging
-  conflicts (CRDTs).
+  ([Consistency Models & CAP](#/consistency-models)), doing failover right
+  ([The Consensus Problem](#/consensus)), merging conflicts ([CRDTs, Gossip
+  & Anti-Entropy](#/crdts-and-gossip)).
 
 ```quiz
 [

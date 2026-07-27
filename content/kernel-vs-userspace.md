@@ -51,11 +51,12 @@ each process sees a 48-bit canonical space: the lower 128 TiB
 (`0x0000_0000_0000_0000`–`0x0000_7fff_ffff_ffff`) belongs to the process, the
 upper half (`0xffff_8000_0000_0000` and up) is the kernel — mapped into
 *every* process's page tables, but supervisor-only, so a syscall doesn't need
-to switch address spaces at all. (Meltdown broke that elegant assumption;
-**KPTI** re-splits the tables on affected CPUs — see
-[CPU Vulnerability Mitigations](#/cpu-mitigations).) The page size is 4 KiB by
-default on x86-64; arm64 kernels can be built for 4, 16, or 64 KiB — details
-in [Virtual Memory](#/memory).
+to switch address spaces at all.
+
+(Meltdown broke that elegant assumption; **KPTI** re-splits the tables on
+affected CPUs — see [CPU Vulnerability Mitigations](#/cpu-mitigations).) The
+page size is 4 KiB by default on x86-64; arm64 kernels can be built for 4, 16,
+or 64 KiB — details in [Virtual Memory](#/memory).
 
 Every process you launch runs in user mode. When it needs anything from the
 outside world — read a file, send a packet, get more memory, even know what
@@ -188,14 +189,17 @@ instant — a signal handler or a whole other process can run in between.
 
 One rule governs everything the syscall implementation does: **never trust a
 user pointer**. Arguments like `buf` in `read(fd, buf, len)` are just numbers
-a process chose. The kernel accesses them only through
+a process chose.
+
+The kernel accesses them only through
 [copy_from_user()](https://elixir.bootlin.com/linux/v6.12/C/ident/copy_from_user)
 / [copy_to_user()](https://elixir.bootlin.com/linux/v6.12/C/ident/copy_to_user),
 which (a) verify the address lies below the user/kernel split
 ([access_ok()](https://elixir.bootlin.com/linux/v6.12/C/ident/access_ok)),
 (b) briefly lift SMAP, and (c) are registered in an exception table so that a
-fault on a bad address returns `-EFAULT` instead of oopsing the kernel. It
-also copies the data *once* and works on the copy — re-reading user memory
+fault on a bad address returns `-EFAULT` instead of oopsing the kernel.
+
+It also copies the data *once* and works on the copy — re-reading user memory
 would let another thread flip the value between the check and the use
 (a TOCTOU race).
 
@@ -226,13 +230,14 @@ Most file syscalls now have `*at` variants: `openat`, `statx`, `unlinkat`,
 `renameat2`. The difference: `open("/etc/hostname")` resolves the path from
 the process's current working directory. `openat(dirfd, "etc/hostname")`
 resolves relative to a directory you already hold open as a file descriptor —
-or from the CWD if you pass the special value `AT_FDCWD`. The `*at` variants
-are essential for thread safety (a `chdir` in one thread doesn't invalidate
-another's `openat`), and for containers (pass the container's root fd instead
-of the process root). Since 5.6 there's also `openat2`, which adds resolve
-flags like `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS` — the building blocks
-for safely opening untrusted paths. Path resolution itself is a
-[VFS](#/filesystems) story.
+or from the CWD if you pass the special value `AT_FDCWD`.
+
+The `*at` variants are essential for thread safety (a `chdir` in one thread
+doesn't invalidate another's `openat`), and for containers (pass the
+container's root fd instead of the process root). Since 5.6 there's also
+`openat2`, which adds resolve flags like `RESOLVE_BENEATH` and
+`RESOLVE_NO_SYMLINKS` — the building blocks for safely opening untrusted
+paths. Path resolution itself is a [VFS](#/filesystems) story.
 
 ### The forgotten syscalls
 
@@ -390,13 +395,16 @@ Functions like `clock_gettime()`, `gettimeofday()`, `getcpu()`, and (since
 read-only mapping of a data page the kernel keeps updated — the
 [vdso_data](https://elixir.bootlin.com/linux/v6.12/C/ident/vdso_data) struct,
 holding the last clock readout (`cycle_last`), the conversion factors
-(`mult`, `shift`), and a sequence counter. The vDSO code reads the sequence
-counter, computes `base + (rdtsc() - cycle_last) * mult >> shift`, reads the
-counter again, and retries if it changed mid-read (a lock-free **seqcount**
-pattern — see [Kernel Synchronization](#/kernel-sync)). No mode switch, no
-privilege transition — a `clock_gettime()` call costs ~20–25 ns instead of
-hundreds. If the clocksource isn't vDSO-capable (an unstable TSC, some VMs),
-the vDSO quietly falls back to the real syscall.
+(`mult`, `shift`), and a sequence counter.
+
+The vDSO code reads the sequence counter, computes
+`base + (rdtsc() - cycle_last) * mult >> shift`, reads the counter again,
+and retries if it changed mid-read (a lock-free **seqcount** pattern — see
+[Kernel Synchronization](#/kernel-sync)).
+
+No mode switch, no privilege transition — a `clock_gettime()` call costs
+~20–25 ns instead of hundreds. If the clocksource isn't vDSO-capable (an
+unstable TSC, some VMs), the vDSO quietly falls back to the real syscall.
 
 The general pattern: if the kernel can expose a piece of data to user space as
 read-only memory, it avoids a full syscall for every read. Two consequences

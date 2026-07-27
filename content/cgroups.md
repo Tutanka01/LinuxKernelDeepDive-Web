@@ -41,15 +41,17 @@ Two crucial properties:
   automatically. No process escapes accounting by forking. (The exception:
   `cgroup.threads` for threaded mode, covered below.)
 
-A one-paragraph history, because the version matters: cgroup v1 shipped in
-2.6.24 (2008) and let every controller mount its own hierarchy — a process
-could be in `/cpu/A` but `/memory/B`, which made coherent resource policy
-nearly impossible. cgroup v2 (one unified tree, declared stable in 4.5,
-2016) is the default on every modern distro — Fedora since 31, Ubuntu since
-21.10, Debian since 11, RHEL since 9 — and the container stack followed:
-Docker 20.10+, Kubernetes GA in 1.25. This chapter covers only v2. (You can
-still boot a hybrid or legacy layout with `systemd.unified_cgroup_hierarchy=0`
-on the kernel command line, but nothing new targets it.)
+A short history, because the version matters: cgroup v1 shipped in 2.6.24
+(2008) and let every controller mount its own hierarchy — a process could be
+in `/cpu/A` but `/memory/B`, which made coherent resource policy nearly
+impossible.
+
+cgroup v2 (one unified tree, declared stable in 4.5, 2016) is the default on
+every modern distro — Fedora since 31, Ubuntu since 21.10, Debian since 11,
+RHEL since 9 — and the container stack followed: Docker 20.10+, Kubernetes GA
+in 1.25. This chapter covers only v2. (You can still boot a hybrid or legacy
+layout with `systemd.unified_cgroup_hierarchy=0` on the kernel command line,
+but nothing new targets it.)
 
 ## How the kernel represents a cgroup
 
@@ -106,14 +108,17 @@ graph TD
 By default a cgroup is a **domain** cgroup: `cgroup.procs` moves a whole
 thread group (a process and all its threads) as a unit, because the memory
 and io controllers only make sense at process granularity — you cannot give
-two threads of one address space different memory limits. Some controllers,
-though, *are* per-thread: `cpu`, `pids`, and `perf_event`. To split the
-threads of one process across sibling cgroups you switch a subtree to
-**threaded mode** by writing `threaded` to `cgroup.type`; then
+two threads of one address space different memory limits.
+
+Some controllers, though, *are* per-thread: `cpu`, `pids`, and `perf_event`.
+To split the threads of one process across sibling cgroups you switch a
+subtree to **threaded mode** by writing `threaded` to `cgroup.type`; then
 `cgroup.threads` accepts individual TIDs and only threaded controllers are
-available. This is how a latency-sensitive thread and a background thread in
-the same process can land on different `cpu.weight` groups. It's rare, but
-it's why `cgroup.type` and `cgroup.threads` exist.
+available.
+
+This is how a latency-sensitive thread and a background thread in the same
+process can land on different `cpu.weight` groups. It's rare, but it's why
+`cgroup.type` and `cgroup.threads` exist.
 
 ## It's a filesystem (of course it is)
 
@@ -208,12 +213,14 @@ Under the hood this is `struct mem_cgroup` (`include/linux/memcontrol.h`).
 Its load-bearing fields: `memory` and `swap`, both `struct page_counter`;
 `oom_group`; and `nodeinfo[]`, an array of per-NUMA-node structures each
 holding its own LRU lists — since 4.8, page reclaim *is* per-memcg-per-node
-LRU walking; the global LRU is gone. A `struct page_counter` is five numbers
-plus a parent pointer: `usage`, `min`, `low`, `high`, `max` (plus a
-`watermark` high-water mark and a `failcnt`). Charging a page walks the
-parent chain atomically incrementing `usage` at every level and fails at the
-first ancestor over `max` — that is the entire "limits cascade" guarantee,
-implemented in ~40 lines of `mm/page_counter.c`.
+LRU walking; the global LRU is gone.
+
+A `struct page_counter` is five numbers plus a parent pointer: `usage`,
+`min`, `low`, `high`, `max` (plus a `watermark` high-water mark and a
+`failcnt`). Charging a page walks the parent chain atomically incrementing
+`usage` at every level and fails at the first ancestor over `max` — that is
+the entire "limits cascade" guarantee, implemented in ~40 lines of
+`mm/page_counter.c`.
 
 Ownership is per-page: every `struct folio` carries a `memcg_data` pointer
 to the memcg that first charged it. That has a famous consequence: a file
@@ -238,9 +245,10 @@ memory-heavy container can be starving on socket memory, not anon),
 `file_dirty` and `file_writeback` (pages waiting to hit disk, which ties
 into writeback attribution below), and `workingset_refault` (pages that were
 evicted and had to be read back — a direct signal that the limit is too
-tight for the working set). A high refault rate with no OOM kill is the
-classic "the limit is technically fine but the workload is thrashing"
-picture.
+tight for the working set).
+
+A high refault rate with no OOM kill is the classic "the limit is
+technically fine but the workload is thrashing" picture.
 
 The protection knobs are where cgroup v2 becomes more than "limits":
 
@@ -256,8 +264,10 @@ never kills. When a charge pushes usage above `high`, the allocating task is
 first sent into direct reclaim, and if it keeps allocating faster than
 reclaim frees, the kernel adds an explicit sleep penalty proportional to the
 square of the overage — clamped at **2 seconds per allocation batch** as of
-6.12. An over-`high` cgroup doesn't die; it wades through molasses. That's
-why systemd-oomd and Facebook's oomd pair `memory.high` with PSI: the kernel
+6.12.
+
+An over-`high` cgroup doesn't die; it wades through molasses. That's why
+systemd-oomd and Facebook's oomd pair `memory.high` with PSI: the kernel
 slows the group, userspace watches the stall numbers and decides when to
 kill politely.
 
@@ -266,12 +276,16 @@ by **proportional reclaim protection**, not a hard reservation. When the
 machine reclaims, a group under its `memory.low` is skipped *until* all
 unprotected memory is exhausted; if reclaim still can't make progress it will
 dip into protected memory proportionally to how far each sibling is over its
-protection. `memory.min` is the hard version: memory under `min` is never
-reclaimed, which is why over-promising `min` across siblings can force an OOM
-kill somewhere else on the machine. This is the shape used by serious
-multi-tenant systems: do not only cap the noisy neighbor; protect the
-latency-sensitive neighbor. A database with `memory.low` gets a reclaim
-shield for its working set while batch jobs absorb more cache eviction.
+protection.
+
+`memory.min` is the hard version: memory under `min` is never reclaimed,
+which is why over-promising `min` across siblings can force an OOM kill
+somewhere else on the machine.
+
+This is the shape used by serious multi-tenant systems: do not only cap the
+noisy neighbor; protect the latency-sensitive neighbor. A database with
+`memory.low` gets a reclaim shield for its working set while batch jobs
+absorb more cache eviction.
 
 `memory.oom.group=1` is another production-grade detail. Without it, the OOM
 killer may kill one large worker and leave a half-broken service limping.
@@ -304,11 +318,12 @@ The defaults and bounds are worth knowing cold: period defaults to
 **100 ms** and the kernel clamps it to **1 ms–1 s**; quota is handed out to
 CPUs in **5 ms slices** (`sysctl kernel.sched_cfs_bandwidth_slice_us`), which
 is why a 64-core box with a small quota can burn its whole budget in a few
-milliseconds of parallel work and then stall. Concretely: a group with
-`cpu.max = "100000 100000"` (one CPU's worth) running 64 threads can consume
-its entire 100 ms quota in about 1.5 ms of wall-clock time, then sit
-throttled for the remaining ~98 ms of the period — a latency cliff that
-looks nothing like "using one core."
+milliseconds of parallel work and then stall.
+
+Concretely: a group with `cpu.max = "100000 100000"` (one CPU's worth)
+running 64 threads can consume its entire 100 ms quota in about 1.5 ms of
+wall-clock time, then sit throttled for the remaining ~98 ms of the period —
+a latency cliff that looks nothing like "using one core."
 
 [CPU Scheduling](#/scheduling) explained the trap: `cpu.max` throttling
 freezes **all** the group's threads for the rest of each 100 ms period once
@@ -343,10 +358,12 @@ The I/O controller is device-oriented (see
 [The Linux Storage Stack](#/storage-stack) for where the throttling hooks
 sit in the block layer). Its per-device state lives in `struct blkcg_gq`
 (the "blkg" — one per (cgroup, block-device) pair), and there are two very
-different policies. `io.max` is a **throttling** policy: a hard bytes/IOPS
-ceiling enforced in the block layer regardless of contention, so it can
-leave a disk idle. `io.weight` / `io.cost` (the **iocost** model, since 5.4)
-is **work-conserving**: it estimates each device's cost model and divides
+different policies.
+
+`io.max` is a **throttling** policy: a hard bytes/IOPS ceiling enforced in
+the block layer regardless of contention, so it can leave a disk idle.
+`io.weight` / `io.cost` (the **iocost** model, since 5.4) is
+**work-conserving**: it estimates each device's cost model and divides
 actual contended bandwidth by weight, so an idle disk is never wasted. Most
 production setups want iocost, not `io.max`. Always map major:minor numbers
 back to real devices:
@@ -359,10 +376,12 @@ cat /sys/fs/cgroup/<group>/io.stat
 A quietly huge v2 improvement: **writeback attribution**. In v1, buffered
 writes were charged to nobody — dirty pages were flushed later by kernel
 threads outside any sensible group, so `io.max` only really governed direct
-I/O. v2 links the memory and io controllers: each dirty page's memcg is
-known (that `memcg_data` pointer again), the flusher threads charge the
-writeback to the right group, and per-cgroup dirty-page limits derive from
-the group's memory allowance. Buffered-write hogs are finally billable — the
+I/O.
+
+v2 links the memory and io controllers: each dirty page's memcg is known
+(that `memcg_data` pointer again), the flusher threads charge the writeback
+to the right group, and per-cgroup dirty-page limits derive from the group's
+memory allowance. Buffered-write hogs are finally billable — the
 `file_dirty` and `file_writeback` lines in `memory.stat` are how you watch
 it happen.
 
@@ -388,10 +407,12 @@ manager pins Guaranteed pods to exclusive cores, and
 isolated scheduler partitions without `isolcpus=` boot parameters — see
 [CPU Isolation, NO_HZ & Real-Time](#/cpu-isolation) and the
 [NUMA Deep Dive](#/numa-deep-dive) for why `cpuset.mems` can matter as much
-as the CPU list. Note the `effective` files: a child's usable CPUs are the
-*intersection* of what you request and what the parent grants, so a cpuset
-never escapes its ancestor's mask — the same cascade rule as every other
-controller, expressed as set intersection instead of arithmetic.
+as the CPU list.
+
+Note the `effective` files: a child's usable CPUs are the *intersection* of
+what you request and what the parent grants, so a cpuset never escapes its
+ancestor's mask — the same cascade rule as every other controller, expressed
+as set intersection instead of arithmetic.
 
 ## How Docker/Kubernetes map onto this
 
@@ -426,13 +447,14 @@ Kubernetes builds a real cgroup subtree, not a flat list. Under
 `kubepods.slice` it creates `kubepods-burstable.slice` and
 `kubepods-besteffort.slice`, with Guaranteed pods placed directly under
 `kubepods.slice`; each level carries the aggregate weights and limits so the
-QoS classes compete correctly under contention. Which manager owns those
-directories depends on the **cgroup driver**: on a systemd-managed host the
-kubelet must run with `--cgroup-driver=systemd` so kubelet and systemd don't
-fight over the same tree (the alternative, `cgroupfs`, writes the files
-directly and is only safe when systemd isn't the init system managing
-cgroups). A driver mismatch is one of the classic "pods randomly get killed"
-Kubernetes bugs.
+QoS classes compete correctly under contention.
+
+Which manager owns those directories depends on the **cgroup driver**: on a
+systemd-managed host the kubelet must run with `--cgroup-driver=systemd` so
+kubelet and systemd don't fight over the same tree (the alternative,
+`cgroupfs`, writes the files directly and is only safe when systemd isn't
+the init system managing cgroups). A driver mismatch is one of the classic
+"pods randomly get killed" Kubernetes bugs.
 
 There is otherwise no other layer. The entire resource model of the
 container ecosystem is file writes into `/sys/fs/cgroup` — performed by runc
@@ -477,11 +499,12 @@ Mechanics: the scheduler feeds per-cgroup state machines
 on every relevant transition), and a periodic worker folds them into
 exponential moving averages over **10 s / 60 s / 300 s** windows, updated
 every 2 s. `some` = at least one task stalled; `full` = all non-idle tasks
-stalled (no useful work at all). You can even register **PSI triggers**:
-write `"some 150000 1000000"` to a pressure file and `poll()` it — wake me
-when stall time exceeds 150 ms within any 1 s window (minimum window
-500 ms). That's the primitive systemd-oomd and modern autoscalers are built
-on.
+stalled (no useful work at all).
+
+You can even register **PSI triggers**: write `"some 150000 1000000"` to a
+pressure file and `poll()` it — wake me when stall time exceeds 150 ms
+within any 1 s window (minimum window 500 ms). That's the primitive
+systemd-oomd and modern autoscalers are built on.
 
 PSI answers the real question — "is anything actually *suffering*?" — far
 better than utilization percentages.

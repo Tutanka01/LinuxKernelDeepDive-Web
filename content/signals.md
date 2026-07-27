@@ -19,10 +19,12 @@ A signal is a **small number** (1–64 on Linux). The kernel delivers it to a
 process by setting a bit in a pending bitmask attached to the target's
 `task_struct` and — this is the part most explanations skip — usually also
 appending a small `struct sigqueue` entry carrying a `siginfo_t` payload
-(who sent it, why, and for faults, the faulting address). On the next return
-from kernel to user space (after any [syscall](#/kernel-vs-userspace), page
-fault, or timer [interrupt](#/interrupts)), the kernel checks the mask and,
-if a deliverable bit is set, *handles* it: default action, handler, or ignore.
+(who sent it, why, and for faults, the faulting address).
+
+On the next return from kernel to user space (after any
+[syscall](#/kernel-vs-userspace), page fault, or timer
+[interrupt](#/interrupts)), the kernel checks the mask and, if a deliverable
+bit is set, *handles* it: default action, handler, or ignore.
 
 The single most useful mental model is to separate two verbs that people
 routinely conflate:
@@ -74,10 +76,11 @@ Key properties:
 
 There is no ordering guarantee among different pending standard signals, and
 delivery is not instantaneous: a signal becomes visible only when the target
-next transitions from kernel mode to user mode. If the target is sleeping
-interruptibly, the sender's kernel wakes it (a normal
-[scheduler](#/scheduling) wakeup), so on an idle machine the handler runs
-within tens of microseconds. If the target is pinned on another CPU in a
+next transitions from kernel mode to user mode.
+
+If the target is sleeping interruptibly, the sender's kernel wakes it (a
+normal [scheduler](#/scheduling) wakeup), so on an idle machine the handler
+runs within tens of microseconds. If the target is pinned on another CPU in a
 long user-space loop, the kernel kicks that CPU with a rescheduling IPI so
 the check happens promptly — on a busy machine you are otherwise at the mercy
 of the target's next scheduler tick (typically 1–10 ms, depending on
@@ -143,9 +146,10 @@ pending set is the union of its private `pending` and the process-wide
 constantly; it caches the "do I have anything to deliver?" answer in the
 single `TIF_SIGPENDING` bit and only recomputes via
 [recalc_sigpending()](https://elixir.bootlin.com/linux/v6.12/C/ident/recalc_sigpending)
-when the pending sets or the mask change. That one bit is what the hot
-kernel-exit path tests billions of times a second, so it has to be a single
-flag test, not a set-union.
+when the pending sets or the mask change.
+
+That one bit is what the hot kernel-exit path tests billions of times a
+second, so it has to be a single flag test, not a set-union.
 
 **Container link:** `/proc/PID/status` exposes exactly this split —
 `SigPnd` is the per-thread pending set, `ShdPnd` the process-wide one.
@@ -254,8 +258,10 @@ in `TASK_STOPPED`; the group stop is coordinated through
 [do_signal_stop()](https://elixir.bootlin.com/linux/v6.12/C/ident/do_signal_stop),
 which uses `signal->group_stop_count` so that *every* thread in the process
 stops before the process is considered stopped — a partial stop would be
-incoherent. SIGCONT reverses it, and here the kernel enforces a mutual
-exclusion you can see in
+incoherent.
+
+SIGCONT reverses it, and here the kernel enforces a mutual exclusion you can
+see in
 [prepare_signal()](https://elixir.bootlin.com/linux/v6.12/C/ident/prepare_signal):
 sending SIGCONT immediately flushes any pending stop signals (SIGSTOP,
 SIGTSTP, SIGTTIN, SIGTTOU) out of the pending set, and sending a stop signal
@@ -474,12 +480,15 @@ Every signal delivered to a traced process passes through a checkpoint the
 tracer controls. Inside `get_signal()`, if the task is being ptraced, it
 calls [ptrace_signal()](https://elixir.bootlin.com/linux/v6.12/C/ident/ptrace_signal),
 which freezes the target in **signal-delivery-stop** and notifies the tracer.
+
 The tracer (`strace`, `gdb`) can then read the full `siginfo` with
 `PTRACE_GETSIGINFO`, decide whether to *inject* the signal, *suppress* it,
 or *replace* it with a different one, and resume the target with
-`PTRACE_CONT` / `PTRACE_syscall`. This is precisely why `strace -e signal`
-can show you exactly which signal hit a process and where — the tracee is
-literally paused mid-delivery, in the kernel, waiting for the tracer's verdict.
+`PTRACE_CONT` / `PTRACE_syscall`.
+
+This is precisely why `strace -e signal` can show you exactly which signal
+hit a process and where — the tracee is literally paused mid-delivery, in the
+kernel, waiting for the tracer's verdict.
 
 The one signal that skips this checkpoint is, again, **SIGKILL** — a tracer
 cannot suppress a kill, and a stopped-under-ptrace task still dies to it.
@@ -504,10 +513,11 @@ docker stop my-container
 If your process does NOT handle SIGTERM, and it's PID 1 in the container,
 the signal is **discarded entirely** — that's the `SIGNAL_UNKILLABLE` rule
 from above, not a mere default action. The same binary that dies instantly
-to `kill -TERM` on your laptop shrugs it off as container PID 1. This is
-the #1 "my container takes exactly 10 seconds to stop" bug: nothing happens
-for the full grace period, then the SIGKILL from the ancestor namespace
-(which is allowed through) does the job. The `STOPSIGNAL` Dockerfile
+to `kill -TERM` on your laptop shrugs it off as container PID 1.
+
+This is the #1 "my container takes exactly 10 seconds to stop" bug: nothing
+happens for the full grace period, then the SIGKILL from the ancestor
+namespace (which is allowed through) does the job. The `STOPSIGNAL` Dockerfile
 instruction exists precisely so images can declare what they actually
 listen to (nginx wants SIGQUIT for graceful drain, for example).
 
@@ -557,10 +567,13 @@ Network daemons almost always set SIGPIPE to `SIG_IGN` and handle the
 
 The PID-reuse race is worth spelling out: `kill(1234, SIGKILL)` kills
 *whoever is PID 1234 right now*. If your target died and the PID was
-recycled, you just killed a stranger. The window is real: the kernel's
-compile-time default `pid_max` is only **32,768** (`PID_MAX_DEFAULT`), so a
-busy box wraps the PID space in minutes, though most modern distros raise it
-toward the 64-bit maximum of **4,194,304** (`cat /proc/sys/kernel/pid_max`).
+recycled, you just killed a stranger.
+
+The window is real: the kernel's compile-time default `pid_max` is only
+**32,768** (`PID_MAX_DEFAULT`), so a busy box wraps the PID space in minutes,
+though most modern distros raise it toward the 64-bit maximum of
+**4,194,304** (`cat /proc/sys/kernel/pid_max`).
+
 A pidfd is a stable handle to one specific process incarnation — obtained
 from `pidfd_open()`, `clone(CLONE_PIDFD)`, or `/proc/PID` — so
 `pidfd_send_signal()` either signals exactly the intended process or fails

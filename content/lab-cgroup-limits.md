@@ -395,12 +395,15 @@ firing — the exact file you watched in Stage 5.
 
 `cpu.max` is enforced per **100 ms period** by default. For a single-threaded
 batch job, being parked for the back half of each period is fine. For a
-**latency-sensitive, multithreaded** service it is a trap. Say a request needs
-work from 8 threads for 10 ms each — 80 ms of CPU. With a limit of `100000
-100000` (one core-equivalent), the group burns its 100 ms quota in the first
-~12.5 ms of the period across those 8 threads, then **all of them are frozen**
-until the period rolls over. A request that should take 12 ms now waits up to
-~90 ms for the refill. The p50 looks fine; the p99 is a cliff.
+**latency-sensitive, multithreaded** service it is a trap.
+
+Say a request needs work from 8 threads for 10 ms each — 80 ms of CPU. With a
+limit of `100000 100000` (one core-equivalent), the group burns its 100 ms
+quota in the first ~12.5 ms of the period across those 8 threads, then **all of
+them are frozen** until the period rolls over.
+
+A request that should take 12 ms now waits up to ~90 ms for the refill. The p50
+looks fine; the p99 is a cliff.
 
 Symptoms: high `nr_throttled` / `throttled_usec` (Stage 3) on a service that
 looks like it's under its average CPU limit. Fixes:

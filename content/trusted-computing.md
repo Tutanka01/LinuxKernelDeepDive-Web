@@ -12,7 +12,16 @@ requires: boot-process, security-hardening
 
 ## The mental model
 
-Every computing platform has a moment of faith: the first instruction executed after power-on must be trusted. There is no verification before that moment — the CPU can't verify the firmware image because the CPU hasn't yet loaded the verification code. On modern x86-64 that first code is the microcode-backed reset vector plus, on many platforms, an immutable **boot ROM** (Intel Boot Guard, AMD Platform Secure Boot) whose public-key hash is burned into on-die fuses. On arm64 it is BL1 in ROM per the Arm Trusted Firmware model. Either way, the very bottom of the stack is silicon you cannot rewrite.
+Every computing platform has a moment of faith: the first instruction executed
+after power-on must be trusted. There is no verification before that moment —
+the CPU can't verify the firmware image because the CPU hasn't yet loaded the
+verification code.
+
+On modern x86-64 that first code is the microcode-backed reset vector plus, on
+many platforms, an immutable **boot ROM** (Intel Boot Guard, AMD Platform
+Secure Boot) whose public-key hash is burned into on-die fuses. On arm64 it is
+BL1 in ROM per the Arm Trusted Firmware model. Either way, the very bottom of
+the stack is silicon you cannot rewrite.
 
 The solution is **chains of trust**:
 
@@ -81,7 +90,16 @@ mokutil --import mykey.der    # add a key (requires reboot + UEFI confirmation)
 mokutil --disable-validation  # disable signature checking (dangerous)
 ```
 
-Why does this matter? DKMS rebuilds out-of-tree kernel modules (NVIDIA, VirtualBox, ZFS) against your running kernel. Under Secure Boot the kernel refuses unsigned modules, so DKMS has to sign each rebuilt `.ko` with a key the kernel trusts. The shim+MOK mechanism lets you enroll your own key: MokManager prompts you at the next reboot (physical presence again), and — since kernel 5.19 — the shim passes MOK certificates to the kernel's `.machine` keyring, so modules signed by your MOK load without further ceremony. This is covered from the driver side in [Devices, Drivers & Modules](#/devices-modules).
+Why does this matter? DKMS rebuilds out-of-tree kernel modules (NVIDIA,
+VirtualBox, ZFS) against your running kernel. Under Secure Boot the kernel
+refuses unsigned modules, so DKMS has to sign each rebuilt `.ko` with a key
+the kernel trusts.
+
+The shim+MOK mechanism lets you enroll your own key: MokManager prompts you at
+the next reboot (physical presence again), and — since kernel 5.19 — the shim
+passes MOK certificates to the kernel's `.machine` keyring, so modules signed
+by your MOK load without further ceremony. This is covered from the driver
+side in [Devices, Drivers & Modules](#/devices-modules).
 
 ### Module signing (`CONFIG_MODULE_SIG`)
 

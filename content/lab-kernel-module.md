@@ -518,14 +518,16 @@ and clean up every resource on every exit path — including the error paths in
 
 Your `.ko` is bound to one kernel version by vermagic. The next `apt upgrade`
 that installs a new kernel leaves your module unbuildable against it — reboot
-into the new kernel and it is gone. **DKMS** (Dynamic Kernel Module Support)
-fixes this: you register the *source* once, and DKMS automatically rebuilds the
-module against every new kernel as it is installed, via a package post-install
-hook. This is how out-of-tree drivers (NVIDIA, VirtualBox, ZFS) survive kernel
-updates. You give it a `dkms.conf` naming the module and version, run
-`dkms add`, `dkms build`, `dkms install`, and from then on it is automatic.
-For a one-off lab module you do not need it; for anything you rely on across
-reboots, you do.
+into the new kernel and it is gone.
+
+**DKMS** (Dynamic Kernel Module Support) fixes this: you register the *source*
+once, and DKMS automatically rebuilds the module against every new kernel as it
+is installed, via a package post-install hook. This is how out-of-tree drivers
+(NVIDIA, VirtualBox, ZFS) survive kernel updates.
+
+You give it a `dkms.conf` naming the module and version, run `dkms add`,
+`dkms build`, `dkms install`, and from then on it is automatic. For a one-off
+lab module you do not need it; for anything you rely on across reboots, you do.
 
 ## Cleanup
 

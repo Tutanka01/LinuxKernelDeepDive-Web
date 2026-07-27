@@ -286,13 +286,14 @@ containers cannot both bind `:80`.
 Without root you cannot create veth pairs or program netfilter on the host.
 Rootless runtimes (Podman, rootless Docker) instead run a user-space process —
 **slirp4netns** or the faster **pasta** — that owns a TAP device inside the
-container's netns and NATs packets in user space. Every packet crosses the
-kernel/user boundary, so throughput and latency are markedly worse than
-bridge mode; pasta narrows the gap by terminating TCP in userspace and
-re-originating it on native host sockets — with a `splice()`-based fast path
-that short-circuits host-local connections entirely — but still can't match
-in-kernel forwarding. This is the
-classic security-vs-performance trade you also see in
+container's netns and NATs packets in user space.
+
+Every packet crosses the kernel/user boundary, so throughput and latency are
+markedly worse than bridge mode; pasta narrows the gap by terminating TCP in
+userspace and re-originating it on native host sockets — with a
+`splice()`-based fast path that short-circuits host-local connections
+entirely — but still can't match in-kernel forwarding. This is the classic
+security-vs-performance trade you also see in
 [Security & Confinement](#/security-hardening).
 
 ## DNS and service discovery

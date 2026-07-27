@@ -217,9 +217,43 @@ const PART_OF = Object.fromEntries(
   BOOK.flatMap(p => p.chapters.map(ch => [ch.slug, p.part]))
 );
 
-/* scroll-memory key for the course home; "@" can never appear in a slug
-   because it is the chapter/anchor separator in the hash */
-const HOME_KEY = "@home";
+/* scroll-memory keys for the two view-only routes; "@" can never appear in a
+   slug because it is the chapter/anchor separator in the hash */
+const HOME_KEY     = "@home";
+const PLATFORM_KEY = "@platform";
+
+/* The other two courses, for the platform landing page. Counts and blurbs are
+   duplicated in each shell's .course-switch markup; tests/tier1 asserts the two
+   agree, so this list cannot drift silently. Progress lives in localStorage on
+   the same origin, which is the only reason a single page can answer "where am
+   I across all three". */
+const COURSES = [
+  { id: "linux", name: "The Linux Deep Dive", href: "#/course", total: 56,
+    blurb: "The machinery under the command line: processes, memory, the " +
+           "storage and network stacks, containers, checkpoint/restore.",
+    time: "20+ hours", progress: () => {
+      try { return new Set(JSON.parse(localStorage.getItem("ldd-read") || "[]")).size; }
+      catch { return 0; }
+    } },
+  { id: "distributed", name: "Distributed Systems", href: "distributed/", total: 13,
+    blurb: "What breaks once there is more than one machine: hostile " +
+           "networks, clocks that lie, replication, consensus, Raft.",
+    time: "4–5 hours", progress: () => countCompleted("ds-course-progress-v1") },
+  { id: "inference", name: "Inference Engineering", href: "inference/", total: 24,
+    blurb: "Serving large language models on GPUs: rooflines, the KV cache, " +
+           "engines, kernels, quantization, rack-scale systems.",
+    time: "7–8 hours", progress: () => countCompleted("inf-course-progress-v1") },
+];
+
+/* The guided courses store {completed: {slug: true}, last}. Read defensively:
+   the engines already refuse localStorage gracefully and the landing page must
+   not be the one place that throws when storage is blocked. */
+function countCompleted(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || "null");
+    return raw && raw.completed ? Object.keys(raw.completed).length : 0;
+  } catch { return 0; }
+}
 
 const LEVEL_LABEL = {
   core:      "fundamentals",
@@ -240,38 +274,19 @@ const pageTocEl  = document.getElementById("page-toc");
 const THEME_KEY   = "ldd-theme";
 const hljsThemeEl = document.getElementById("hljs-theme");
 
-const HLJS_THEME_HREF = {
-  dark:  "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css",
-  paper: "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-light-medium.min.css",
-};
+/* The highlight.js themes are vendored, not fetched from a CDN. This engine
+   and course.js both live in assets/ but are loaded from documents at two
+   different depths, so a path relative to the *document* is wrong for two of
+   the three courses: ReaderUI resolves it against its own script URL instead.
+   The fallback keeps the theme switch working if reader-ui.js failed to load,
+   deriving the same base from this file's URL. */
+const vendorUrl = window.ReaderUI
+  ? ReaderUI.vendorUrl
+  : rel => new URL("vendor/" + rel, document.currentScript.src).href;
 
-const MERMAID_THEME = {
-  dark: {
-    startOnLoad: false,
-    theme: "dark",
-    themeVariables: {
-      background: "#1a1714",
-      primaryColor: "#262019",
-      primaryTextColor: "#d4cbb7",
-      primaryBorderColor: "#a4783f",
-      lineColor: "#978d7c",
-      fontFamily: "SF Mono, Menlo, monospace",
-      fontSize: "14px",
-    },
-  },
-  paper: {
-    startOnLoad: false,
-    theme: "neutral",
-    themeVariables: {
-      background: "#f6f1e6",
-      primaryColor: "#f1ebdd",   /* --bg-raised; #efe8d7 matched no token */
-      primaryTextColor: "#383022",
-      primaryBorderColor: "#8f5d1a",
-      lineColor: "#6b6250",
-      fontFamily: "SF Mono, Menlo, monospace",
-      fontSize: "14px",
-    },
-  },
+const HLJS_THEME_HREF = {
+  dark:  vendorUrl("hljs/gruvbox-dark-medium.min.css"),
+  paper: vendorUrl("hljs/gruvbox-light-medium.min.css"),
 };
 
 function currentTheme() {
@@ -292,10 +307,10 @@ function applyTheme(theme, rerenderDiagrams = false) {
     b.classList.toggle("active", on);
     b.setAttribute("aria-pressed", String(on));
   });
-  if (typeof mermaid !== "undefined") {
-    mermaid.initialize(MERMAID_THEME[theme]);
-    if (rerenderDiagrams) rerenderMermaid();
-  }
+  /* Diagram colours are baked into the SVG, so a theme change repaints them.
+     ReaderUI remembers the theme even when Mermaid has not been downloaded
+     yet, so a switch made before any diagram is seen still applies. */
+  if (window.ReaderUI) ReaderUI.setMermaidTheme(theme, rerenderDiagrams);
 }
 
 function setTheme(theme) {
@@ -508,7 +523,7 @@ function crumbHtml(slug) {
   const i = chapterIndex(slug);
   const part = PART_OF[slug] || "";
   return `<nav class="chapter-crumb" aria-label="Breadcrumb">` +
-    `<a class="crumb" href="#/">Course home</a>` +
+    `<a class="crumb" href="#/course">Course home</a>` +
     `<span class="crumb-sep" aria-hidden="true">/</span>` +
     `<span class="crumb-here">${part}</span>` +
     (i >= 0 ? `<span class="crumb-count">Chapter ${i + 1} of ${FLAT.length}</span>` : "") +
@@ -604,30 +619,9 @@ function wrapTables() {
   });
 }
 
-function renderMermaid() {
-  const blocks = articleEl.querySelectorAll("pre code.language-mermaid");
-  if (!blocks.length || typeof mermaid === "undefined") return;
-  blocks.forEach(code => {
-    const holder = document.createElement("pre");
-    holder.className = "mermaid";
-    holder.dataset.src = code.textContent;   // kept for theme re-renders
-    holder.textContent = code.textContent;
-    code.closest("pre").replaceWith(holder);
-  });
-  mermaid.run({ nodes: articleEl.querySelectorAll("pre.mermaid") });
-}
-
-/* re-render diagrams after a theme change (colours are baked into the SVG) */
-function rerenderMermaid() {
-  const blocks = articleEl.querySelectorAll("pre.mermaid");
-  if (!blocks.length || typeof mermaid === "undefined") return;
-  blocks.forEach(p => {
-    if (!p.dataset.src) return;
-    p.removeAttribute("data-processed");
-    p.textContent = p.dataset.src;
-  });
-  mermaid.run({ nodes: blocks });
-}
+/* Mermaid rendering — including the lazy download of the library itself —
+   lives in ReaderUI, so the guided courses get the same diagrams from the
+   same code rather than a second copy of it. */
 
 function buildPageToc() {
   if (!pageTocEl) return;
@@ -680,11 +674,16 @@ function parseHash() {
   return { slug, anchor };
 }
 
-/* An empty or unknown hash is the course home, not chapter one. */
+/* Three routes now. An *empty* hash is the platform landing page — "/" used to
+   be the Linux course, which meant the other two courses were reachable only
+   from the left rail. A hash that names something we don't have still lands on
+   the course home rather than the landing page: a stale bookmark to a renamed
+   chapter is a Linux reader who mistyped, not a first-time visitor. */
 function currentRoute() {
   const { slug, anchor } = parseHash();
   if (slug && FLAT.some(ch => ch.slug === slug)) return { kind: "chapter", slug, anchor };
-  return { kind: "home" };
+  if (slug) return { kind: "home" };          // unknown slug: course home
+  return { kind: "platform" };                // bare #/ or no hash at all
 }
 
 /* the slug being read, or null on the course home */
@@ -693,8 +692,13 @@ function currentSlug() {
   return r.kind === "chapter" ? r.slug : null;
 }
 
+/* The landing page and the course home are two different documents at two
+   different hashes, so they must not share one remembered scroll position. */
 function scrollKey() {
-  return currentSlug() || HOME_KEY;
+  const r = currentRoute();
+  if (r.kind === "chapter")  return r.slug;
+  if (r.kind === "platform") return PLATFORM_KEY;
+  return HOME_KEY;
 }
 
 function markActive(slug) {
@@ -719,13 +723,13 @@ function renderPager(slug) {
     (prev ? `<a class="prev" href="#/${prev.slug}">` +
             `<span class="pager-label">&larr; previous</span>` +
             `<span class="pager-title">${prev.title}</span></a>`
-          : `<a class="prev" href="#/">` +
+          : `<a class="prev" href="#/course">` +
             `<span class="pager-label">&larr; back</span>` +
             `<span class="pager-title">Course home</span></a>`) +
     (next ? `<a class="next" href="#/${next.slug}">` +
             `<span class="pager-label">next &rarr;</span>` +
             `<span class="pager-title">${next.title}</span></a>`
-          : `<a class="next" href="#/">` +
+          : `<a class="next" href="#/course">` +
             `<span class="pager-label">finish &rarr;</span>` +
             `<span class="pager-title">Back to the course map</span></a>`);
 }
@@ -787,11 +791,15 @@ async function loadChapter(slug, anchor) {
     });
     decorateHeadings(slug);
     wrapTables();
-    renderMermaid();
     buildPageToc();
     renderPager(slug);
 
     if (window.ReaderUI) {
+      /* Diagrams first: it swaps each fence for a <pre class="mermaid">
+         synchronously, so the block below measures the element the reader
+         will actually get. The 3.2 MB library itself is only fetched if
+         this chapter has a diagram at all. */
+      ReaderUI.renderMermaid(articleEl);
       /* make every scrollable block reachable and signposted, and give the
          narrow-screen reader the outline the 1280px rail withholds */
       ReaderUI.prepareContent(articleEl);
@@ -833,7 +841,7 @@ function renderLoadError(slug, anchor, err) {
      <p>Failed to fetch <code>content/${slug}.md</code> (${err.message}).</p>
      <p class="error-actions">
        <button id="retry-load" class="btn-primary" type="button">Try again</button>
-       <a class="error-home" href="#/">Course home</a>
+       <a class="error-home" href="#/course">Course home</a>
      </p>
      <p>If you opened <code>index.html</code> directly from disk, the browser
      blocks local <code>fetch()</code> calls. Serve the folder instead:</p>
@@ -851,10 +859,110 @@ python3 -m http.server 8000</code></pre>
   }
 }
 
+/* ---------------- platform landing ----------------
+   Reached at the bare "/" (empty hash). Until this existed, "/" *was* the Linux
+   course: it owned the domain title, the <title> and the visitor's first
+   screen, and the other 37 chapters were discoverable only from the left rail.
+
+   The one thing this page can do that no other page can: all three courses keep
+   their completion in localStorage on the same origin, so this is the only
+   place that can answer "where am I across the whole site".
+
+   A 0% ring is a hole for a first-time visitor, so a course that has not been
+   started shows its size and reading time instead of an empty donut. */
+
+function renderPlatform() {
+  renderToken += 1;
+  clearTimeout(placeholderTimer);
+  placeholderTimer = null;
+  markActive(null);
+  lastSlug = null;
+  autoReadArmed = false;
+  document.title = "How Systems Really Work — three courses on Linux, distributed systems and LLM inference";
+
+  const rows = COURSES.map(c => {
+    const done  = Math.min(c.progress(), c.total);
+    const pct   = Math.round((done / c.total) * 100);
+    const R = 26, CIRC = 2 * Math.PI * R;
+    const meter = done > 0
+      ? `<div class="course-ring" role="img" aria-label="${pct}% of ${c.name} complete">
+           <svg viewBox="0 0 64 64" width="64" height="64">
+             <circle cx="32" cy="32" r="${R}" class="ring-track"/>
+             <circle cx="32" cy="32" r="${R}" class="ring-fill"
+                     stroke-dasharray="${CIRC.toFixed(1)}"
+                     stroke-dashoffset="${(CIRC - (pct / 100) * CIRC).toFixed(1)}"
+                     transform="rotate(-90 32 32)"/>
+           </svg>
+           <span class="course-ring-label">${pct}<span>%</span></span>
+         </div>`
+      : `<div class="course-meter">
+           <span class="course-meter-n">${c.total}</span>
+           <span class="course-meter-l">chapters</span>
+         </div>`;
+    return `
+      <a class="course-card" href="${c.href}">
+        ${meter}
+        <span class="course-card-body">
+          <span class="course-card-title">${c.name}</span>
+          <span class="course-card-desc">${c.blurb}</span>
+          <span class="course-card-meta">${done > 0
+            ? `${done} of ${c.total} read &middot; continue`
+            : `~${c.time} of reading`}</span>
+        </span>
+        <span class="card-arrow" aria-hidden="true">&rarr;</span>
+      </a>`;
+  }).join("");
+
+  const totalDone = COURSES.reduce((s, c) => s + Math.min(c.progress(), c.total), 0);
+  const totalAll  = COURSES.reduce((s, c) => s + c.total, 0);
+
+  articleEl.className = "home platform";
+  articleEl.innerHTML = `
+      <header class="hero platform-hero">
+        <div class="hero-text">
+          <p class="hero-kicker">Three self-paced courses &middot; ${totalAll} chapters</p>
+          <h1>How systems really work</h1>
+          <p class="hero-lede">
+            Three courses on the machinery you are allowed to look at, each one
+            built from first principles and read in the browser: the Linux
+            kernel beneath your command line, the algorithms that keep many
+            machines in agreement, and the systems that serve large language
+            models on GPUs. No account, no sign-up, no build step — plain
+            Markdown, rendered here.
+          </p>
+          ${totalDone > 0
+            ? `<p class="hero-hint">${totalDone} of ${totalAll} chapters read across the three courses.</p>`
+            : `<p class="hero-hint">Your place is kept in this browser.</p>`}
+        </div>
+      </header>
+
+      <div class="course-cards">${rows}</div>
+
+      <p class="path-legend">Each course stands on its own and can be read
+        first. They do cross-reference each other where the same problem shows
+        up twice &mdash; a page fault, a replicated log, a cache that decides
+        how many users fit on one machine.</p>`;
+
+  void articleEl.offsetWidth;
+  articleEl.classList.add("fade-in");
+
+  pagerEl.innerHTML = "";
+  if (pageTocEl) pageTocEl.innerHTML = "";
+  if (window.ReaderUI) {
+    ReaderUI.setTopbarTitle("All courses");
+    ReaderUI.buildInlineToc([], null, null);
+    if (booted) { ReaderUI.focusMain(); ReaderUI.announce("All courses loaded."); }
+  }
+
+  if (!booted) restoreScroll(PLATFORM_KEY);
+  else window.scrollTo({ top: 0, behavior: "instant" });
+  booted = true;
+}
+
 /* ---------------- course home ----------------
-   The front door: what this book is, how far you are through it,
-   and every chapter on one map. Reached at #/ — the empty hash no
-   longer drops a first-time visitor into the middle of a chapter. */
+   What this book is, how far you are through it, and every chapter on one map.
+   Reached at #/course — it moved off the bare "/" when the platform landing
+   page took that slot. Every #/<slug> chapter link is unaffected. */
 
 function renderHome() {
   /* Returning home is also a navigation: invalidate any chapter fetch and
@@ -1004,7 +1112,8 @@ function setSidebar(open) {
 
 function route() {
   const r = currentRoute();
-  if (r.kind === "home") renderHome();
+  if (r.kind === "platform")   renderPlatform();
+  else if (r.kind === "home")  renderHome();
   else loadChapter(r.slug, r.anchor);
   setSidebar(false);
 }

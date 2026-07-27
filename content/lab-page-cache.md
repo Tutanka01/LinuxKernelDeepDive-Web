@@ -224,7 +224,9 @@ Writeback:             0 kB
 **What just happened:** `write()` (and `dd`) returns as soon as the data is
 copied into page-cache pages and those pages are marked **dirty** — the data is
 in RAM, not on disk. This is why writes feel instant and why pulling the power
-cord can lose the last few seconds of writes. Background flusher threads (kernel
+cord can lose the last few seconds of writes.
+
+Background flusher threads (kernel
 `kworker`s driven by `fs/fs-writeback.c`) write dirty pages out based on the
 `vm.dirty_*` knobs — `dirty_background_ratio` (default 10%) starts background
 flushing, `dirty_expire_centisecs` (default 3000 = 30 s) forces out pages that
@@ -361,11 +363,11 @@ maintenance chore.
 The [Virtual Memory](#/memory) chapter drew the line: a **minor fault** is fixed
 without disk I/O (the page was already in RAM); a **major fault** required
 reading from storage. `/usr/bin/time -v` (the standalone binary, *not* the shell
-`time` builtin — spell out the path) reports both. Use a program that faults the
-file in via `mmap`, so residency turns directly into fault counts. `wc -c` on a
-file it `mmap`s works, but the cleanest demonstration is `cat` reading through
-`read()` — faults show up as the kernel copies from cache. Let's use a small
-mmap-based read so the file pages are faulted, not just copied:
+`time` builtin — spell out the path) reports both.
+
+The counter only moves for pages the process faults in through its own address
+space, so *how* you read the file decides what you see. Start with the reading
+method you already used — `read()`, via `grep` — to establish the baseline:
 
 Cold run — drop the file's cache first:
 
@@ -382,8 +384,8 @@ dd if=/tmp/bigfile iflag=nocache count=0 2>/dev/null
 `grep` uses `read()` rather than `mmap`, so its page-ins show as block I/O, not
 process page faults — a useful subtlety. To make **major faults** appear in the
 counter, read the file through a memory mapping, where a cold page really does
-fault into the process. Use `cat` on a `mmap`-ing tool, or this one-liner with
-Python's `mmap`:
+fault into the process. This one-liner uses Python's `mmap` to touch one byte
+per page:
 
 ```bash
 dd if=/tmp/bigfile iflag=nocache count=0 2>/dev/null    # cold

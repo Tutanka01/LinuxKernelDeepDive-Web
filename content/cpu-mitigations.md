@@ -23,7 +23,16 @@ if (user_controlled_index < array_length) {
 // Attacker measures cache timing → reads kernel memory
 ```
 
-Two properties make this work. First, the CPU speculates *past* the bounds check because the check's outcome isn't known yet — the load address is computed and issued long before the comparison retires. Second, speculation windows are large: on a modern Intel or AMD core the reorder buffer holds 300–600+ in-flight micro-ops, so hundreds of instructions can execute on a mispredicted path before the machine notices and rolls back. That is more than enough to encode a secret bit into cache state and then leak it with a FLUSH+RELOAD timing loop that resolves a cache hit (~30–70 cycles) from a miss (~200–300 cycles).
+Two properties make this work. First, the CPU speculates *past* the bounds
+check because the check's outcome isn't known yet — the load address is
+computed and issued long before the comparison retires. Second, speculation
+windows are large: on a modern Intel or AMD core the reorder buffer holds
+300–600+ in-flight micro-ops, so hundreds of instructions can execute on a
+mispredicted path before the machine notices and rolls back.
+
+That is more than enough to encode a secret bit into cache state and then leak
+it with a FLUSH+RELOAD timing loop that resolves a cache hit (~30–70 cycles)
+from a miss (~200–300 cycles).
 
 The fix isn't easy because speculation *is* the performance. Turn it off and general-purpose code runs 5–10× slower. So none of the mitigations "disable speculation." They **constrain** it: block speculative access to secrets, or scrub the traces before crossing a security boundary. That boundary — user vs. kernel, guest vs. host, one SMT sibling vs. the other — is the whole story. See [Kernel, User Space & Syscalls](#/kernel-vs-userspace) for the privilege model these attacks subvert.
 
@@ -75,7 +84,16 @@ KPTI (kernel 4.15, `CONFIG_PAGE_TABLE_ISOLATION=y`, default on affected x86-64) 
 
 The two tables are laid out as adjacent PGDs: the kernel PGD occupies one page, the user PGD the next, so switching between them is a single bit flip in the CR3 value (bit 12, `PTI_USER_PGTABLE_BIT`). On every `syscall`/interrupt the entry asm writes the kernel CR3; on `sysret`/`iret` it writes the user CR3. Each CR3 write on a machine *without* PCID flushes the entire TLB — ~1,000+ cycles, plus the refill misses afterward.
 
-That is where **PCID** (Process-Context Identifiers, x86 since Haswell) earns its keep. PCID tags each TLB entry with a 12-bit address-space ID, so the CPU keeps user and kernel translations resident simultaneously. Switching CR3 with the no-flush bit set (bit 63) then costs a few hundred cycles instead of a full flush plus refill. KPTI reserves two PCIDs per real ASID — one for the user table, one for the kernel table — which is why `nopcid` on the command line makes a KPTI machine noticeably slower. The page table machinery itself is covered in [Virtual Memory](#/memory).
+That is where **PCID** (Process-Context Identifiers, x86 since Haswell) earns
+its keep. PCID tags each TLB entry with a 12-bit address-space ID, so the CPU
+keeps user and kernel translations resident simultaneously. Switching CR3 with
+the no-flush bit set (bit 63) then costs a few hundred cycles instead of a
+full flush plus refill.
+
+KPTI reserves two PCIDs per real ASID — one for the user table, one for the
+kernel table — which is why `nopcid` on the command line makes a KPTI machine
+noticeably slower. The page table machinery itself is covered in [Virtual
+Memory](#/memory).
 
 ```bash
 # Is KPTI active?
@@ -101,7 +119,16 @@ if (index < size) {
 }
 ```
 
-Internally it computes a mask with no branch (`(index < size) ? ~0 : 0`) using compare-and-subtract, then ANDs the index with it. Because the CPU can't speculate around a *data* dependency the way it speculates around a *branch*, an out-of-bounds index is forced to 0 on the speculative path too. Kernel developers add these by hand at boundaries where userspace controls an index — syscall multiplexers, BPF map lookups, and similar. There is no way to auto-insert them everywhere without wrecking performance, so Spectre v1 remains a code-audit problem; `smp_rmb()`/`lfence` barriers cover the cases where a full ordering fence is cheaper than a mask.
+Internally it computes a mask with no branch (`(index < size) ? ~0 : 0`) using
+compare-and-subtract, then ANDs the index with it. Because the CPU can't
+speculate around a *data* dependency the way it speculates around a *branch*,
+an out-of-bounds index is forced to 0 on the speculative path too.
+
+Kernel developers add these by hand at boundaries where userspace controls an
+index — syscall multiplexers, BPF map lookups, and similar. There is no way to
+auto-insert them everywhere without wrecking performance, so Spectre v1
+remains a code-audit problem; `smp_rmb()`/`lfence` barriers cover the cases
+where a full ordering fence is cheaper than a mask.
 
 ## Spectre v2: the retpoline saga
 
@@ -153,7 +180,15 @@ cat /sys/devices/system/cpu/smt/control   # on off forceoff notsupported ...
 
 ## L1TF and the virtualization nightmare
 
-L1 Terminal Fault (L1TF / Foreshadow) is the one that terrifies cloud providers. When a PTE has its Present bit clear, the CPU still speculatively forwards the *physical address bits left in that PTE* to the L1 data cache — and if some other context's data sits at that L1 line, a guest can read it. In a virtualized world the guest controls its own page tables, so a malicious guest can craft PTEs whose physical bits point at host memory and speculatively read whatever the host left in L1: other guests, host kernel secrets, anything.
+L1 Terminal Fault (L1TF / Foreshadow) is the one that terrifies cloud
+providers. When a PTE has its Present bit clear, the CPU still speculatively
+forwards the *physical address bits left in that PTE* to the L1 data cache —
+and if some other context's data sits at that L1 line, a guest can read it.
+
+In a virtualized world the guest controls its own page tables, so a malicious
+guest can craft PTEs whose physical bits point at host memory and
+speculatively read whatever the host left in L1: other guests, host kernel
+secrets, anything.
 
 Three layers defend the host (see [KVM & Virtualization Internals](#/kvm-internals) for the VM-entry path):
 

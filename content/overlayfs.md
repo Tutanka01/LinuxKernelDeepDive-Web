@@ -277,6 +277,7 @@ A whiteout in upperdir is a **character device node with device number
 because no real device uses it. That's what the `c---------` in the
 experiment above was. Overlayfs checks `S_ISCHR` + rdev 0 on every upper
 lookup ([ovl_is_whiteout()](https://elixir.bootlin.com/linux/v6.12/C/ident/ovl_is_whiteout)).
+
 Creating whiteouts needs `CAP_MKNOD` over the upper fs — one of the reasons
 the *mounter's* credentials (that `creator_cred` field) are used for lower
 and upper access. Deleting a merged directory is heavier: overlayfs must

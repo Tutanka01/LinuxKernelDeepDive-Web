@@ -381,3 +381,127 @@ html[data-theme="paper"] {
   .quiz { padding: 1.1rem 1rem 1rem; }
   .meta-right { flex-basis: 100%; margin-left: 0; }
 }
+
+/* ---------------- platform landing (#/ on the root shell) ----------------
+
+   Reuses the course-home vocabulary — .hero, .card-arrow, the progress ring —
+   because it is the same product, one level up. The only new idea is a card
+   big enough to be the page's primary content rather than a nav chip.
+
+   Ring geometry is r=26 here against r=52 on a course home, so the stroke is
+   halved to keep the same visual weight. */
+
+.platform-hero { display: block; }
+.platform-hero .hero-lede { max-width: 46rem; }
+.platform-hero .hero-hint { display: block; margin-top: 1.2rem; }
+
+.course-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.9rem;
+  margin: 2rem 0 0;
+}
+
+.course-card {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  padding: 1.2rem 1.3rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.course-card:hover,
+.course-card:focus-visible {
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+}
+
+.course-card:hover .card-arrow,
+.course-card:focus-visible .card-arrow {
+  color: var(--accent);
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.course-card-body { min-width: 0; flex: 1; }
+
+.course-card-title {
+  display: block;
+  color: var(--ink);
+  font-size: 1.12rem;
+  font-weight: 700;
+}
+
+.course-card-desc {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.course-card-meta {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* started: a real ring. Not started: the size of the thing, because an empty
+   donut reading "0%" tells a first-time visitor nothing. */
+.course-ring { position: relative; flex-shrink: 0; width: 64px; height: 64px; }
+.course-ring svg { display: block; }
+.course-ring .ring-track,
+.course-ring .ring-fill { stroke-width: 3; }
+
+.course-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  pointer-events: none;
+}
+
+.course-ring-label span { font-size: 0.58rem; color: var(--text-faint); }
+
+.course-meter {
+  flex-shrink: 0;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+}
+
+.course-meter-n { color: var(--ink); font-family: var(--mono); font-size: 1.3rem; line-height: 1; }
+.course-meter-l {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* the way back up, above the three course chips in every sidebar */
+.chip-all { margin-bottom: 0.5rem; }
+.chip-all .chip-title { color: var(--accent); }
+
+@media (max-width: 600px) {
+  .course-card { gap: 0.9rem; padding: 1rem; }
+  .course-card-title { font-size: 1rem; }
+  .course-ring, .course-meter { width: 52px; }
+  .course-ring { height: 52px; }
+  .course-ring svg { width: 52px; height: 52px; }
+}

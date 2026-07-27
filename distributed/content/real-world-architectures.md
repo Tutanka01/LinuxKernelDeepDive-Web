@@ -15,15 +15,16 @@ answers.
 
 ## ZooKeeper & etcd: consensus as a service
 
-The purest embodiment of Module 4. Both are small replicated key-value
-stores — ZooKeeper on **ZAB**, etcd on **Raft** — running on 3 or 5 nodes
-(2f+1!), holding not your data but your **coordination facts**: who is
+The purest embodiment of [The Consensus Problem](#/consensus). Both are
+small replicated key-value stores — ZooKeeper on **ZAB**, etcd on
+[**Raft**](#/raft) — running on 3 or 5 nodes (2f+1, for the reason that
+chapter gave), holding not your data but your **coordination facts**: who is
 leader, what is the config, which nodes exist, who holds which lock.
 
-The architecture is state machine replication verbatim: every write flows
-through the leader into the consensus log; the replicated state machine is
-a tree (ZooKeeper) or flat keyspace (etcd) of small entries. Two primitives
-elevate them from "tiny database" to "coordination kernel":
+The architecture is [state machine replication](#/consensus) verbatim: every
+write flows through the leader into the consensus log; the replicated state
+machine is a tree (ZooKeeper) or flat keyspace (etcd) of small entries. Two
+primitives elevate them from "tiny database" to "coordination kernel":
 
 - **Watches:** clients subscribe to a key and get notified on change — the
   push mechanism that turns a passive store into a control plane.
@@ -31,78 +32,91 @@ elevate them from "tiny database" to "coordination kernel":
   vanishes when its owner stops renewing. Build leader election from it in
   one move: everyone tries to create the same ephemeral key; the one who
   succeeds is leader; if it dies, the key evaporates and watchers race
-  again. Heartbeats, failure suspicion and fencing (the lease generation
-  number!) — chapters 3 and 4 — packaged behind one API.
+  again. Heartbeats and failure suspicion ([Failure Models &
+  Detection](#/failure-models)) plus fencing by lease generation number
+  ([Time, Clocks & Why They Lie](#/time-and-clocks)) — packaged behind one
+  API.
 
-Their CAP answer: hard **CP**. A partitioned minority refuses even reads
-of dubious freshness (etcd's linearizable reads use the ReadIndex round
-from the Raft chapter). Their PACELC answer: consistency over latency,
-always — which is precisely why you keep them small and put only *facts
-that must never fork* inside.
+Their [CAP](#/consistency-models) answer: hard **CP**. A partitioned
+minority refuses even reads of dubious freshness (etcd's linearizable reads
+use the [ReadIndex round](#/raft)). Their PACELC answer: consistency over
+latency, always — which is precisely why you keep them small and put only
+*facts that must never fork* inside.
 
 ## Kafka: the replicated log as a product
 
-The Raft chapter's central object — an ordered, replicated log — sold as
+[Raft](#/raft)'s central object — an ordered, replicated log — sold as
 infrastructure. Kafka's mapping onto the course:
 
-- **Partitioning (Module 3):** a topic is split into partitions by key
-  hash; ordering is guaranteed *within* a partition only — a deliberately
-  weakened, therefore scalable, promise.
-- **Replication:** each partition has a leader and followers; producers
-  write to the leader; the **ISR** (in-sync replica set) is a dynamic
-  quorum-ish membership. `acks=all` + `min.insync.replicas=2` is
-  synchronous-replication durability; `acks=1` is the async gamble from
-  the replication chapter — your latency/durability dial, exposed as
-  config.
-- **Consensus:** who leads each partition, and the cluster metadata
-  itself, used to live in ZooKeeper; modern Kafka's **KRaft** mode moves
-  it onto an internal Raft quorum. Note the architecture: consensus
+- **[Partitioning](#/partitioning):** a topic is split into partitions by
+  key hash; ordering is guaranteed *within* a partition only — a
+  deliberately weakened, therefore scalable, promise.
+- **[Replication](#/replication):** each partition has a leader and
+  followers; producers write to the leader; the **ISR** (in-sync replica
+  set) is a dynamic quorum-ish membership. `acks=all` +
+  `min.insync.replicas=2` is synchronous-replication durability; `acks=1`
+  is the async gamble that chapter warned about — your latency/durability
+  dial, exposed as config.
+- **[Consensus](#/consensus):** who leads each partition, and the cluster
+  metadata itself, used to live in ZooKeeper; modern Kafka's **KRaft** mode
+  moves it onto an internal Raft quorum. Note the architecture: consensus
   governs the *metadata*; the *data path* uses cheaper leader-follower
   replication coordinated by those facts. (The composition predicted in
-  the CRDT chapter.)
-- **Delivery semantics (Module 4):** consumers track offsets; offset
-  commits vs processing order gives at-least-once or at-most-once, and
-  Kafka transactions (offsets + outputs atomically) give effectively-once
-  within the ecosystem — the transactions chapter, productized.
+  [CRDTs, Gossip & Anti-Entropy](#/crdts-and-gossip).)
+- **Delivery semantics:** consumers track offsets; offset commits vs
+  processing order gives at-least-once or at-most-once, and Kafka
+  transactions (offsets + outputs atomically) give effectively-once within
+  the ecosystem — [Distributed Transactions](#/distributed-transactions),
+  productized.
 
 ## Dynamo & Cassandra: the AP school, complete
 
-Amazon's 2007 Dynamo paper is this course's Module 3+5 in one system, built
-for one requirement: the shopping cart **must always accept writes**.
+Amazon's 2007 Dynamo paper is Modules 3 and 5 of this course in one system,
+built for one requirement: the shopping cart **must always accept writes**.
 
-- **Partitioning:** consistent hashing on a ring, virtual nodes —
-  chapter 8, originally popularized by this very paper.
-- **Replication:** leaderless; each key written to N successors on the
-  ring; **sloppy quorums + hinted handoff** keep accepting writes even
-  when the proper home nodes are down (availability pushed to its limit).
-- **Conflicts:** version vectors detect concurrent writes (chapter 5);
-  Dynamo surfaced siblings to the application, Cassandra chose
-  per-cell LWW timestamps — accepting chapter 4's silent-loss trade for
-  operational simplicity. Tunable `R`/`W` per query: each request picks
-  its own point on the consistency spectrum.
+- **[Partitioning](#/partitioning):** consistent hashing on a ring, virtual
+  nodes — originally popularized by this very paper.
+- **[Replication](#/replication):** leaderless; each key written to N
+  successors on the ring; **sloppy quorums + hinted handoff** keep accepting
+  writes even when the proper home nodes are down (availability pushed to
+  its limit).
+- **Conflicts:** [version vectors](#/logical-clocks) detect concurrent
+  writes; Dynamo surfaced siblings to the application, Cassandra chose
+  per-cell LWW timestamps — knowingly accepting the [silent-loss
+  trade](#/time-and-clocks) for operational simplicity. Tunable `R`/`W` per
+  query: each request picks its own point on the consistency spectrum.
 - **Membership & repair:** gossip for who's-alive (phi-accrual suspicion),
-  read repair + Merkle-tree anti-entropy for divergence — chapter 12
-  end to end.
+  read repair + Merkle-tree anti-entropy for divergence — [CRDTs, Gossip &
+  Anti-Entropy](#/crdts-and-gossip) end to end.
 
-CAP answer: **AP** with tunable edges. PACELC: latency over consistency,
-with the application holding the merge burden. The mirror image of etcd —
-and correctly so, because carts and counters are not locks and leases.
+[CAP](#/consistency-models) answer: **AP** with tunable edges. PACELC:
+latency over consistency, with the application holding the merge burden.
+The mirror image of etcd — and correctly so, because carts and counters are
+not locks and leases.
 
 ## Spanner: buying back strong consistency at planet scale
 
 Google's Spanner is the audacious synthesis: SQL, ACID transactions,
 **linearizability (external consistency)** — across continents.
 
-The stack, bottom to top, is this course in one diagram:
+The stack, bottom to top, is this course in one diagram — every box is a
+chapter you have already read:
 
-```text
-  data partitioned into ranges  ──────────────  (chapter 8)
-  each range = a Paxos group (leader + replicas) (chapters 9–10)
-  single-range transactions: through that group's leader
-  multi-range transactions: 2PC ACROSS Paxos groups (chapter 11 —
-      coordinator state itself replicated ⇒ no blocking flaw)
-  reads/commits ordered globally by TrueTime ──  (chapter 4)
+```mermaid
+graph TD
+    D["data split into ranges"] --> P["each range is a Paxos group"]
+    P --> S["single-range transaction<br/>through that group leader"]
+    P --> M["multi-range transaction<br/>2PC across Paxos groups"]
+    M --> C["coordinator state replicated<br/>so no blocking flaw"]
+    S --> O["global order stamped by TrueTime"]
+    C --> O
 ```
+
+Bottom layer: [Partitioning & Sharding](#/partitioning). The Paxos groups:
+[The Consensus Problem](#/consensus) and [Raft](#/raft). The 2PC layer and
+its replicated coordinator: [Distributed
+Transactions](#/distributed-transactions). The ordering at the top: [Time,
+Clocks & Why They Lie](#/time-and-clocks).
 
 TrueTime is the famous ingredient: GPS + atomic clocks expose time as an
 **interval** with bounded error, and Spanner **waits out the uncertainty**
@@ -112,33 +126,54 @@ clocks"; it's the shape of the trade: Google converted a coordination
 problem into a (bounded) *waiting* problem, paying milliseconds of commit
 latency to make reads coordination-free worldwide. CockroachDB plays the
 same architecture without the exotic clocks — paying instead with
-uncertainty windows and occasional transaction restarts. PACELC made
-flesh: both are PC/EC, differing in how they pay the latency bill.
+uncertainty windows and occasional transaction restarts.
+[PACELC](#/consistency-models) made flesh: both are PC/EC, differing in how
+they pay the latency bill.
 
 ## Kubernetes: a distributed system that manages your distributed systems
 
 The least "database" of the five, and the most instructive architecture:
 
 - **All state in etcd** — every pod, service, config object lives in the
-  consensus store. The API server is (to first approximation) stateless
-  CRUD + watches in front of it.
+  [consensus store](#/consensus). The API server is (to first
+  approximation) stateless CRUD + watches in front of it.
 - **Controllers are reconciliation loops:** each one watches desired state
   and current state and nudges reality toward the spec, forever.
   *Level-triggered, not edge-triggered*: a controller that misses an event
-  (crash, partition — chapter 2's lost messages!) simply reconverges on
-  the next loop. The whole control plane is designed to be **safely
-  restartable from observed state** — failure-model thinking as
-  architecture.
+  (crash, partition — [lost messages](#/the-network-is-hostile)) simply
+  reconverges on the next loop. The whole control plane is designed to be
+  **safely restartable from observed state** — [failure-model
+  thinking](#/failure-models) as architecture.
 - **Optimistic concurrency:** every object carries a resourceVersion;
-  conflicting controller writes fail and retry with fresh state — versions
-  as conflict detection (chapter 5's spirit, server-side).
+  conflicting controller writes fail and retry with fresh state — [versions
+  as conflict detection](#/logical-clocks), server-side.
 - **Leader election among controller replicas** uses leases in etcd — the
-  ephemeral-key pattern above, fencing included.
-- The scheduler is a **placement** engine (chapter 8's concerns: spreading,
-  affinities, hot nodes), and kubelet heartbeats with the node controller
-  replay chapter 3's timeout dilemmas — including the deliberately
-  *patient* eviction timeouts that trade detection speed for fewer false
-  evictions.
+  ephemeral-key pattern above, [fencing](#/failure-models) included.
+- The scheduler is a **placement** engine ([Partitioning &
+  Sharding](#/partitioning)'s concerns: spreading, affinities, hot nodes),
+  and kubelet heartbeats with the node controller replay the [timeout
+  dilemmas](#/failure-models) — including the deliberately *patient*
+  eviction timeouts that trade detection speed for fewer false evictions.
+
+The loop is worth drawing, because what makes it robust is an arrow that
+isn't there:
+
+```mermaid
+graph LR
+    E["etcd holds the desired state"] --> W["controller reads desired and current"]
+    W --> A["act to close the gap"]
+    A --> W
+    A --> E
+```
+
+There is no "handle the event" arrow. A controller that crashes and misses
+ten notifications simply reads the world again on its next pass and
+converges — which is why the whole plane tolerates the message loss of
+Module 1 without a single special case.
+
+One layer down, every pod on a node is a set of Linux
+[namespaces](../#/namespaces) and a [cgroup](../#/cgroups): the isolation
+Kubernetes schedules is a kernel mechanism, not a Kubernetes one.
 
 Kubernetes is what it looks like when an industry absorbs this course:
 consensus kernel at the center, idempotent convergent loops everywhere
@@ -157,8 +192,8 @@ else, and every guarantee written down.
 
 Read the columns and the design space snaps into focus: **there is no best
 system, only positions on trade-off axes you can now name** — and the
-architectures that win combine a small CP core with scalable, weaker-
-consistency machinery around it.
+architectures that win combine a small CP core with scalable,
+weaker-consistency machinery around it.
 
 ## Where to go next
 
@@ -175,9 +210,17 @@ You have the map; here's where the territory deepens:
   labs exist — MIT 6.824's is the classic). Break things on purpose;
   Jepsen's analyses (jepsen.io) are masterclasses in how real systems fail
   their own guarantees.
-- **This site:** the kernel chapters on networking and namespaces show the
-  layer all of this runs on — `iptables` partitions and TCP behavior are
-  one deep-dive away.
+- **This site:** [The Networking Stack](../#/networking) and [TCP
+  Congestion Control & Tuning](../#/tcp-congestion) are the layer all of
+  this runs on — the `iptables` rules you would use to induce a partition,
+  and the retransmit behaviour underneath every timeout you tuned.
+  [Namespaces](../#/namespaces) and [Control Groups](../#/cgroups) are the
+  mechanisms Kubernetes actually drives. And if the machines you distribute
+  are GPUs, the [Inference Engineering](../inference/#/what-is-inference)
+  course is the same reasoning applied to a fleet where the replicated
+  object is a cache: [The KV Fabric](../inference/#/the-kv-fabric) for
+  placement and routing, [Operating It](../inference/#/operating-it) for
+  which of your instincts survive the move.
 
 ## Key takeaways
 

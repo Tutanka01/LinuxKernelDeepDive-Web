@@ -6,12 +6,13 @@
 > clocks (which can also *detect* concurrency), and see where each is used in
 > real systems.
 
-The last chapter ended with a problem: physical timestamps can't safely order
-events across machines. Leslie Lamport's 1978 paper — *"Time, Clocks, and
-the Ordering of Events in a Distributed System"*, perhaps the most cited in
-the field — offered a beautiful reframing: for correctness, we usually don't
-need to know *when* events happened. We need to know **what could have
-caused what**.
+[Time, Clocks & Why They Lie](#/time-and-clocks) ended with a problem:
+physical timestamps can't safely order events across machines, and
+last-write-wins turns that into silent data loss. Leslie Lamport's 1978
+paper — *"Time, Clocks, and the Ordering of Events in a Distributed
+System"*, perhaps the most cited in the field — offered a beautiful
+reframing: for correctness, we usually don't need to know *when* events
+happened. We need to know **what could have caused what**.
 
 ## Happens-before: order from causality
 
@@ -32,16 +33,26 @@ Not "simultaneous" — there may be minutes between them on a wall clock.
 Concurrent means **neither could have known about the other**. Causally,
 there is no fact of the matter about which came first.
 
-```text
-node A: ── a1 ──── a2 ──────────── a3 ──▶ time
-                    \ msg
-node B: ── b1 ──────── b2 ── b3 ────────▶
+One message is enough to order a whole chain of events — and enough to leave
+the rest of them permanently unordered:
 
-a1 → a2 → b2 → b3   (same-node order + message + transitivity)
-a1 → a3             (same node)
-b1 ∥ a1, b1 ∥ a2…   (no path either way: concurrent)
-a3 ∥ b3             (concurrent — even if a3 occurred 'later' on the wall)
+```mermaid
+sequenceDiagram
+    participant A as node A
+    participant B as node B
+    A->>A: a1
+    B->>B: b1
+    A->>A: a2
+    A->>B: message sent at a2
+    B->>B: b2, then b3
+    A->>A: a3
 ```
+
+Reading the arrows: `a1 → a2 → b2 → b3` (program order, then the message,
+then transitivity), and `a1 → a3` on A's own line. But `b1` has no path to
+or from anything on A, so `b1 ∥ a1`; and `a3 ∥ b3` — concurrent, even though
+`a3` sits lower on the page and may well have happened later on a wall
+clock.
 
 This relation is a **partial order**: some pairs are ordered, others aren't.
 The two clock constructions below are ways of *encoding* it in numbers.
@@ -55,12 +66,20 @@ Each node keeps a single counter `L`, with three rules:
 3. On receiving a message with timestamp `Lm`: `L = max(L, Lm) + 1`.
 
 Rule 3 is the heart: receiving a message *fast-forwards* your clock past the
-sender's, so causes always carry smaller numbers than their effects.
+sender's, so causes always carry smaller numbers than their effects. Watch
+B's counter jump from 1 to 3 on receipt — it can never again claim a number
+below its cause:
 
-```text
-node A:  L=1 ──── L=2 ─────────────────── L=3
-                    \  send (L=2)
-node B:  L=1 ─────────▶ L=max(1,2)+1=3 ── L=4
+```mermaid
+sequenceDiagram
+    participant A as node A
+    participant B as node B
+    A->>A: local event, L=1
+    A->>A: local event, L=2
+    B->>B: local event, L=1
+    A->>B: message carrying L=2
+    B->>B: L = max(1,2)+1 = 3
+    B->>B: local event, L=4
 ```
 
 **Guarantee:** if `a → b` then `L(a) < L(b)`.
@@ -78,9 +97,10 @@ the "true" order, which doesn't exist for concurrent events — Lamport
 timestamps are perfect. Break ties by node ID: order by `(L, node_id)`.
 Every node sorts events identically, and the order respects causality.
 Classic uses: totally-ordered multicast, fair distributed lock queues, and
-as the conceptual ancestor of the **term numbers** in Raft and **epoch /
-fencing tokens** from earlier chapters — all are counters that only move
-forward and stamp who's "later".
+as the conceptual ancestor of the **term numbers** in [Raft](#/raft), the
+**ballot numbers** in Paxos ([The Consensus Problem](#/consensus)), and the
+**epoch / fencing tokens** of [Failure Models & Detection](#/failure-models)
+— all are counters that only move forward and stamp who's "later".
 
 ## Vector clocks: detecting concurrency
 
@@ -104,14 +124,27 @@ Comparison rules — and this is where the power is:
   entry of `Vb`, and at least one is strictly smaller.
 - Neither `Va < Vb` nor `Vb < Va` → **concurrent**, definitively.
 
-```text
-node A: [1,0] ──── [2,0] ───────────────────────
-                      \ send [2,0]
-node B: ── [0,1] ──────▶ merge → [2,2] ── [2,3] ─
+Same exchange as before, now carrying vectors instead of one integer:
 
-[1,0] vs [2,3]: 1≤2 and 0≤3, strictly less → causally before
-[0,1] vs [2,0]: 0<2 but 1>0 → NEITHER dominates → concurrent ∥
+```mermaid
+sequenceDiagram
+    participant A as node A
+    participant B as node B
+    A->>A: V=[1,0]
+    A->>A: V=[2,0]
+    B->>B: V=[0,1]
+    A->>B: message carrying [2,0]
+    B->>B: merge then bump, V=[2,2]
+    B->>B: V=[2,3]
 ```
+
+The two comparisons that matter, and the second is the one a single integer
+could never make:
+
+- `[1,0]` vs `[2,3]`: `1 ≤ 2` and `0 ≤ 3`, with at least one strictly
+  smaller ⇒ **causally before**.
+- `[0,1]` vs `[2,0]`: `0 < 2` but `1 > 0` — neither dominates ⇒
+  **concurrent**, provably.
 
 **Guarantee (both directions this time):** `Va < Vb` **iff** `a → b`.
 Vector clocks capture the happens-before partial order *exactly*.
@@ -126,8 +159,11 @@ knowingly.
 
 ### Conflict detection in replicated stores
 
-Amazon's Dynamo (and Riak after it) stamped each stored value with a version
-vector. When a replica receives a write:
+Amazon's Dynamo (and Riak after it — both dissected in [Real-World
+Architectures](#/real-world-architectures)) stamped each stored value with a
+version vector. This is the leaderless replication of
+[Replication](#/replication) with its conflict detection made honest. When a
+replica receives a write:
 
 - New version **dominates** the stored one → safe overwrite (the writer had
   seen the current value).
@@ -135,9 +171,12 @@ vector. When a replica receives a write:
   **conflict**. Dynamo keeps *both* as siblings and hands them to the
   application to merge (the famous shopping-cart union).
 
-Compare with last-write-wins from the previous chapter, which would silently
-discard one of them based on lying wall clocks. Vector clocks are how a
-store *knows* a conflict happened instead of guessing.
+Compare with last-write-wins from [Time, Clocks & Why They
+Lie](#/time-and-clocks), which would silently discard one of them based on
+lying wall clocks. Vector clocks are how a store *knows* a conflict happened
+instead of guessing — and [CRDTs, Gossip &
+Anti-Entropy](#/crdts-and-gossip) turns that knowledge into merges that need
+no application code at all.
 
 > Terminology you'll meet in papers: **version vectors** — the same
 > mechanism applied to *versions of a data item* rather than all events of
@@ -147,7 +186,8 @@ store *knows* a conflict happened instead of guessing.
 ### Causal consistency
 
 A session writes a comment, then a reply to it. With **causal consistency**
-(a model we'll place properly in the consistency chapter), every replica
+(placed properly on the ladder in [Consistency Models &
+CAP](#/consistency-models)), every replica
 must show the comment before the reply — and vector-clock-style metadata is
 how replicas know to delay applying the reply until the comment has
 arrived. Causality tracking is the engine room of "reads make sense"
@@ -164,11 +204,11 @@ every message) doing daily work.
 
 | You need | Use | Cost |
 |---|---|---|
-| Measure a duration on one machine | monotonic clock | free |
-| Human-readable event times, logs | wall clock (NTP-synced) | ms-level lies |
+| Measure a duration on one machine | [monotonic clock](#/time-and-clocks) | free |
+| Human-readable event times, logs | [wall clock](#/time-and-clocks) (NTP-synced) | ms-level lies |
 | One total order all nodes agree on | Lamport clock (+ node ID tiebreak) | 1 integer |
 | Know whether two updates conflict | vector / version clocks | 1 entry per actor |
-| Order by real time, provably | bounded-uncertainty clocks (TrueTime) | special hardware + waiting |
+| Order by real time, provably | [bounded-uncertainty clocks](#/time-and-clocks) (TrueTime) | special hardware + waiting |
 
 ## Key takeaways
 

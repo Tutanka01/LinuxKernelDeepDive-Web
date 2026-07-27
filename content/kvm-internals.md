@@ -19,7 +19,15 @@ Virtualization splits the world in two:
 | **Type 1** | Hypervisor runs on bare metal, VMs on top | VMware ESXi, Xen, Hyper-V |
 | **Type 2** | Hypervisor is a process on a host OS, VMs are processes | VirtualBox, QEMU without KVM |
 
-Linux+KVM is **both**: KVM (Kernel-based Virtual Machine, merged in 2.6.20 back in 2007) is a kernel module that turns the running Linux kernel into a Type 1 hypervisor. Each VM is a regular Linux process (visible in `ps`, killable with `kill`, cgroup-constrained, swappable), but inside that process the CPU runs in **guest mode** — a hardware-enforced execution context where the guest OS believes it owns the machine. So it walks like a Type 2 (a normal userspace process manages it) but runs like a Type 1 (guest code executes directly on the silicon, not interpreted).
+Linux+KVM is **both**: KVM (Kernel-based Virtual Machine, merged in 2.6.20
+back in 2007) is a kernel module that turns the running Linux kernel into a
+Type 1 hypervisor. Each VM is a regular Linux process (visible in `ps`,
+killable with `kill`, cgroup-constrained, swappable), but inside that process
+the CPU runs in **guest mode** — a hardware-enforced execution context where
+the guest OS believes it owns the machine.
+
+So it walks like a Type 2 (a normal userspace process manages it) but runs
+like a Type 1 (guest code executes directly on the silicon, not interpreted).
 
 ```bash
 # A running VM is a process like any other
@@ -139,7 +147,15 @@ sequenceDiagram
     end
 ```
 
-The inner kernel loop (`vcpu_enter_guest`) does, on every iteration: service pending `vcpu->requests`; flush the TLB if asked; evaluate and inject a pending interrupt or exception into the VMCS; disable preemption and IRQs; do the low-level register save/restore and execute `VMLAUNCH`/`VMRESUME`; then, the instant the guest exits, read the exit reason from the VMCS and dispatch. If the exit is fully handled in the kernel, it loops again without ever returning to userspace — this is the fast path, and keeping I/O on it (via KVM's in-kernel APIC, PIT, and `ioeventfd`) is why modern VMs feel native.
+The inner kernel loop (`vcpu_enter_guest`) does, on every iteration: service
+pending `vcpu->requests`; flush the TLB if asked; evaluate and inject a
+pending interrupt or exception into the VMCS; disable preemption and IRQs; do
+the low-level register save/restore and execute `VMLAUNCH`/`VMRESUME`; then,
+the instant the guest exits, read the exit reason from the VMCS and dispatch.
+
+If the exit is fully handled in the kernel, it loops again without ever
+returning to userspace — this is the fast path, and keeping I/O on it (via
+KVM's in-kernel APIC, PIT, and `ioeventfd`) is why modern VMs feel native.
 
 ## The VM exit: the heart of virtualization
 
@@ -182,9 +198,30 @@ Memory is the subtle part. A guest process address must survive **two** translat
     Host/EPT:       Guest Physical Addr → Host  Physical Addr   (EPT / NPT, owned by KVM)
 ```
 
-Intel **EPT** (Extended Page Tables) and AMD **NPT** (Nested Page Tables) let the CPU perform both walks in hardware — sometimes called *two-dimensional paging*. The guest freely edits its own page tables and writes CR3 with **no exit**; the MMU walks the guest tables to get a GPA and then walks the EPT to get the HPA. On x86-64 with 4 KiB pages both are 4-level radix trees, so a full nested miss can touch up to 5×5 = 24 memory accesses — which is why the TLB, and using huge pages, matter so much for VMs.
+Intel **EPT** (Extended Page Tables) and AMD **NPT** (Nested Page Tables) let
+the CPU perform both walks in hardware — sometimes called *two-dimensional
+paging*. The guest freely edits its own page tables and writes CR3 with **no
+exit**; the MMU walks the guest tables to get a GPA and then walks the EPT to
+get the HPA.
 
-KVM owns the EPT/NPT structures through `struct kvm_mmu` (per vCPU) and represents each page-table page with `struct kvm_mmu_page`. When the guest touches a GPA that has no EPT entry, the hardware raises an **EPT violation** and `kvm_mmu_page_fault()` runs: it looks up the guest-physical address in the target memslot, calls into the host's ordinary fault path to get the backing page, and installs a leaf EPT entry (a "SPTE", shadow page-table entry) pointing at the host page frame. Since ~4.14 the default MMU is the **TDP MMU** (Two-Dimensional Paging MMU), a rewrite that uses RCU-protected, largely lock-free page-table walks so faults on different vCPUs scale — see [Kernel Synchronization](#/kernel-sync) for the RCU it leans on.
+On x86-64 with 4 KiB pages both are 4-level radix trees. Each of the five
+guest-physical addresses the walk produces — four page-table pages plus the
+final data page — must itself be resolved by a five-step EPT walk, so a full
+nested miss can touch up to 5×5 − 1 = 24 memory accesses before the data is
+read. That is why the TLB, and using huge pages, matter so much for VMs.
+
+KVM owns the EPT/NPT structures through `struct kvm_mmu` (per vCPU) and
+represents each page-table page with `struct kvm_mmu_page`. When the guest
+touches a GPA that has no EPT entry, the hardware raises an **EPT violation**
+and `kvm_mmu_page_fault()` runs: it looks up the guest-physical address in the
+target memslot, calls into the host's ordinary fault path to get the backing
+page, and installs a leaf EPT entry (a "SPTE", shadow page-table entry)
+pointing at the host page frame.
+
+Since ~4.14 the default MMU is the **TDP MMU** (Two-Dimensional Paging MMU), a
+rewrite that uses RCU-protected, largely lock-free page-table walks so faults
+on different vCPUs scale — see [Kernel Synchronization](#/kernel-sync) for the
+RCU it leans on.
 
 Before EPT (Nehalem, 2008) KVM had to **shadow** the guest's page tables: maintain a hidden set of tables containing baked-in GVA→HPA entries and trap every guest CR3 write and `INVLPG` to keep them in sync. It worked but the trap density was brutal. EPT eliminates that entire category of exits; shadow paging survives today only for the no-EPT and nested cases.
 

@@ -38,10 +38,11 @@ the destination host *before* all its memory has arrived: the destination
 registers the restored memory with `userfaultfd`, lets the process run, and
 when it touches a page that hasn't been transferred yet, the fault becomes a
 network request back to the source. The page arrives, `UFFDIO_COPY` installs
-it, the process resumes. This lab builds that machine in miniature — the
-source of the pages is just a `memset` in the same process, but the syscall
-choreography is identical to what `criu restore --lazy-pages` performs across a
-socket.
+it, the process resumes.
+
+This lab builds that machine in miniature — the source of the pages is just a
+`memset` in the same process, but the syscall choreography is identical to what
+`criu restore --lazy-pages` performs across a socket.
 
 Three facts to carry in: `userfaultfd` is *a process serving another region's
 page faults from userspace*; the fault becomes a **message you read from an
@@ -70,13 +71,17 @@ vm.unprivileged_userfaultfd = 0
 `0` means an unprivileged process may **not** create a userfaultfd that can
 trap *kernel-mode* faults (a hardening measure — userfaultfd has been a
 building block in several kernel exploits, because parking a fault lets an
-attacker freeze the kernel mid-operation and win a race). But since Linux 5.11
-there is an escape hatch that is perfectly safe: pass **`UFFD_USER_MODE_ONLY`**
-when creating the fd. The resulting object handles only *userspace* faults
-(exactly our case — our main thread reads the pages from userspace), and any
-kernel-originated fault on the range gets a `SIGBUS` instead. The kernel doc is
-explicit: *"Any user can always create a userfaultfd which traps userspace page
-faults only."* Our program uses that flag, so it runs as an ordinary user.
+attacker freeze the kernel mid-operation and win a race).
+
+But since Linux 5.11 there is an escape hatch that is perfectly safe: pass
+**`UFFD_USER_MODE_ONLY`** when creating the fd. The resulting object handles
+only *userspace* faults (exactly our case — our main thread reads the pages
+from userspace), and any kernel-originated fault on the range gets a `SIGBUS`
+instead.
+
+The kernel doc is explicit: *"Any user can always create a userfaultfd which
+traps userspace page faults only."* Our program uses that flag, so it runs as
+an ordinary user.
 
 If you ever need to handle kernel faults (a real CRIU restore does), you would
 instead run as root, or set `sudo sysctl vm.unprivileged_userfaultfd=1`. We
@@ -449,15 +454,18 @@ Interpret only the shape of the result:
 Run at least a few dozen pages, repeat the whole program several times, and
 look at the distribution rather than quoting one sample or a universal ratio.
 
-Now extrapolate to the real use case. In post-copy [live migration](#/live-migration),
-the handler does not `memset` a local buffer — it sends the faulting address
-over a socket to the *source* host and waits for the page to come back. The
-observed fault then includes local handling, network RTT, queueing, and page
-transfer; on a LAN the network component will often dominate, but there is no
-portable fixed multiplier. That is precisely the tradeoff `criu restore
+Now extrapolate to the real use case. In post-copy [live
+migration](#/live-migration), the handler does not `memset` a local buffer — it
+sends the faulting address over a socket to the *source* host and waits for the
+page to come back.
+
+The observed fault then includes local handling, network RTT, queueing, and
+page transfer; on a LAN the network component will often dominate, but there is
+no portable fixed multiplier. That is precisely the tradeoff `criu restore
 --lazy-pages` makes: the process resumes on the destination quickly, then pays
-a first-touch penalty only for pages reached before the background copy. See
-[CRIU restore](#/criu-restore) for how the lazy-pages daemon wires a
+a first-touch penalty only for pages reached before the background copy.
+
+See [CRIU restore](#/criu-restore) for how the lazy-pages daemon wires a
 userfaultfd to a page-fault-over-TCP protocol, and
 [Observability](#/observability) for measuring the resulting fault latency in
 production.

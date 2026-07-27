@@ -38,10 +38,12 @@ the last decade. A syscall is not just a `syscall` instruction; on x86-64 the
 CPU switches privilege rings, swaps the stack, and — since the Meltdown/Spectre
 era — often flips page tables through **KPTI** (kernel page-table isolation).
 On mitigated hardware a round trip that once cost tens of nanoseconds can cost
-several hundred. See [CPU Vulnerability Mitigations](#/cpu-mitigations) for why
-that overhead exists and [Kernel, User Space & Syscalls](#/kernel-vs-userspace)
-for the mechanics of the boundary itself. When a busy server does one syscall
-per socket per event, that tax dominates.
+several hundred.
+
+See [CPU Vulnerability Mitigations](#/cpu-mitigations) for why that overhead
+exists and [Kernel, User Space & Syscalls](#/kernel-vs-userspace) for the
+mechanics of the boundary itself. When a busy server does one syscall per
+socket per event, that tax dominates.
 
 The history of Linux I/O APIs is mostly a history of reducing those costs
 without destroying the Unix file descriptor model.
@@ -155,11 +157,12 @@ CQEs: completion queue entries
 The rings are three separate `mmap()` regions returned by the setup call: the
 SQ ring metadata, the CQ ring metadata, and the SQE array itself. (Since 5.12,
 `IORING_SETUP_SUBMIT_ALL` and single-mmap features simplify this, but the
-three-region model is the mental picture.) Each ring is a power-of-two circular
-buffer with `head` and `tail` indices. User space owns the SQ tail and the CQ
-head; the kernel owns the SQ head and the CQ tail. Because both sides share the
-memory, advancing an index is a plain memory write plus a memory barrier — no
-syscall.
+three-region model is the mental picture.)
+
+Each ring is a power-of-two circular buffer with `head` and `tail` indices.
+User space owns the SQ tail and the CQ head; the kernel owns the SQ head and
+the CQ tail. Because both sides share the memory, advancing an index is a
+plain memory write plus a memory barrier — no syscall.
 
 The SQ ring holds *indices* into the SQE array, not SQEs directly. That
 indirection lets you prepare SQEs out of order and submit them in a chosen
@@ -348,13 +351,16 @@ storage DMA ↔ user buffer
 This avoids cache pollution and extra copies for databases and storage
 engines, but requires alignment discipline (buffer, offset, and length aligned
 to the device's logical block size — 512 B or 4096 B) and gives up many
-page-cache benefits. `io_uring` is attractive for both worlds, but the
-performance model differs. With direct I/O and registered buffers, it can map
-closely to storage queue semantics — an SQE turns into a block-layer request
-that DMAs straight into a pinned user buffer. With buffered I/O, it improves
-API structure, batching, and async behavior, but still interacts with page
-cache realities. See [The Linux Storage Stack](#/storage-stack) for where the
-block layer and NVMe driver pick the request up.
+page-cache benefits.
+
+`io_uring` is attractive for both worlds, but the performance model differs.
+With direct I/O and registered buffers, it can map closely to storage queue
+semantics — an SQE turns into a block-layer request that DMAs straight into a
+pinned user buffer. With buffered I/O, it improves API structure, batching,
+and async behavior, but still interacts with page cache realities.
+
+See [The Linux Storage Stack](#/storage-stack) for where the block layer and
+NVMe driver pick the request up.
 
 ## Registered buffers and files
 
@@ -395,12 +401,13 @@ This is less compelling for one-shot scripts.
 `SQPOLL` (`IORING_SETUP_SQPOLL`) creates a dedicated kernel thread that polls
 the submission queue tail. User space places SQEs into the ring and, in the hot
 path, avoids the `io_uring_enter()` syscall to notify the kernel — it just
-advances the tail. The thread sleeps after an idle period
-(`sq_thread_idle`, default 1000 ms, tunable at setup) and user space must set
-`IORING_SQ_NEED_WAKEUP` before re-entering to wake it. This is excellent when
-the ring is busy enough to justify burning a core; it is wasteful when the
-workload is sparse, and it needs `CAP_SYS_NICE` (or a shared-poll thread) to
-set up.
+advances the tail.
+
+The thread sleeps after an idle period (`sq_thread_idle`, default 1000 ms,
+tunable at setup) and user space must set `IORING_SQ_NEED_WAKEUP` before
+re-entering to wake it. This is excellent when the ring is busy enough to
+justify burning a core; it is wasteful when the workload is sparse, and it
+needs `CAP_SYS_NICE` (or a shared-poll thread) to set up.
 
 `IOPOLL` (`IORING_SETUP_IOPOLL`) is for polling-capable block devices under
 direct I/O. Instead of interrupt-driven completion, the kernel busy-polls the
@@ -442,12 +449,13 @@ Timeouts and cancellation are first-class operations too. `IORING_OP_TIMEOUT`
 posts a CQE after a delay or a number of completions; `IORING_OP_LINK_TIMEOUT`
 arms a timeout on the *linked* operation, so a `recv` that hangs can be
 canceled automatically; `IORING_OP_ASYNC_CANCEL` cancels an in-flight request
-by `user_data`. That is crucial: large async systems are not just reads and
-writes. They are reads, writes, timeouts, retries, accept loops, shutdowns,
-backpressure, and cancellation. An I/O API that cannot cancel cleanly
-eventually leaks complexity into the application architecture — and interacts
-badly with [signals](#/signals), which are the older, blunter cancellation
-mechanism.
+by `user_data`.
+
+That is crucial: large async systems are not just reads and writes. They are
+reads, writes, timeouts, retries, accept loops, shutdowns, backpressure, and
+cancellation. An I/O API that cannot cancel cleanly eventually leaks
+complexity into the application architecture — and interacts badly with
+[signals](#/signals), which are the older, blunter cancellation mechanism.
 
 ## Multishot operations
 
@@ -483,10 +491,11 @@ For network send paths, `IORING_OP_SEND_ZC` / `SENDMSG_ZC` (zero-copy send,
 since 6.0) can avoid copying payloads into kernel socket buffers, but user
 memory must remain stable until the NIC is done with it. That is signalled by a
 **second** CQE carrying `IORING_CQE_F_NOTIF`: the first CQE means "submitted",
-the notification CQE means "your buffer is free to reuse". Completion
-notification has become part of memory ownership — a strictly more complex
-contract than a normal `send`. It only pays off above a payload threshold
-(roughly a few KiB); below that the copy is cheaper than the pinning
+the notification CQE means "your buffer is free to reuse".
+
+Completion notification has become part of memory ownership — a strictly more
+complex contract than a normal `send`. It only pays off above a payload
+threshold (roughly a few KiB); below that the copy is cheaper than the pinning
 bookkeeping.
 
 For storage, direct I/O avoids page-cache copies, but you lose cache

@@ -109,10 +109,13 @@ mode. Roughly, in hardware then software:
 
 Most handlers run on the current kernel stack. But some exceptions can fire
 *when the normal stack is unusable* — a double fault after a stack overflow,
-or an NMI arriving in the middle of another handler. For those, x86-64 provides
-the **Interrupt Stack Table** (IST): the TSS holds up to 7 known-good stack
-pointers, and an IDT entry can specify "always switch to IST stack N." The
-kernel dedicates IST stacks to the dangerous vectors — NMI, double fault
+or an NMI arriving in the middle of another handler.
+
+For those, x86-64 provides the **Interrupt Stack Table** (IST): the TSS holds
+up to 7 known-good stack pointers, and an IDT entry can specify "always switch
+to IST stack N."
+
+The kernel dedicates IST stacks to the dangerous vectors — NMI, double fault
 (`#DF`), machine check (`#MC`), and debug (`#DB`) — so they always land on a
 fresh, valid stack no matter how wrecked the interrupted context was. These
 per-CPU stacks live in the `cpu_entry_area`; you can see the sizes in
@@ -205,11 +208,12 @@ Some drivers need to do more than a top half can safely do — talk to an I2C
 chip, grab a mutex — but that work *is* the interrupt handling and can't be a
 generic bottom half. The answer is a **threaded IRQ**:
 [`request_threaded_irq()`](https://elixir.bootlin.com/linux/v6.12/C/ident/request_threaded_irq)
-takes two callbacks. The `handler` runs in hardirq context (fast, just decides
-"is this mine?" and returns `IRQ_WAKE_THREAD`); the `thread_fn` runs in a
-dedicated kernel thread — you'll see it as `irq/48-eth0` in `ps` — where it
-**can sleep**. With `IRQF_ONESHOT` the line stays masked until the thread
-finishes.
+takes two callbacks.
+
+The `handler` runs in hardirq context (fast, just decides "is this mine?" and
+returns `IRQ_WAKE_THREAD`); the `thread_fn` runs in a dedicated kernel
+thread — you'll see it as `irq/48-eth0` in `ps` — where it **can sleep**. With
+`IRQF_ONESHOT` the line stays masked until the thread finishes.
 
 Threaded handlers are also what the **PREEMPT_RT** real-time kernel forces
 almost everywhere: pushing IRQ work into schedulable threads is how RT bounds

@@ -14,7 +14,16 @@ requires: memory, scheduling
 
 In a single-socket system, one CPU die connects to one set of memory DIMMs through one memory controller. Latency is uniform: every core sees roughly the same time to any address — on modern DDR4/DDR5 servers, ~80-100 ns of load-to-use latency for a cache miss that hits DRAM. This is **UMA** (Uniform Memory Access).
 
-In a two-socket system, each socket has its own integrated memory controller and its own DIMMs. A core on socket 0 reaches socket 0's memory at ~80-100 ns — but socket 1's memory means the request travels across the inter-socket link, gets serviced by socket 1's controller, and comes back: ~130-150 ns. That ~50-60 ns gap is the **NUMA penalty**, usually quoted as a *distance ratio* of ~1.5-2.1×. On four-socket systems, or when a request takes two hops, remote latency can exceed 300 ns. Bandwidth suffers too: the cross-socket link (Intel UPI, AMD Infinity Fabric) has less bandwidth than local DRAM, so a remote-heavy workload saturates the link long before it saturates memory.
+In a two-socket system, each socket has its own integrated memory controller
+and its own DIMMs. A core on socket 0 reaches socket 0's memory at ~80-100 ns
+— but socket 1's memory means the request travels across the inter-socket
+link, gets serviced by socket 1's controller, and comes back: ~130-150 ns.
+
+That ~50-60 ns gap is the **NUMA penalty**, usually quoted as a *distance
+ratio* of ~1.5-2.1×. On four-socket systems, or when a request takes two hops,
+remote latency can exceed 300 ns. Bandwidth suffers too: the cross-socket link
+(Intel UPI, AMD Infinity Fabric) has less bandwidth than local DRAM, so a
+remote-heavy workload saturates the link long before it saturates memory.
 
 ```text
     ┌──────────── Socket 0 ────────────┐  ┌──────────── Socket 1 ────────────┐
@@ -30,7 +39,18 @@ In a two-socket system, each socket has its own integrated memory controller and
                          (inter-socket link, ~10-50 ns hop)
 ```
 
-This isn't exotic. Any server with more than one physical CPU package is NUMA. Cloud instances with many vCPUs run on NUMA hosts, and a large instance may straddle two host nodes. Your 128-core Threadripper or EPYC workstation is NUMA even with a single socket: AMD builds these from multiple compute dies (CCDs) plus an I/O die, and depending on the firmware's *NUMA Nodes Per Socket* (NPS) setting the memory channels are partitioned into 1, 2, or 4 nodes per socket. Recent Intel Xeon (Sapphire/Emerald Rapids) offer the same idea as *Sub-NUMA Clustering* (SNC), splitting one physical socket into 2-4 logical NUMA nodes so that cores talk to the nearest memory controller tile on the mesh.
+This isn't exotic. Any server with more than one physical CPU package is NUMA.
+Cloud instances with many vCPUs run on NUMA hosts, and a large instance may
+straddle two host nodes.
+
+Your 128-core Threadripper or EPYC workstation is NUMA even with a single
+socket: AMD builds these from multiple compute dies (CCDs) plus an I/O die,
+and depending on the firmware's *NUMA Nodes Per Socket* (NPS) setting the
+memory channels are partitioned into 1, 2, or 4 nodes per socket.
+
+Recent Intel Xeon (Sapphire/Emerald Rapids) offer the same idea as *Sub-NUMA
+Clustering* (SNC), splitting one physical socket into 2-4 logical NUMA nodes
+so that cores talk to the nearest memory controller tile on the mesh.
 
 ## How the kernel sees NUMA
 
@@ -122,7 +142,16 @@ numactl --interleave=0,1 ./myapp
 #   move_pages(pid, count, pages, nodes, status, flags);  // migrate existing pages
 ```
 
-Interleave is the classic answer to "one thread allocates, many use": by striping pages across nodes at page granularity, every accessor gets a predictable fraction of local hits and the memory bandwidth of *both* controllers instead of one. The cost is that it guarantees ~50% of accesses are remote on a 2-node box, and it fights [transparent huge pages](#/memory): a 2 MiB huge page must come from a single node, so a strictly interleaved region can't be backed by THP. Since 6.9, `MPOL_WEIGHTED_INTERLEAVE` lets you bias the ratio (e.g. more pages on faster CDXL/HBM tiers), which matters on tiered-memory machines.
+Interleave is the classic answer to "one thread allocates, many use": by
+striping pages across nodes at page granularity, every accessor gets a
+predictable fraction of local hits and the memory bandwidth of *both*
+controllers instead of one.
+
+The cost is that it guarantees ~50% of accesses are remote on a 2-node box,
+and it fights [transparent huge pages](#/memory): a 2 MiB huge page must come
+from a single node, so a strictly interleaved region can't be backed by THP.
+Since 6.9, `MPOL_WEIGHTED_INTERLEAVE` lets you bias the ratio (e.g. more pages
+on faster CDXL/HBM tiers), which matters on tiered-memory machines.
 
 ### AutoNUMA: the kernel doing it for you
 
@@ -132,7 +161,19 @@ Since Linux 3.13, `CONFIG_NUMA_BALANCING` gives **automatic NUMA balancing** (Au
 cat /proc/sys/kernel/numa_balancing    # 0 = off, 1 = on (default on if the kernel supports it)
 ```
 
-The mechanism is a deliberate trick. A kthread-driven scanner walks a task's page tables and strips the access bits from a batch of PTEs, marking them **`PROT_NONE`** (specifically the `_PAGE_PROTNONE` encoding — the page is still present, just poisoned for access). The next time any CPU touches such a page, the MMU raises a fault. That **NUMA hinting fault** is not a real protection error; the handler restores the PTE and records *which node the faulting CPU was on*. Accumulate enough of these and the kernel knows, per page and per task, where the demand actually is. Then it migrates the page to the node that keeps faulting on it, and — through the scheduler — nudges the task toward the node that holds most of its pages.
+The mechanism is a deliberate trick. A kthread-driven scanner walks a task's
+page tables and strips the access bits from a batch of PTEs, marking them
+**`PROT_NONE`** (specifically the `_PAGE_PROTNONE` encoding — the page is
+still present, just poisoned for access).
+
+The next time any CPU touches such a page, the MMU raises a fault. That **NUMA
+hinting fault** is not a real protection error; the handler restores the PTE
+and records *which node the faulting CPU was on*.
+
+Accumulate enough of these and the kernel knows, per page and per task, where
+the demand actually is. Then it migrates the page to the node that keeps
+faulting on it, and — through the scheduler — nudges the task toward the node
+that holds most of its pages.
 
 ```bash
 # The knobs (all under /proc/sys/kernel/)
@@ -248,7 +289,20 @@ cat /sys/fs/cgroup/mygroup/cpuset.mems   # which NUMA nodes tasks may allocate f
 echo 0 > /sys/fs/cgroup/mygroup/cpuset.mems   # confine allocation to node 0
 ```
 
-`cpuset.mems` is a hard `MPOL_BIND`-style constraint layered *under* any policy the task sets for itself: even `numactl --membind=1` can't escape a cpuset that only lists node 0. That's the mechanism Kubernetes' **Topology Manager** uses. With `--topology-manager-policy=single-numa-node`, kubelet only admits a Guaranteed-QoS pod if a single node has enough free CPUs *and* memory *and* device (e.g. GPU/NIC) capacity, then writes `cpuset.cpus` and `cpuset.mems` so every container in the pod is aligned to that one node. A pod that spans nodes on a busy host can lose 30-50% of its effective memory bandwidth — microseconds per access that compound into milliseconds of tail latency. See [What a Container Actually Is](#/containers-overview) and [Control Groups](#/cgroups).
+`cpuset.mems` is a hard `MPOL_BIND`-style constraint layered *under* any
+policy the task sets for itself: even `numactl --membind=1` can't escape a
+cpuset that only lists node 0.
+
+That's the mechanism Kubernetes' **Topology Manager** uses. With
+`--topology-manager-policy=single-numa-node`, kubelet only admits a
+Guaranteed-QoS pod if a single node has enough free CPUs *and* memory *and*
+device (e.g. GPU/NIC) capacity, then writes `cpuset.cpus` and `cpuset.mems` so
+every container in the pod is aligned to that one node.
+
+A pod that spans nodes on a busy host can lose 30-50% of its effective memory
+bandwidth — microseconds per access that compound into milliseconds of tail
+latency. See [What a Container Actually Is](#/containers-overview) and
+[Control Groups](#/cgroups).
 
 ## Follow the code (kernel v6.12)
 

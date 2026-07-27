@@ -5,8 +5,9 @@
 > consistency — and finally understand what the CAP theorem actually says
 > (it's narrower than the famous slogan) and what PACELC adds.
 
-The replication chapter showed copies drifting apart and reads returning
-stale or vanishing data. A **consistency model** is the contract that tames
+[Replication](#/replication) showed copies drifting apart and reads
+returning stale or vanishing data. A **consistency model** is the contract
+that tames
 this: a precise promise about *which values reads may return*, given the
 reads and writes happening across the system.
 
@@ -18,7 +19,8 @@ from it for the rest of your career.
 > Vocabulary guard-rail: this is **replication consistency** — not the "C"
 > in ACID (integrity constraints), and not eventual *vs* strong marketing
 > labels. Also: these models apply to single-object operations; multi-object
-> transactions come in Module 4.
+> transactions come in [Distributed
+> Transactions](#/distributed-transactions).
 
 ## Linearizability: the gold standard
 
@@ -32,6 +34,9 @@ subsequent read (by anyone, anywhere) must also return it. The system never
 "goes back" to the old value. Equivalently: the moment a write completes,
 it is visible to all.
 
+The forbidden pattern, drawn as three operations whose durations overlap in
+real time — the one thing a message-passing diagram cannot show:
+
 ```text
                 time ──────────────────────────────▶
   writer:   |── write x=1 ──|
@@ -44,14 +49,16 @@ it is visible to all.
 
 Linearizability is what intuition expects of "a register in the sky". You
 *need* it when reads feed decisions that must not act on stale data:
-uniqueness checks (two users claiming one username), leader election,
-locks and leases, account balances at the moment of withdrawal.
+uniqueness checks (two users claiming one username), [leader
+election](#/consensus), [locks and leases](#/failure-models), account
+balances at the moment of withdrawal.
 
 What it costs: replicas must coordinate on every operation — typically a
 round trip to a leader or quorum — so latency floors at network RTT, and
 during partitions, some nodes must refuse to answer (CAP, below). Note
-that even a `w + r > n` quorum system is **not** automatically
-linearizable: partially-propagated writes can let two reads disagree about
+that even a [`w + r > n` quorum](#/replication) system is **not**
+automatically linearizable: partially-propagated writes can let two reads
+disagree about
 "the moment" a write happened unless extra repair-before-return work is
 done.
 
@@ -67,32 +74,34 @@ one.
 ## Causal consistency: respect the arrows
 
 **Causal consistency** promises only that **causally related** operations
-(the happens-before relation from the logical-clocks chapter!) are seen in
-order by everyone. Concurrent operations may be observed in different
-orders by different clients.
+(the happens-before relation from [Logical & Vector
+Clocks](#/logical-clocks)) are seen in order by everyone. Concurrent
+operations may be observed in different orders by different clients.
 
-The canonical example:
+The canonical example — one arrow that must be respected, and two nodes with
+no arrow at all:
 
-```text
-  Alice:  posts "We're having a baby!"        (W1)
-  Bob:    reads it, replies "Congrats!"        (W2, caused by W1)
-
-  causal:    no one may see W2 without W1 — the reply
-             never appears before the post.
-  allowed:   Carol and Dave may disagree on the order of two
-             UNRELATED posts made concurrently.
+```mermaid
+graph LR
+    W1["Alice posts the news"] -->|"Bob read it first"| W2["Bob replies Congrats"]
+    X["Carol posts something else"]
+    Y["Dave posts something else"]
 ```
+
+Nobody may ever see W2 without W1: the reply cannot appear before the post.
+Carol's and Dave's posts have no arrow between them, so Erin may see Carol
+first while Frank sees Dave first, and both replicas are behaving correctly.
 
 Causal consistency is the strongest model achievable **without
 coordination** — replicas can keep accepting writes during partitions and
-still honor it (tracking causality with vector-clock-style metadata, as
-chapter 5 promised). That makes it the sweet spot for geo-replicated and
-offline-capable systems.
+still honor it (tracking causality with the vector-clock-style metadata of
+[Logical & Vector Clocks](#/logical-clocks)). That makes it the sweet spot
+for geo-replicated and offline-capable systems.
 
 ### Client-centric session guarantees
 
 Four smaller promises, often offered à la carte, that fix the replication-lag
-anomalies you've already met:
+anomalies you already met in [Replication](#/replication):
 
 | Guarantee | The promise | Kills which anomaly |
 |---|---|---|
@@ -114,20 +123,27 @@ eventually converge to the same value.* It says nothing about what reads
 return meanwhile — stale, regressing, out-of-order: all allowed.
 
 It's not as useless as it sounds: with the session guarantees above layered
-on, plus convergent conflict handling (LWW with its known dangers, or CRDTs
-done right), eventual consistency powers DNS, CDNs, shopping carts, social
-feeds — workloads where availability and latency outrank momentary
-precision. The key engineering question is never "is it eventually
-consistent?" but "**what anomalies exactly can my users observe, and do I
-have a story for each?**"
+on, plus convergent conflict handling (LWW with its known dangers, or
+[CRDTs](#/crdts-and-gossip) done right), eventual consistency powers DNS,
+CDNs, shopping carts, social feeds — workloads where availability and
+latency outrank momentary precision. The key engineering question is never
+"is it eventually consistent?" but "**what anomalies exactly can my users
+observe, and do I have a story for each?**"
 
-```text
-  stronger ▲  linearizable        "one copy, real-time"     coordination per op
-           │  sequential          "one agreed order"
-           │  causal              "arrows respected"        ← strongest without
-           │  session guarantees  "I make sense to myself"    coordination
-  weaker   ▼  eventual            "converges someday"       always available
+Read the ladder downward and each rung is a specific promise being dropped
+in exchange for less coordination:
+
+```mermaid
+graph TD
+    LIN["linearizable - one copy, real time"] -->|"drop real-time ordering"| SEQ["sequential - one agreed order"]
+    SEQ -->|"drop order between unrelated ops"| CAU["causal - arrows respected"]
+    CAU -->|"narrow the promise to one session"| SESS["session guarantees"]
+    SESS -->|"promise only convergence"| EV["eventual - converges someday"]
 ```
+
+The important boundary is between sequential and causal: everything from
+causal down can be served during a network partition, everything above it
+cannot.
 
 ## The CAP theorem: what it actually says
 
@@ -141,24 +157,23 @@ Formally (Gilbert & Lynch, 2002): a system cannot simultaneously provide
   response,
 - **P** — correct behavior despite arbitrary message loss between nodes.
 
-The honest reading: **partitions are not a choice.** Networks *will*
-partition; P is reality, not a menu item. The actual decision arrives only
-*during* a partition:
+The honest reading: **partitions are not a choice.** [Networks *will*
+partition](#/failure-models); P is reality, not a menu item. The actual
+decision arrives only *during* a partition, and there are exactly two
+branches:
 
-```text
-            ── partition happens ──
-                       │
-        ┌──────────────┴──────────────┐
-        ▼                             ▼
-   choose C (CP):                choose A (AP):
-   minority side refuses         every node keeps answering
-   reads/writes — errors/        — sides diverge; reconcile
-   timeouts for some users       later (conflicts!)
+```mermaid
+graph TD
+    P["partition happens - not a menu item"] --> CP["choose C - the CP branch"]
+    P --> AP["choose A - the AP branch"]
+    CP --> CP2["minority side returns errors<br/>consistent, partly unavailable"]
+    AP --> AP2["every node keeps answering<br/>sides diverge, reconcile later"]
 ```
 
-- A **CP** system (etcd, ZooKeeper, Spanner) keeps the single-copy illusion:
-  the side of the partition without a quorum returns errors. Consistent,
-  partially unavailable.
+- A **CP** system (etcd, ZooKeeper, Spanner — all in [Real-World
+  Architectures](#/real-world-architectures)) keeps the single-copy
+  illusion: the side of the partition without a quorum returns errors.
+  Consistent, partially unavailable.
 - An **AP** system (Dynamo-style stores, DNS) answers everywhere, accepting
   divergence and conflict resolution after healing. Available, not
   linearizable.
@@ -180,7 +195,7 @@ is why systems offer relaxed reads (followers, bounded staleness) as a
 | System | If partitioned | Else | Reading |
 |---|---|---|---|
 | etcd / ZooKeeper | C | C | correctness first, always |
-| Spanner | C | C (pays TrueTime waits) | consistency with engineered latency |
+| Spanner | C | C (pays [TrueTime](#/time-and-clocks) waits) | consistency with engineered latency |
 | Cassandra (typical) | A | L | availability and speed |
 | MongoDB (defaults) | C-ish | C | leader-based, consistent-leaning |
 
@@ -210,8 +225,8 @@ per query. Strong where it matters, cheap where it doesn't.
 - **Causal** is the strongest model that stays available under partitions;
   the four **session guarantees** are its cheap, per-user cousins that fix
   lag anomalies.
-- **CAP, properly:** partitions happen; during one you choose consistent-
-  but-refusing (CP) or available-but-diverging (AP). **PACELC** adds the
+- **CAP, properly:** partitions happen; during one you choose
+  consistent-but-refusing (CP) or available-but-diverging (AP). **PACELC** adds the
   everyday trade: latency vs consistency even without partitions.
 - Real systems mix models per operation. The professional question is
   always: *which anomalies can occur, and who absorbs them?*

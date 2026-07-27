@@ -85,7 +85,9 @@ const COURSE_META = {
   searchKey: "ds-search-index-v1",        /* localStorage: cached search index */
   name:      "Distributed Systems",
   homeTitle: "Distributed Systems — A Guided Course",
-  heroTitle: "Distributed Systems,<br>from first principles",
+  /* No hard <br>: course.css sets `text-wrap: balance` on .hero h1, which
+     breaks the line where the width actually wants it. */
+  heroTitle: "Distributed Systems, from first principles",
   heroLede:  `One machine is simple. Two machines connected by a wire is a
               different universe — one where messages vanish, clocks disagree
               and half your system can die while the other half keeps going.

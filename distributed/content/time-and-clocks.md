@@ -23,6 +23,23 @@ frequency. The OS counts ticks to maintain two distinct clocks:
   **never goes backward**. Meaningless across machines, perfect for
   measuring durations on one machine.
 
+Two clocks, one crystal, and only one of them is safe for arithmetic:
+
+```mermaid
+graph TD
+    X["quartz oscillator - drifts tens of ppm"] --> W["CLOCK_REALTIME<br/>settable, can jump backward"]
+    X --> M["CLOCK_MONOTONIC<br/>never goes backward"]
+    NTP["NTP correction"] -->|"small offset - slew"| W
+    NTP -->|"offset past ~128 ms - step"| W
+    W --> H["display and human timestamps"]
+    M --> D["durations and timeouts"]
+```
+
+How the kernel actually counts those ticks — jiffies, hrtimers, the tickless
+idle path and the two clock IDs above — is [Timers & Time](../#/timers) in
+the Linux course; everything below assumes you accept that the number it
+hands you is local and imperfect.
+
 Quartz is cheap and imperfect: typical **drift** is in the tens of parts per
 million — tens of microseconds gained or lost per second, up to a couple of
 seconds per day. Temperature changes make it worse. Left alone for a month, a
@@ -78,7 +95,10 @@ many hours of slightly-slow ticking.
 
 This one is subtler and more damaging. Suppose two clients write to two
 replicas, and replicas resolve conflicts with **last-write-wins (LWW)** by
-comparing timestamps:
+comparing timestamps — the default conflict rule in multi-leader and
+leaderless [replication](#/replication), and a legitimate
+[CRDT](#/crdts-and-gossip) besides. The aligned columns below are the whole
+argument: real order on the left, believed order on the right.
 
 ```text
   real order of events          what the timestamps say
@@ -104,24 +124,32 @@ the root bug; LWW is just its most famous victim.
 
 ## Bug class #3: trusting the clock for exclusivity
 
-From the failure-detection chapter, recall **leases**: "I am the leader
-until 10:00:30." A lease is a *clock-based* promise, and it inherits every
-clock problem — plus one more: **pauses**.
+From [Failure Models & Detection](#/failure-models), recall **leases**: "I
+am the leader until 10:00:30." A lease is a *clock-based* promise, and it
+inherits every clock problem — plus one more: **pauses**. Watch the
+timeline; nothing here is a bug in anyone's code:
 
-```text
-node A (leader, lease until 10:00:30):
-  10:00:28  starts a stop-the-world GC pause…
-  ── while frozen, the lease expires; B becomes leader ──
-  10:00:41  …wakes up, believes it's 10:00:28-ish,
-            keeps acting as leader.   TWO leaders.
+```mermaid
+sequenceDiagram
+    participant A as node A (leader)
+    participant S as storage
+    participant B as node B
+    A->>S: write, lease valid until 10:00:30
+    Note over A: 10:00:28 stop-the-world GC pause
+    Note over B: lease expires, B takes leadership
+    B->>S: write as the new leader
+    Note over A: 10:00:41 wakes, still believes it is 10:00:28
+    A->>S: write as leader - now there are TWO
 ```
 
 A process cannot feel time passing while paused (GC, VM migration, swap,
 SIGSTOP). Checking the clock *before* an operation doesn't help — the pause
-can land between the check and the act. This is precisely why the previous
-chapter introduced **fencing tokens**: the storage layer rejects the stale
-leader's writes by token number, with no clock involved. Safety must come
-from something other than the clock.
+can land between the check and the act. This is precisely why [Failure
+Models & Detection](#/failure-models) introduced **fencing tokens**: the
+storage layer rejects the stale leader's writes by token number, with no
+clock involved. Safety must come from something other than the clock — and
+[Raft](#/raft) will make that token, its *term*, a mandatory field on every
+single message.
 
 ## Doing it right: bounded uncertainty (Spanner's TrueTime)
 
@@ -135,12 +163,13 @@ The elegant trick: to claim event 1 happened before event 2, Spanner ensures
 their intervals don't overlap — when needed, it simply **waits out the
 uncertainty** (if the interval is 7 ms wide, wait 7 ms) before committing.
 The clock error doesn't vanish; it becomes a *known, bounded* quantity you
-can engineer around. We'll see the full picture in the final module.
+can engineer around. [Real-World Architectures](#/real-world-architectures)
+shows the full picture, TrueTime sitting under Spanner's 2PC.
 
 The other path — used by most systems, which lack atomic clocks — is to
 stop relying on physical time for ordering altogether and derive order from
-**causality**: which events *could have influenced* which. That is logical
-clocks, the subject of the next chapter.
+**causality**: which events *could have influenced* which. That is [Logical
+& Vector Clocks](#/logical-clocks), next.
 
 ## Key takeaways
 

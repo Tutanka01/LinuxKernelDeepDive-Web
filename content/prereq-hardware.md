@@ -66,7 +66,9 @@ The **instruction pointer** deserves a special stare. It is just a register
 holding an address, and after each instruction the CPU normally bumps it forward
 to the next one. That single register *is* "where the program is right now."
 Change it — which a jump instruction does — and the CPU is now executing
-somewhere else. When the kernel switches from one task to another
+somewhere else.
+
+When the kernel switches from one task to another
 ([CPU Scheduling](#/scheduling)), the deepest thing it does is save one task's
 registers (including the instruction pointer) and load another's. The CPU
 resumes and has no idea anything happened — it just keeps fetching from wherever
@@ -173,11 +175,12 @@ decimal." So `0x10` is **not** ten — it's `1×16 + 0 = 16`. And `0xFF` is
 Why does everyone use hex instead of plain decimal? Because **one hex digit maps
 exactly to four bits** (four bits can express 0–15, precisely one hex digit's
 range). Four bits is called a **nibble**, and two nibbles — two hex digits —
-make exactly one byte (8 bits, 0–255, `0x00` to `0xFF`). This clean alignment is
-the whole reason hex won: memory is organized in bytes, and hex lets you read
-bytes off at a glance. `0xFF` is one byte, all bits set. `0xFFFF` is two bytes.
-Decimal has no such tidy relationship to bytes, so it obscures exactly what
-you're trying to see.
+make exactly one byte (8 bits, 0–255, `0x00` to `0xFF`).
+
+This clean alignment is the whole reason hex won: memory is organized in bytes,
+and hex lets you read bytes off at a glance. `0xFF` is one byte, all bits set.
+`0xFFFF` is two bytes. Decimal has no such tidy relationship to bytes, so it
+obscures exactly what you're trying to see.
 
 To read a longer value like an address, work in nibbles. Books often group the
 digits with underscores or spaces for readability:
@@ -213,24 +216,29 @@ that's deliberate. There are two different "kilo"s in computing:
 Memory hardware is organized in powers of two, so a "4 KiB page" is exactly 4,096
 bytes — a round number in hex (`0x1000`), a slightly odd one in decimal. This
 book uses the **-bi- units (KiB, MiB, GiB)** whenever it means the binary value,
-which for memory is almost always. Disk and network vendors, annoyingly, tend to
-use the decimal units (a "1 TB" disk is 10¹² bytes, which is why it shows up as
-only ~931 GiB in your file manager). Same word, ~7% different number, endless
-confusion. The `-i-` makes it unambiguous.
+which for memory is almost always.
+
+Disk and network vendors, annoyingly, tend to use the decimal units (a "1 TB"
+disk is 10¹² bytes, which is why it shows up as only ~931 GiB in your file
+manager). Same word, ~7% different number, endless confusion. The `-i-` makes it
+unambiguous.
 
 ### What "64-bit" means
 
 Your machine is "64-bit." Concretely, that means registers are 64 bits wide and,
 crucially, **addresses are 64-bit numbers.** A 64-bit address can in principle
-name 2⁶⁴ bytes — 16 *exbibytes*, an absurd amount no machine has. So current
-CPUs don't wire up all 64 bits: x86-64 typically uses 48 bits of address (256
-TiB), and the top bits are required to be a sign-extension of bit 47 (the
-"canonical address" rule that creates the gap in the address-space diagram you
-saw in [What Is Linux, Really?](#/what-is-linux)). The important takeaways: a
-pointer is a 64-bit number, the address space is vastly larger than your actual
-RAM, and — as the next section on the MMU hints and [Virtual Memory](#/memory)
-develops fully — the addresses a program uses are *virtual*, translated to
-physical RAM slots by hardware under the kernel's control.
+name 2⁶⁴ bytes — 16 *exbibytes*, an absurd amount no machine has.
+
+So current CPUs don't wire up all 64 bits: x86-64 typically uses 48 bits of
+address (256 TiB), and the top bits are required to be a sign-extension of bit
+47 (the "canonical address" rule that creates the gap in the address-space
+diagram you saw in [What Is Linux, Really?](#/what-is-linux)).
+
+The important takeaways: a pointer is a 64-bit number, the address space is
+vastly larger than your actual RAM, and — as the next section on the MMU hints
+and [Virtual Memory](#/memory) develops fully — the addresses a program uses are
+*virtual*, translated to physical RAM slots by hardware under the kernel's
+control.
 
 ## The memory hierarchy: five kinds of memory
 
@@ -258,10 +266,12 @@ The **caches** (L1/L2/L3) are the key characters. They're small, fast copies of
 recently-used RAM, kept automatically by the CPU. When the CPU needs a byte, it
 checks L1 first; if it's there (a "cache hit"), great, ~1 ns. If not (a "cache
 miss"), it looks in L2, then L3, then finally trudges out to RAM at ~100 ns —
-roughly **a hundred times slower.** Data moves between levels in fixed chunks
-called **cache lines** (typically 64 bytes), which is why accessing memory in
-sequential, nearby order is far faster than jumping around randomly: one miss
-drags in a whole line, and the next few accesses are then free.
+roughly **a hundred times slower.**
+
+Data moves between levels in fixed chunks called **cache lines** (typically 64
+bytes), which is why accessing memory in sequential, nearby order is far faster
+than jumping around randomly: one miss drags in a whole line, and the next few
+accesses are then free.
 
 ### The "if L1 were 1 second" analogy
 
@@ -323,6 +333,7 @@ memory at the same time.** If core 0 and core 1 both read a counter, both add 1,
 and both write it back, one increment is lost — they raced. Worse, each core has
 its own L1/L2 caches, so they can briefly disagree about what a memory location
 even contains until the hardware's cache-coherency protocol reconciles them.
+
 Coordinating concurrent access to shared memory is one of the hardest problems in
 the kernel, and it has its own chapter: [Kernel Synchronization](#/kernel-sync)
 (locks, atomic operations, memory barriers). Much of why the kernel is structured
@@ -405,16 +416,20 @@ being counted in real time in `/proc/interrupts`.
 
 One honest complication. If a disk has 1 MiB of data ready and the CPU had to
 copy it in, one register-load at a time, through MMIO, the CPU would waste
-enormous effort shuffling bytes. So fast devices use **DMA** (direct memory
-access): the kernel tells the device "put your data at physical address X," and
-the device — via a DMA controller — **writes directly into RAM itself**, without
-the CPU copying anything. When the transfer is done, the device raises an
-interrupt to say "it's in memory, go look." The CPU only sets up the transfer and
-handles the completion; the bulk data movement happens behind its back. DMA is
-why a modern NVMe drive or NIC can move gigabytes per second without pinning the
-CPU. It also means the kernel must be careful about *which* memory a device is
-allowed to scribble into — a theme that returns in [Devices, Drivers &
-Modules](#/devices-modules) and in security discussions of untrusted peripherals.
+enormous effort shuffling bytes.
+
+So fast devices use **DMA** (direct memory access): the kernel tells the device
+"put your data at physical address X," and the device — via a DMA controller —
+**writes directly into RAM itself**, without the CPU copying anything. When the
+transfer is done, the device raises an interrupt to say "it's in memory, go
+look."
+
+The CPU only sets up the transfer and handles the completion; the bulk data
+movement happens behind its back. DMA is why a modern NVMe drive or NIC can move
+gigabytes per second without pinning the CPU. It also means the kernel must be
+careful about *which* memory a device is allowed to scribble into — a theme that
+returns in [Devices, Drivers & Modules](#/devices-modules) and in security
+discussions of untrusted peripherals.
 
 ## Firmware: the code that runs before Linux
 
@@ -428,9 +443,11 @@ Interface; the older PC standard it replaced was called **BIOS**, and people
 still say "BIOS" loosely). Its job is to bring the machine to life enough to
 hand off: initialize RAM and essential hardware, run power-on self-tests, and
 then locate and load a **bootloader** or the kernel itself from disk, and jump
-into it. From that jump onward, the kernel is in charge and firmware steps back
-(though UEFI leaves some runtime services and hardware tables — like ACPI — that
-the kernel goes on to use).
+into it.
+
+From that jump onward, the kernel is in charge and firmware steps back (though
+UEFI leaves some runtime services and hardware tables — like ACPI — that the
+kernel goes on to use).
 
 That's all you need for now: firmware is the pre-Linux code that sets the table
 so the kernel can be loaded and take over. The full sequence — firmware to

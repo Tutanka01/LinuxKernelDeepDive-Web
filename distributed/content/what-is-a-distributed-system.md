@@ -85,11 +85,15 @@ you need servers (and usually data) on three continents.
 ## What makes it genuinely hard
 
 On a single machine, the operating system gives you a wonderfully convenient
-set of lies: a function call always either runs or doesn't; reading memory
-just works; the clock moves forward; if the machine dies, *everything* dies
-together, so you never see half a failure.
+set of lies — the ones [Kernel, User Space &
+Syscalls](../#/kernel-vs-userspace) spends a whole chapter enforcing: a
+function call always either runs or doesn't; reading memory just works; the
+clock moves forward; if the machine dies, *everything* dies together, so you
+never see half a failure.
 
-Distribution takes every one of those guarantees away:
+Distribution takes every one of those guarantees away. The two columns below
+line up the same four promises — call semantics, shared memory, one clock,
+failing as a unit — on a single machine and in a distributed system:
 
 ```text
             single machine                 distributed system
@@ -148,24 +152,22 @@ course shows the consequences of each.
    protocol versions — always.
 
 > The first two fallacies — reliability and latency — cause more production
-> incidents than the other six combined. The next chapter is dedicated
-> entirely to them.
+> incidents than the other six combined. [The Network Is
+> Hostile](#/the-network-is-hostile) is dedicated entirely to them.
 
 ## The mental model to carry forward
 
-Picture every distributed system like this, and you'll rarely go wrong:
+Picture every distributed system like this — two islands of private state
+joined only by an unreliable pipe — and you'll rarely go wrong:
 
-```text
-   ┌─────────┐         messages          ┌─────────┐
-   │ node A  │ ─────────────────────────▶│ node B  │
-   │ state_A │ ◀───────────────────────── │ state_B │
-   │ clock_A │     (delayed, lost,        │ clock_B │
-   └─────────┘      duplicated,           └─────────┘
-        ▲           reordered)                 ▲
-        │                                      │
-        └──── each node knows ONLY its own ────┘
-              state + messages received
+```mermaid
+graph LR
+    A["node A (state_A, clock_A)"] -->|"delayed, lost, duplicated"| B["node B (state_B, clock_B)"]
+    B -->|"reordered replies"| A
 ```
+
+Each box owns its state and its clock; neither can read the other's, only
+receive claims about it.
 
 - Nodes are honest but ignorant: they act correctly on what they know, and
   what they know is always potentially out of date.
@@ -181,15 +183,35 @@ The course follows the problems, not the technologies — each chapter exists
 because the previous one created a problem that needs solving:
 
 1. **Foundations** (you are here): the network and failures — the raw,
-   hostile reality.
+   hostile reality. [The Network Is Hostile](#/the-network-is-hostile) takes
+   the messages, [Failure Models & Detection](#/failure-models) the nodes.
 2. **Time & order:** without a shared clock, how can we even say one event
-   happened "before" another?
-3. **Data at scale:** copying data to many nodes (replication), splitting it
-   across nodes (partitioning), and what "consistent" even means.
-4. **Coordination:** making nodes *agree* — consensus, Raft, distributed
-   transactions. The intellectual summit of the field.
-5. **Advanced systems:** designs that avoid coordination altogether (CRDTs),
-   and how real systems — Kafka, Spanner, Kubernetes — assemble all of it.
+   happened "before" another? [Time, Clocks & Why They
+   Lie](#/time-and-clocks) shows why you can't, and [Logical & Vector
+   Clocks](#/logical-clocks) shows what to use instead.
+3. **Data at scale:** copying data to many nodes
+   ([Replication](#/replication)), splitting it across nodes ([Partitioning
+   & Sharding](#/partitioning)), and what "consistent" even means
+   ([Consistency Models & CAP](#/consistency-models)).
+4. **Coordination:** making nodes *agree* — [The Consensus
+   Problem](#/consensus), [Raft, Step by Step](#/raft), [Distributed
+   Transactions](#/distributed-transactions). The intellectual summit of the
+   field.
+5. **Advanced systems:** designs that avoid coordination altogether ([CRDTs,
+   Gossip & Anti-Entropy](#/crdts-and-gossip)), and how real systems —
+   Kafka, Spanner, Kubernetes — assemble all of it ([Real-World
+   Architectures](#/real-world-architectures)).
+
+The order isn't editorial taste: each module hands the next one a problem it
+provably cannot solve with its own tools.
+
+```mermaid
+graph LR
+    M1["1 Foundations"] -->|"no shared clock"| M2["2 Time & order"]
+    M2 -->|"one copy is not enough"| M3["3 Data at scale"]
+    M3 -->|"copies disagree"| M4["4 Coordination"]
+    M4 -->|"agreement costs latency"| M5["5 Advanced systems"]
+```
 
 ## Key takeaways
 

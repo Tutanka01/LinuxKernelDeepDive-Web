@@ -129,13 +129,16 @@ The chain on a typical distro: firmware verifies **shim** (signed by
 Microsoft's UEFI CA, so it boots everywhere), shim verifies **GRUB** using the
 distro's certificate embedded in shim, GRUB verifies the **kernel** (signature
 appended to the vmlinuz PE binary), and the kernel then verifies **modules**
-against keys in its keyring. Users can enroll their own **MOK** (Machine Owner
-Key) with `mokutil` to sign custom kernels or out-of-tree modules. If any link
-fails, boot halts — this is why unsigned kernels/modules won't load under
-Secure Boot, and why many distros also enable kernel **lockdown** mode when
-Secure Boot is on (lockdown blocks the interfaces that could patch a running
-kernel from user space, such as `/dev/mem` and unsigned module loading). The
-deeper story — measured boot, the TPM, and IMA — is in
+against keys in its keyring.
+
+Users can enroll their own **MOK** (Machine Owner Key) with `mokutil` to sign
+custom kernels or out-of-tree modules. If any link fails, boot halts — this is
+why unsigned kernels/modules won't load under Secure Boot, and why many
+distros also enable kernel **lockdown** mode when Secure Boot is on (lockdown
+blocks the interfaces that could patch a running kernel from user space, such
+as `/dev/mem` and unsigned module loading).
+
+The deeper story — measured boot, the TPM, and IMA — is in
 [Trusted Computing: Secure Boot, TPM & IMA](#/trusted-computing).
 
 ## Stage 2 — Bootloader (GRUB)
@@ -328,12 +331,15 @@ Meanwhile the kernel is running on **page tables**. On x86-64 the very first
 ones are in [swapper_pg_dir](https://elixir.bootlin.com/linux/v6.12/C/ident/swapper_pg_dir),
 the statically allocated top-level page table associated with
 [init_mm](https://elixir.bootlin.com/linux/v6.12/C/ident/init_mm), the address
-space every kernel thread borrows. The default page size on x86-64 is **4 KiB**
-(with 2 MiB and 1 GiB "huge" pages available); **arm64** can be built for 4, 16,
-or 64 KiB base pages, which changes the whole page-table geometry. KASLR adds
-entropy to where the kernel and its `physmap` (the direct map of all RAM) land
-— on the order of 9–30 bits depending on the region — so an attacker can't
-assume a fixed address for kernel structures.
+space every kernel thread borrows.
+
+The default page size on x86-64 is **4 KiB** (with 2 MiB and 1 GiB "huge"
+pages available); **arm64** can be built for 4, 16, or 64 KiB base pages,
+which changes the whole page-table geometry.
+
+KASLR adds entropy to where the kernel and its `physmap` (the direct map of
+all RAM) land — on the order of 9–30 bits depending on the region — so an
+attacker can't assume a fixed address for kernel structures.
 
 ### SMP bring-up
 
@@ -349,19 +355,23 @@ Historically this was strictly serial — CPU 0 woke CPU 1, waited for it to
 report in, woke CPU 2, and so on — which cost real time on big sockets. **Since
 kernel 6.5, x86 brings CPUs up in parallel**, overlapping the slow per-CPU
 init across cores and cutting this phase from seconds to tens of milliseconds
-on machines with hundreds of threads. The whole dance is driven by the CPU
-hotplug state machine (the same mechanism `echo 0 > /sys/devices/system/cpu/
-cpu3/online` uses at runtime), stepping each CPU through a fixed ladder of
-`CPUHP_*` states.
+on machines with hundreds of threads.
+
+The whole dance is driven by the CPU hotplug state machine (the same
+mechanism `echo 0 > /sys/devices/system/cpu/cpu3/online` uses at runtime),
+stepping each CPU through a fixed ladder of `CPUHP_*` states.
 
 ### Device discovery
 
 With CPUs, memory, interrupts, and timers up, the kernel walks the hardware.
 Drivers register **ID tables** (for PCI, vendor/device ID pairs); the bus core
 enumerates each device on PCIe/USB and, when an ID matches, calls the driver's
-`probe()` function. `/sys` entries appear as devices are found; `/dev` nodes
-follow once **udev** runs in user space and reacts to the uevents the kernel
-emits. A driver that isn't ready — because a resource it depends on hasn't been
+`probe()` function.
+
+`/sys` entries appear as devices are found; `/dev` nodes follow once **udev**
+runs in user space and reacts to the uevents the kernel emits.
+
+A driver that isn't ready — because a resource it depends on hasn't been
 probed yet — can return `-EPROBE_DEFER` to be retried later instead of failing
 or blocking boot. The full model is in
 [Devices, Drivers & Modules](#/devices-modules).
@@ -370,12 +380,14 @@ or blocking boot. The full model is in
 
 The initramfs `/init` does the heavy lifting: loads needed modules (nvme, ext4,
 dm-crypt…), assembles [storage stacks](#/storage-stack) (md-raid, LVM, LUKS
-unlock), mounts the real root, and then **switches root** onto it. The switch
-is not a normal `mount` — the initramfs *is* the current root, so it uses a
-special path: it moves the new root's mount to `/`, moves `/proc`, `/sys`,
-`/dev` along with it, then deletes every file of the old initramfs to free the
-RAM (a `rootfs`/ramfs instance can't be unmounted, so the tool
+unlock), mounts the real root, and then **switches root** onto it.
+
+The switch is not a normal `mount` — the initramfs *is* the current root, so
+it uses a special path: it moves the new root's mount to `/`, moves `/proc`,
+`/sys`, `/dev` along with it, then deletes every file of the old initramfs to
+free the RAM (a `rootfs`/ramfs instance can't be unmounted, so the tool
 `switch_root` empties it instead) and finally `execve`s the real `/sbin/init`.
+
 From this moment the kernel is largely *reactive*: most kernel code executes
 when interrupts fire or processes make [syscalls](#/kernel-vs-userspace).
 
@@ -403,9 +415,11 @@ the kernel's per-task control block. Even at this stage the fields that define
 a task are already meaningful: `pid` (its identifier), `comm` (the short name
 you see in brackets in `ps`), `flags` (with `PF_KTHREAD` set for the two kernel
 threads, marking them as having no user-space address space), and `stack` (its
-kernel stack, typically 16 KiB on x86-64). Kernel threads set their `mm`
-pointer to `NULL` and borrow `init_mm`'s page tables; that's the concrete
-difference between a kernel thread and a user process.
+kernel stack, typically 16 KiB on x86-64).
+
+Kernel threads set their `mm` pointer to `NULL` and borrow `init_mm`'s page
+tables; that's the concrete difference between a kernel thread and a user
+process.
 
 ### Initcalls: how "everything else" gets initialized
 
@@ -414,10 +428,12 @@ and driver init functions. The kernel doesn't call them by name; each is
 registered at compile time into one of eight **initcall levels** (early,
 core, postcore, arch, subsys, fs, device, late), and the kernel simply walks
 the levels in order. A driver's `module_init()` becomes a level-6 ("device")
-initcall when built in. This is also where boot time hides: boot with
-`initcall_debug` on the kernel command line and dmesg will print the latency
-of every single initcall — the classic way to find the driver that costs you
-400 ms probing hardware you don't have.
+initcall when built in.
+
+This is also where boot time hides: boot with `initcall_debug` on the kernel
+command line and dmesg will print the latency of every single initcall — the
+classic way to find the driver that costs you 400 ms probing hardware you
+don't have.
 
 ```mermaid
 graph TD
@@ -504,10 +520,12 @@ opens a service's listening socket itself and hands it over on start, so
 dependents can connect before the service has even finished starting —
 connections just queue in the kernel's socket backlog. **Bus activation**: a
 D-Bus service is started on first message. Both break dependency chains that a
-sequential init would have to wait out. systemd also runs **generators** very
-early — small programs that synthesize units on the fly, for example turning
-`/etc/fstab` lines and `root=`/`rd.*` kernel-command-line options into mount
-and target units before the first real unit starts.
+sequential init would have to wait out.
+
+systemd also runs **generators** very early — small programs that synthesize
+units on the fly, for example turning `/etc/fstab` lines and `root=`/`rd.*`
+kernel-command-line options into mount and target units before the first real
+unit starts.
 
 If you booted from a dracut initramfs, there were actually *two* systemd
 instances: a minimal one inside the initramfs that reaches `initrd.target` and
@@ -558,15 +576,19 @@ For a server: systemd starts `agetty` on a tty. `getty` opens the terminal,
 prints `/etc/issue`, and runs `login`. `login` authenticates you through
 **PAM** (Pluggable Authentication Modules — a *stack* of modules configured in
 `/etc/pam.d/login`, evaluated in four groups: `auth`, `account`, `password`,
-`session`). In the common case `pam_unix` checks your password hash against
-`/etc/shadow` (yescrypt or SHA-512 by default on current distros), then
-`pam_systemd` in the `session` group registers a **session** with
-`systemd-logind` — which is what creates `/run/user/<uid>`, sets `XDG_RUNTIME_DIR`,
-tracks your **seat** (the bundle of a screen, keyboard, and mouse), and starts
-your `user@<uid>.service` tree. Then `login` sets your UID/GID/home directory
-and finally `exec`s the shell listed in `/etc/passwd`. The kernel doesn't know
-or care that you're "logged in"; it just knows the process tree changed and
-some credentials (the task's UID/GID and its supplementary groups) got set.
+`session`).
+
+In the common case `pam_unix` checks your password hash against `/etc/shadow`
+(yescrypt or SHA-512 by default on current distros), then `pam_systemd` in the
+`session` group registers a **session** with `systemd-logind` — which is what
+creates `/run/user/<uid>`, sets `XDG_RUNTIME_DIR`, tracks your **seat** (the
+bundle of a screen, keyboard, and mouse), and starts your
+`user@<uid>.service` tree.
+
+Then `login` sets your UID/GID/home directory and finally `exec`s the shell
+listed in `/etc/passwd`. The kernel doesn't know or care that you're "logged
+in"; it just knows the process tree changed and some credentials (the task's
+UID/GID and its supplementary groups) got set.
 
 For a desktop: a **display manager** (GDM, SDDM) does the same dance
 graphically: it owns the GPU/input, runs a login screen, authenticates via

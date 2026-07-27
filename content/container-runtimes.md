@@ -152,11 +152,12 @@ The runtime spec also defines a **container lifecycle** — `creating` →
 (`createRuntime`, `createContainer`, `startContainer`, `poststart`,
 `poststop`). This is not academic: it is how `docker run` splits into
 `runc create` (build everything, block just before exec) and `runc start`
-(release the exec), and how higher layers inject networking. containerd's CNI
-plugin, for instance, runs in the gap between create and start, wiring the veth
-into the already-created network namespace before the payload's first
-instruction. `runc create` + `runc start` is what the shim actually invokes;
-`runc run` is a convenience that fuses the two.
+(release the exec), and how higher layers inject networking.
+
+containerd's CNI plugin, for instance, runs in the gap between create and
+start, wiring the veth into the already-created network namespace before the
+payload's first instruction. `runc create` + `runc start` is what the shim
+actually invokes; `runc run` is a convenience that fuses the two.
 
 **crun**, the C rewrite, does the identical dance but starts a container in
 single-digit milliseconds versus runc's tens of milliseconds — it avoids the Go
@@ -284,10 +285,11 @@ the whole dockerd → containerd → runc stack inside a single user namespace.
 Rootless is not free: without `CAP_NET_ADMIN` on the host you lose real veth
 networking and fall back to a user-space relay (measurable throughput cost on
 high-bandwidth flows), and some workloads that expect to `mount` or tweak
-sysctls need extra configuration. The architectural lesson still matters more
-than the brand: *the daemon was never
-necessary* — the kernel has no concept of a "container daemon", only of the
-process that called `clone()`.
+sysctls need extra configuration.
+
+The architectural lesson still matters more than the brand: *the daemon was
+never necessary* — the kernel has no concept of a "container daemon", only of
+the process that called `clone()`.
 
 **Container link:** rootless containers are the sharpest demonstration of the
 [user namespace](#/namespaces) from that chapter — "root inside, nobody

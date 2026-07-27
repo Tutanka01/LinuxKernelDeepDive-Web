@@ -112,11 +112,13 @@ echo 8041 | sudo tee /proc/sys/kernel/ns_last_pid   # next fork wants 8042
 It works, but look at what it assumes: that **no other process forks in this
 namespace between the write and your fork**. On a busy host that window is a
 live race — some daemon forks, steals 8042, and your restore fails or lands the
-task on a different number. CRIU could reduce exposure by controlling the PID
-namespace and the actors inside it, but there is no transaction lock on
-`ns_last_pid` that excludes an unrelated fork. The mechanism remains advisory.
-It also needs `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE` and a writable
-`procfs`, and sets only one PID-namespace level at a time.
+task on a different number.
+
+CRIU could reduce exposure by controlling the PID namespace and the actors
+inside it, but there is no transaction lock on `ns_last_pid` that excludes an
+unrelated fork. The mechanism remains advisory. It also needs `CAP_SYS_ADMIN`
+or `CAP_CHECKPOINT_RESTORE` and a writable `procfs`, and sets only one
+PID-namespace level at a time.
 
 ### The kernel grows a door: `clone3()` with `set_tid`
 
@@ -149,12 +151,13 @@ struct clone_args {
 `set_tid` points to an array of PIDs, **innermost namespace first**:
 `set_tid[0]` is the PID in the deepest namespace the task lives in, `set_tid[1]`
 its PID one level up, and so on out to the init namespace, with `set_tid_size`
-saying how many levels you are pinning. That single field solves two problems at
-once: it kills the race (the kernel either grants the exact number or returns
-`-EEXIST`, nothing in between), and it restores the **whole layered PID** of a
-task nested several PID namespaces deep — the `numbers[]` array from the
-[Namespaces](#/namespaces) chapter — in one call, which `ns_last_pid` could
-never do.
+saying how many levels you are pinning.
+
+That single field solves two problems at once: it kills the race (the kernel
+either grants the exact number or returns `-EEXIST`, nothing in between), and
+it restores the **whole layered PID** of a task nested several PID namespaces
+deep — the `numbers[]` array from the [Namespaces](#/namespaces) chapter —
+in one call, which `ns_last_pid` could never do.
 
 The capability story is itself a C/R artifact: `set_tid` requires
 `CAP_SYS_ADMIN`, or, since Linux 5.9, the narrower **`CAP_CHECKPOINT_RESTORE`**,
@@ -208,8 +211,10 @@ private / unbindable), bind mounts that alias one subtree into several places,
 and mounts whose *source* lives outside the container entirely. CRIU walks the
 dumped mount tree in dependency order, recreates each mount, and reestablishes
 propagation last (setting propagation too early would make intermediate mounts
-leak into peer groups). Mounts it cannot recreate on its own — a host bind of
-`/etc/resolv.conf`, a volume from the orchestrator, a device node — must be
+leak into peer groups).
+
+Mounts it cannot recreate on its own — a host bind of `/etc/resolv.conf`, a
+volume from the orchestrator, a device node — must be
 declared by the operator with **`--external`** at both dump and restore, telling
 CRIU "don't try to recreate this; I will provide an equivalent, splice it in
 here." External mounts are the seam where a self-contained checkpoint meets a
@@ -239,9 +244,11 @@ acyclic — an epoll watch depends on its target fd — but the graph as a whole
 not guaranteed to be a DAG. Connected Unix sockets and descriptors carried in
 `SCM_RIGHTS` messages can create mutual dependencies. (The kernel rejects an
 epoll nesting loop, so epoll contributes ordering edges but is not the cycle
-example.) CRIU therefore combines ordering of acyclic portions with staged
-creation: create an object or endpoint first, publish it through the fdstore,
-then connect it or attach its dependent references in a later pass.
+example.)
+
+CRIU therefore combines ordering of acyclic portions with staged creation:
+create an object or endpoint first, publish it through the fdstore, then
+connect it or attach its dependent references in a later pass.
 
 - An **`epoll`** fd is meaningless until the fds it watches exist — so those
   come first, then the `epoll` fd is created and `epoll_ctl()`'d to watch them.
@@ -265,14 +272,17 @@ The shared identity would be lost.
 CRIU rebuilds sharing the way the kernel would: **one task opens the file, then
 passes the fd to every task that must share it, over a helper `unix` socket
 using `SCM_RIGHTS`** — reconstructing, deliberately, the exact mechanism that
-created the sharing in the first place. This machinery is the **service fd /
-fdstore**: a set of internal file descriptors and a small socket-backed store
-that CRIU keeps at a high, reserved fd range (out of the way of the target's
-own numbers) so restoring tasks can stash a `struct file` in one task and fetch
-it in another. Regular files with independent descriptions are simpler: reopen
-the surviving path, then `lseek()` to the saved offset. An unlinked file has no
-portable path to reopen: `/proc/<pid>/map_files` helps CRIU identify and access
-the live mapping on the **dump** side, but restore needs a different strategy,
+created the sharing in the first place.
+
+This machinery is the **service fd / fdstore**: a set of internal file
+descriptors and a small socket-backed store that CRIU keeps at a high,
+reserved fd range (out of the way of the target's own numbers) so restoring
+tasks can stash a `struct file` in one task and fetch it in another.
+
+Regular files with independent descriptions are simpler: reopen the surviving
+path, then `lseek()` to the saved offset. An unlinked file has no portable
+path to reopen: `/proc/<pid>/map_files` helps CRIU identify and access the
+live mapping on the **dump** side, but restore needs a different strategy,
 such as a serialized **ghost file** or `--link-remap`, to reconstruct an inode
 before reopening it.
 
@@ -302,12 +312,13 @@ The address space is restored in two movements.
 First, **the VMAs**: CRIU reads the memory-map image (`mm-<pid>.img` plus the
 `vma` entries) and recreates each region with `mmap()` at its original address
 and length, with the original protections and flags — anonymous private,
-file-backed, shared, growsdown stack, and so on. File-backed mappings are
-re-`mmap()`'d **from their backing file** when it still exists; a deleted
-backing requires the ghost/link-remap handling above. The goal is the same
-inode contents and mapping semantics, not reuse of the source host's
-`map_files` pseudo-link. Only the *private, dirtied* pages of an otherwise
-reconstructable file mapping need to be saved separately.
+file-backed, shared, growsdown stack, and so on.
+
+File-backed mappings are re-`mmap()`'d **from their backing file** when it
+still exists; a deleted backing requires the ghost/link-remap handling above.
+The goal is the same inode contents and mapping semantics, not reuse of the
+source host's `map_files` pseudo-link. Only the *private, dirtied* pages of an
+otherwise reconstructable file mapping need to be saved separately.
 
 Second, **the page contents**: anonymous pages were dumped into `pages-<id>.img`
 with an index (`pagemap-<pid>.img`) recording which virtual addresses each blob
@@ -348,12 +359,15 @@ instruction fetch faults and the task dies.
 
 CRIU's answer is a small, self-contained, **position-independent (PIE) blob**:
 `restorer.c`, compiled to depend on *nothing* — no libc, no global offset
-table, no external mappings, only raw syscalls. In stage 4, CRIU copies this
-blob into a memory region carefully chosen to sit in an address range the
-**target does not use**, sets up a tiny private stack for it there, and *jumps
-into it*. From that instant, execution is no longer running "in" CRIU — it runs
-in a scrap of code squatting in a gap of the target's future address space, and
-it is free to demolish everything else.
+table, no external mappings, only raw syscalls.
+
+In stage 4, CRIU copies this blob into a memory region carefully chosen to sit
+in an address range the **target does not use**, sets up a tiny private stack
+for it there, and *jumps into it*.
+
+From that instant, execution is no longer running "in" CRIU — it runs in a
+scrap of code squatting in a gap of the target's future address space, and it
+is free to demolish everything else.
 
 ```mermaid
 sequenceDiagram
@@ -385,15 +399,18 @@ containing the dumped register set — the exact `RIP`, `RSP`, `RAX`, everything
 onto the stack and executes `rt_sigreturn`. The kernel, believing it is
 returning from a signal handler, loads all of it at once and drops the task into
 userspace at precisely the saved instruction pointer, with precisely the saved
-registers. There is no "final instruction" of CRIU that runs in the target —
-the transition is a single syscall that never returns to the caller, because
-the caller's entire world has been replaced. This does **not** continue an
-arbitrary kernel call frame halfway through `read()`: CRIU saves a
-ptrace-visible userspace register context and the restart information it knows
-how to reproduce, then arranges for supported interrupted syscalls to be
-re-entered or restarted under Linux's normal restart rules. From the
-application's supported userspace semantics, execution continues from the
-checkpoint boundary.
+registers.
+
+There is no "final instruction" of CRIU that runs in the target — the
+transition is a single syscall that never returns to the caller, because the
+caller's entire world has been replaced.
+
+This does **not** continue an arbitrary kernel call frame halfway through
+`read()`: CRIU saves a ptrace-visible userspace register context and the
+restart information it knows how to reproduce, then arranges for supported
+interrupted syscalls to be re-entered or restarted under Linux's normal
+restart rules. From the application's supported userspace semantics, execution
+continues from the checkpoint boundary.
 
 That is the whole magic trick, stated plainly: *restore ends by staging a fake
 return from a signal that was never delivered.*
@@ -405,11 +422,12 @@ lands on a **different host** than the one it was dumped on — that's the whole
 point of [live migration](#/live-migration). Different hosts have different
 uptimes. But `CLOCK_MONOTONIC` and `CLOCK_BOOTTIME` are defined to *never go
 backward*, and a huge amount of software relies on that: timeout math, rate
-limiters, `condition_variable` waits, watchdogs. Restore a process whose
-`CLOCK_MONOTONIC` last read 9,000,000 seconds onto a host that booted an hour
-ago, and its next reading would be a few thousand seconds — time running
-violently backward under code that assumes it cannot. Deadlocks and corrupted
-timeout logic follow.
+limiters, `condition_variable` waits, watchdogs.
+
+Restore a process whose `CLOCK_MONOTONIC` last read 9,000,000 seconds onto a
+host that booted an hour ago, and its next reading would be a few thousand
+seconds — time running violently backward under code that assumes it cannot.
+Deadlocks and corrupted timeout logic follow.
 
 The fix is the **time namespace** (Linux 5.6), which — as the
 [Namespaces](#/namespaces) chapter notes — was *largely created for CRIU*. A
@@ -428,12 +446,14 @@ cat /proc/<pid>/timens_offsets
 
 Because `clock_gettime()` is a vDSO fast path, each time namespace gets its own
 `vvar` data page and the offset is added in userspace with no syscall — so the
-restored process pays nothing per call for that virtualized epoch. Do not read
-this as "time was perfectly paused": the first post-restore sample occurs after
-restore work, `CLOCK_REALTIME` is outside the time namespace, and external
-observers can see the downtime. The mechanism prevents a host-uptime jump and
-keeps namespace-relative timer semantics coherent; it does not erase every
-observable passage of time.
+restored process pays nothing per call for that virtualized epoch.
+
+Do not read this as "time was perfectly paused": the first post-restore sample
+occurs after restore work, `CLOCK_REALTIME` is outside the time namespace, and
+external observers can see the downtime. The mechanism prevents a host-uptime
+jump and keeps namespace-relative timer semantics coherent; it does not erase
+every observable passage of time.
+
 Three features — `set_tid`, `CAP_CHECKPOINT_RESTORE`, and the time namespace —
 each exist because "restore a process somewhere else and let it believe nothing
 happened" turned out to be a requirement the original kernel could not meet.
@@ -511,14 +531,17 @@ It does **not** start over at 0 or 1. The variable holding the count was
 poured back from `pages-*.img` into the same VMA at the same address; the
 register set was reloaded via `rt_sigreturn`; the process returned to the saved
 userspace context in its `nanosleep()`/print loop, with syscall restart handled
-as described above. `--shell-job` tells CRIU the process was
-started from an interactive shell and shares its controlling terminal and
-process group, so the session relationships (which are as identity-laden as the
-PID) are reattached to *your* terminal rather than the one that existed at dump
-time. Its counter and control flow continue from the checkpoint rather than
-starting over. That statement is about restored execution state, not invisible
-wall time: `CLOCK_REALTIME`, the terminal observer, and external services can
-all reveal the interval between dump and restore.
+as described above.
+
+`--shell-job` tells CRIU the process was started from an interactive shell and
+shares its controlling terminal and process group, so the session
+relationships (which are as identity-laden as the PID) are reattached to
+*your* terminal rather than the one that existed at dump time.
+
+Its counter and control flow continue from the checkpoint rather than starting
+over. That statement is about restored execution state, not invisible wall
+time: `CLOCK_REALTIME`, the terminal observer, and external services can all
+reveal the interval between dump and restore.
 
 The full end-to-end walkthrough — dump, inspect the images, restore, and prove
 the offsets and clocks survived — is the [CRIU hands-on lab](#/lab-criu).

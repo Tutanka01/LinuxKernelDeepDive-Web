@@ -26,7 +26,7 @@
       var link = document.createElement("link");
       link.id = "hljs-theme";
       link.rel = "stylesheet";
-      link.href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-" +
+      link.href = "../assets/vendor/hljs/gruvbox-" +
                   (theme === "paper" ? "light" : "dark") + "-medium.min.css";
       document.head.appendChild(link);
     })();
@@ -71,7 +71,10 @@
 
       <nav class="course-switch" aria-label="Courses on this site">
         <p class="course-switch-title">Courses</p>
-        <a class="course-chip" href="../">
+        <a class="course-chip chip-all" href="../">
+          <span class="chip-title">All three courses</span>
+        </a>
+        <a class="course-chip" href="../#/course">
           <span class="chip-title">The Linux Deep Dive</span>
           <span class="chip-desc">56 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
         </a>
@@ -119,8 +122,11 @@
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <!-- Vendored, not CDN: the whole site is one self-contained tree, and the
+       cdnjs tags carried no integrity hash. Mermaid is fetched by
+       reader-ui.js, and only for a chapter that actually has a diagram. -->
+  <script src="../assets/vendor/marked.min.js"></script>
+  <script src="../assets/vendor/highlight.min.js"></script>
   <script src="../assets/reader-ui.js?v=20260726"></script>
   <script src="assets/inf.js?v=20260726"></script>
   <script src="../assets/course.js?v=20260726"></script>

@@ -48,8 +48,9 @@ can falsify the hypothesis.
 Put numbers on it. A `/proc` read is a syscall plus a `seq_file` render —
 sub-microsecond, and it never stops the target. A `strace` round trip stops
 the traced task **twice per syscall** (entry and exit), context-switching to
-the tracer each time; a syscall-heavy process can slow down 10–100×. A
-`perf record -F 99` samples 99 times/second per CPU — roughly 1–3% overhead.
+the tracer each time; a syscall-heavy process can slow down 10–100×.
+
+A `perf record -F 99` samples 99 times/second per CPU — roughly 1–3% overhead.
 A well-written eBPF probe that aggregates into a per-CPU map adds tens to a few
 hundred nanoseconds per event, which is why it survives on production hot
 paths where `strace` would melt.
@@ -96,10 +97,11 @@ cat  /proc/$$/stack       # where in the KERNEL it's sleeping (root)
 `/proc/<pid>/status` deserves a slow read. `State:` maps directly to the task
 state you met in [Processes & Threads](#/processes) — `R` (running/runnable),
 `S` (interruptible sleep), `D` (uninterruptible sleep, almost always waiting
-on I/O), `Z` (zombie), `t` (traced/stopped). `VmRSS` is resident set size, the
-physical pages backing the process right now, split into `RssAnon` (heap/stack)
-and `RssFile` (file-backed, shared with the page cache — see
-[Virtual Memory](#/memory)). `voluntary_ctxt_switches` versus
+on I/O), `Z` (zombie), `t` (traced/stopped).
+
+`VmRSS` is resident set size, the physical pages backing the process right now,
+split into `RssAnon` (heap/stack) and `RssFile` (file-backed, shared with the
+page cache — see [Virtual Memory](#/memory)). `voluntary_ctxt_switches` versus
 `nonvoluntary_ctxt_switches` is a free diagnosis: a task piling up
 *non-voluntary* switches is being preempted (CPU-hungry, competing); one piling
 up *voluntary* switches is blocking on something (I/O, locks).
@@ -269,14 +271,18 @@ aggregate into **maps**, and stream results to user space.
 
 What makes "run my code in ring 0" sane is the **verifier**. Before load, it
 performs a static analysis — an abstract interpretation over all reachable
-paths — proving the program terminates and touches only memory it is allowed
-to. It enforces a bounded instruction budget (1 million analyzed instructions
-as of 6.12), rejects unbounded loops (bounded loops are allowed since 5.3),
-and tracks the type and range of every register so a stray pointer
-dereference can't happen. This is the same technology family as seccomp's
-syscall filters and Cilium's network datapath — observability, security, and
-networking converged on one in-kernel VM. The internals get a full treatment
-in [eBPF Internals](#/ebpf-internals).
+paths — proving the program terminates and touches only memory it is
+allowed to.
+
+It enforces a bounded instruction budget (1 million analyzed instructions as of
+6.12), rejects unbounded loops (bounded loops are allowed since 5.3), and
+tracks the type and range of every register so a stray pointer dereference
+can't happen.
+
+This is the same technology family as seccomp's syscall filters and Cilium's
+network datapath — observability, security, and networking converged on one
+in-kernel VM. The internals get a full treatment in
+[eBPF Internals](#/ebpf-internals).
 
 **bpftrace** makes it a one-liner language:
 

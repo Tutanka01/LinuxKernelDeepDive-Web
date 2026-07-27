@@ -7,8 +7,18 @@ README.md
 
 # Editor / agent scratch
 .claude
+.conductor
+.github
 
 # Source notes for the inference course: research dossiers, the style guide
 # and audits. Part of the repository, not of the published site — without
 # this they ship to production and are fetchable at /inference/research/*.md.
 inference/research
+
+# Audits and design notes: same reasoning as inference/research.
+docs
+
+# The test suite, its npm dependencies and its artefacts. The served site is
+# dependency-free; none of this may reach the image, least of all
+# tests/node_modules — it is larger than the entire rest of the repository.
+tests

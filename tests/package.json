@@ -1,0 +1,15 @@
+{
+  "name": "deep-dive-courses-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Test suite for the Deep Dive Courses static site. Lives here, not at the repo root, because the site itself is deliberately dependency-free and build-free.",
+  "scripts": {
+    "test": "npm run test:tier1 && npm run test:tier2",
+    "test:tier1": "node --test \"tier1/*.test.js\"",
+    "test:tier2": "playwright test",
+    "install:browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

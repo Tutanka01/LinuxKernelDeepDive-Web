@@ -67,10 +67,11 @@ end. Post-copy front-loads the switch and makes the destination authoritative
 before the data has caught up. They have opposite failure semantics, opposite
 latency profiles, and — this is the good part — they are built on completely
 different kernel features. Pre-copy rides the **soft-dirty** PTE bit;
-post-copy rides **userfaultfd**. And neither of them helps at all with the one
-piece of state that doesn't live in the process's address space: its open TCP
-connections. That needs a third primitive, **TCP repair**. We'll take all
-three in turn.
+post-copy rides **userfaultfd**.
+
+And neither of them helps at all with the one piece of state that doesn't
+live in the process's address space: its open TCP connections. That needs a
+third primitive, **TCP repair**. We'll take all three in turn.
 
 ## Pre-copy: iterative migration with soft-dirty
 
@@ -131,6 +132,7 @@ guessing, no full re-scan of contents.
 One caveat the kernel doc calls out and CRIU has to respect: if a task unmaps a
 region and immediately maps fresh memory at the same address, the fresh PTEs
 start out zeroed (soft-dirty clear) even though the *contents* are brand new.
+
 To avoid silently missing that, the kernel marks any newly mapped or grown VMA
 soft-dirty at the VMA level (`VM_SOFTDIRTY`), so the region is treated as fully
 dirty until the next reset. Miss this and you'd ship stale data — which is why
@@ -363,12 +365,14 @@ the first seconds after the switch.
 CRIU softens the tail two ways. First, **prefetch/prioritization**: the daemon
 doesn't only react to faults — it also pushes pages proactively, and when a
 fault does happen it can pull a *batch* of nearby pages on the assumption that
-access is somewhat local. Second, the pages already delivered by any earlier
-*pre-dump* passes are present from the start, so post-copy is usually run *on
-top of* one or more pre-copy passes: pre-copy moves the bulk cheaply while the
-task runs, post-copy covers the residual so the freeze is near-zero and no
-convergence is required. Best of both. The [userfaultfd lab](#/lab-userfaultfd)
-builds a minimal fault-serving daemon by hand so you can watch a page arrive on
+access is somewhat local.
+
+Second, the pages already delivered by any earlier *pre-dump* passes are
+present from the start, so post-copy is usually run *on top of* one or more
+pre-copy passes: pre-copy moves the bulk cheaply while the task runs,
+post-copy covers the residual so the freeze is near-zero and no convergence
+is required. Best of both. The [userfaultfd lab](#/lab-userfaultfd) builds a
+minimal fault-serving daemon by hand so you can watch a page arrive on
 demand.
 
 ## TCP repair: migrating a live connection
@@ -568,13 +572,14 @@ The failure rows are the ones people underweight. **Pre-copy can support safe
 rollback** because the source remains authoritative while the early passes
 run; during final cutover the orchestrator must retain it in a stopped,
 resumable state until B commits. A plain `criu dump` that kills the source does
-not provide that guarantee by itself. **Post-copy is a gamble:** the instant B
-starts executing, it creates state the stopped source does not have while some
-pages still exist only on A. Losing A or the link before the drain completes
-can strand B on its next fault; losing B discards its new execution state.
-There is no single complete, current copy to resume. Hybrid systems use
-pre-copy for the bulk and accept that bounded post-copy risk window only for
-the residual tail.
+not provide that guarantee by itself.
+
+**Post-copy is a gamble:** the instant B starts executing, it creates state
+the stopped source does not have while some pages still exist only on A.
+Losing A or the link before the drain completes can strand B on its next
+fault; losing B discards its new execution state. There is no single
+complete, current copy to resume. Hybrid systems use pre-copy for the bulk
+and accept that bounded post-copy risk window only for the residual tail.
 
 Rules of thumb:
 

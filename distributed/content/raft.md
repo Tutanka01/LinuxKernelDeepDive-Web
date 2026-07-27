@@ -7,14 +7,27 @@
 > After this chapter, etcd and friends stop being magic.
 
 Raft (Ongaro & Ousterhout, 2014) is consensus engineered for human
-comprehension. Same problem and guarantees as Multi-Paxos — replicate a log
-across `2f+1` nodes, tolerating `f` crashes — but decomposed into pieces you
-can hold in your head one at a time. It now runs inside etcd, CockroachDB,
-TiDB, Consul, Kafka's KRaft and countless others.
+comprehension. Same problem and guarantees as [Multi-Paxos](#/consensus) —
+replicate a log across `2f+1` nodes, tolerating `f` crashes — but decomposed
+into pieces you can hold in your head one at a time. It now runs inside
+etcd, CockroachDB, TiDB, Consul, Kafka's KRaft and countless others;
+[Real-World Architectures](#/real-world-architectures) takes several of them
+apart.
 
 ## The cast: three roles and a clock that isn't
 
-Every node is exactly one of:
+Every node is exactly one of three roles, and every transition between them
+is triggered either by a timeout or by hearing a term greater than its own:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Follower
+    Follower --> Candidate: election timeout, no heartbeat
+    Candidate --> Leader: wins a majority of votes
+    Candidate --> Candidate: split vote, try again next term
+    Candidate --> Follower: sees a higher term
+    Leader --> Follower: sees a higher term
+```
 
 - **Leader** — handles all client writes, replicates them, the only node
   that commits.
@@ -24,11 +37,16 @@ Every node is exactly one of:
 
 Time is divided into **terms**, numbered monotonically. Each term has *at
 most one* leader (maybe none, if an election fails). The term number is a
-Lamport clock for leadership: every message carries it, and any node that
-sees a higher term than its own immediately adopts it and steps down to
-follower. Terms make stale leaders harmless — their messages carry an old
-term and are rejected on sight. (Recognize the fencing-token pattern from
-the failure chapter — built into the protocol's bones.)
+[Lamport clock](#/logical-clocks) for leadership: every message carries it,
+and any node that sees a higher term than its own immediately adopts it and
+steps down to follower. Terms make stale leaders harmless — their messages
+carry an old term and are rejected on sight. (Recognize the [fencing-token
+pattern](#/failure-models) — built into the protocol's bones, so that safety
+never rests on a clock the way [Time, Clocks & Why They
+Lie](#/time-and-clocks) warned.)
+
+Laid out on a timeline, a term is an election followed by at most one
+leadership — and term 3 below is an election that produced no leader at all:
 
 ```text
  term 1        term 2          term 3      term 4
@@ -37,7 +55,8 @@ the failure chapter — built into the protocol's bones.)
 
 ## Part 1: leader election
 
-The heartbeat machinery from chapter 3, now with teeth:
+The heartbeat machinery from [Failure Models & Detection](#/failure-models),
+now with teeth:
 
 1. The leader sends periodic heartbeats (empty `AppendEntries`) to all.
 2. Each follower runs an **election timeout**, randomized per node
@@ -46,8 +65,9 @@ The heartbeat machinery from chapter 3, now with teeth:
    increments its term, becomes a **candidate**, votes for itself, and asks
    everyone for votes (`RequestVote`).
 4. A node grants its vote if it hasn't voted in this term — **one vote per
-   term per node**, persisted to disk before answering (crash-recovery
-   discipline: promise nothing you won't remember).
+   term per node**, persisted to disk before answering
+   ([crash-recovery](#/failure-models) discipline: promise nothing you won't
+   remember).
 5. **Majority of votes ⇒ leader.** Start heartbeating immediately.
 
 Why this is safe: one vote per node per term means **two candidates can't
@@ -56,32 +76,40 @@ voter voted once. Why it terminates: *randomized* timeouts make split votes
 (several simultaneous candidates dividing the vote) rare and self-healing —
 if a term ends with no winner, candidates time out at different random
 moments next term, and whoever wakes first usually wins alone. This
-randomness is exactly the non-determinism that sidesteps FLP.
+randomness is exactly the non-determinism that sidesteps
+[FLP](#/consensus) — the theorem only binds *deterministic* protocols.
 
 ## Part 2: log replication
 
 In steady state (a stable leader), Raft is simple — this simplicity is its
 selling point:
 
-```text
- client ──"set x=5"──▶ LEADER
-                         │ 1. append to own log (disk!)
-                         │ 2. AppendEntries to all followers
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-            F1 ack     F2 ack     F3 (slow…)
-                         │
-                         │ 3. majority (leader+F1+F2) have it
-                         │    ⇒ entry is COMMITTED
-                         │ 4. apply to state machine, reply to client
-                         ▼
-                      "OK, x=5"
+```mermaid
+sequenceDiagram
+    participant Cl as client
+    participant L as leader
+    participant F1 as follower 1
+    participant F2 as follower 2
+    participant F3 as follower 3
+    Cl->>L: set x=5
+    L->>L: append to own log, on disk
+    L->>F1: AppendEntries
+    L->>F2: AppendEntries
+    L->>F3: AppendEntries
+    F1->>L: ack
+    F2->>L: ack
+    Note over F3: still catching up, nobody waits
+    Note over L: leader plus F1 plus F2 is a majority - COMMITTED
+    L->>Cl: OK, x=5
 ```
+
+The slowest follower never appears on the critical path: a majority is
+enough, so one sick node costs latency to nobody.
 
 Each log entry holds `(term, index, command)`. The leader tracks, per
 follower, how far their log matches its own, and retries/repairs lagging
 followers indefinitely. One round trip to a majority per batch of entries —
-the same steady-state cost as Multi-Paxos.
+the same steady-state cost as [Multi-Paxos](#/consensus).
 
 **Consistency check:** every `AppendEntries` carries the `(term, index)` of
 the entry *preceding* the new ones. A follower accepts only if its own log
@@ -108,13 +136,22 @@ index)`, and **a voter refuses any candidate whose log is less up-to-date
 than its own** ("up-to-date" = higher last term, or same term and longer
 log).
 
-Why it works — majority overlap again: a committed entry lives on a
-majority; any election majority intersects it; the witness in the overlap
-will refuse a candidate lacking the entry. **A leader can never be missing
-a committed entry**, so — elegant consequence — Raft leaders never need to
-"learn" past decisions the way Paxos proposers do in phase 1; the election
-itself guarantees the winner already has everything. (This is the main
-structural simplification over Paxos.)
+Why it works is [majority overlap](#/consensus) again, and the whole
+argument is four steps:
+
+```mermaid
+graph LR
+    E["entry committed on a majority"] --> W["every election needs a majority"]
+    W --> X["the two majorities share a node"]
+    X --> V["that node refuses candidates missing the entry"]
+    V --> C["a leader is born holding every committed entry"]
+```
+
+**A leader can never be missing a committed entry**, so — elegant
+consequence — Raft leaders never need to "learn" past decisions the way
+Paxos proposers do in phase 1; the election itself guarantees the winner
+already has everything. (This is the main structural simplification over
+Paxos.)
 
 ### Rule 2: commit only entries from your own term
 
@@ -155,15 +192,16 @@ might not overlap — two leaders, one per configuration. Raft's practical
 answer: **change one node at a time** — any majority of a configuration
 differing by one node necessarily overlaps any majority of the old one.
 Configuration changes travel *through the log itself*, like any other
-entry. (The paper's joint-consensus mechanism handles bulk changes; single-
-node steps are what most implementations ship.)
+entry. (The paper's joint-consensus mechanism handles bulk changes;
+single-node steps are what most implementations ship.)
 
 ### Reads: subtler than they look
 
 A read served instantly from a leader's state machine might be **stale**:
 the node may have been deposed during a partition and not know it (the
-zombie-leader problem from the time chapter — clocks and pauses). Three
-production answers, in decreasing cost:
+zombie-leader problem from [Time, Clocks & Why They
+Lie](#/time-and-clocks) — clocks and pauses). Three production answers, in
+decreasing cost:
 
 - **Log the read:** run it through consensus like a write. Linearizable,
   expensive.
@@ -174,8 +212,10 @@ production answers, in decreasing cost:
   Fastest — and reintroduces a clock assumption (bounded drift), the very
   thing Raft otherwise avoids. Used by etcd and CockroachDB as an opt-in.
 
-The consistency-models chapter lives here in miniature: each option is a
-price point on the linearizability-vs-latency curve.
+[Consistency Models & CAP](#/consistency-models) lives here in miniature:
+each option is a price point on the linearizability-vs-latency curve, and
+PACELC's "else, latency vs consistency" is precisely the choice between
+these three lines of config.
 
 ## Watching it in the wild
 
@@ -183,7 +223,9 @@ price point on the linearizability-vs-latency curve.
 leader's identity, and per-member commit indexes — every concept of this
 chapter, running in production, one command away. Kill the leader and watch
 a term increment and a sub-second election; partition a minority and watch
-it stall harmlessly, then catch up on heal.
+it stall harmlessly, then catch up on heal. [Real-World
+Architectures](#/real-world-architectures) shows what Kubernetes then builds
+on top of exactly this.
 
 ## Key takeaways
 

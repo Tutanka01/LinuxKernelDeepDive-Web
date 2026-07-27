@@ -38,8 +38,8 @@ p99 request latency — describes almost nothing about an inference fleet.
 Replace it with meters pointed at the actual bottlenecks.
 
 **Queue depth, in tokens.** This is the single most important reframing.
-Requests are not units of work. A queued 100K-token prompt is, under a 2,048-
-token chunk budget, about fifty scheduler steps of work; a queued 200-token
+Requests are not units of work. A queued 100K-token prompt is, under a
+2,048-token chunk budget, about fifty scheduler steps of work; a queued 200-token
 prompt is one. Measuring `queue_length = 4` tells you nothing about whether
 you are two seconds or two minutes from draining it. Sum the *pending prefill
 tokens* instead, and divide by your measured prefill token rate to get an

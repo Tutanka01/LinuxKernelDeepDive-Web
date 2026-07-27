@@ -37,13 +37,16 @@ user space consumes aggregated results
 
 This removes the expensive pattern where every event crosses into user space.
 A BPF program can count, filter, aggregate, sample, drop packets, enforce
-policy, or summarize latency before user space ever wakes up. Compare it to the
-classic instrumentation loop: `strace` intercepts each syscall by stopping the
-tracee and context-switching to the tracer twice per event, which can slow a
-syscall-heavy workload by 10-100x. A BPF program attached to the same syscall
-runs in a few dozen nanoseconds without leaving kernel context. That gap — the
-cost of *not* crossing the [kernel/user-space boundary](#/kernel-vs-userspace)
-per event — is the whole reason eBPF exists.
+policy, or summarize latency before user space ever wakes up.
+
+Compare it to the classic instrumentation loop: `strace` intercepts each
+syscall by stopping the tracee and context-switching to the tracer twice per
+event, which can slow a syscall-heavy workload by 10-100x. A BPF program
+attached to the same syscall runs in a few dozen nanoseconds without leaving
+kernel context.
+
+That gap — the cost of *not* crossing the [kernel/user-space
+boundary](#/kernel-vs-userspace) per event — is the whole reason eBPF exists.
 
 ### The virtual machine itself
 
@@ -186,12 +189,14 @@ matter:
 
 A register is not just "64 bits". It might be "pointer to packet data with
 range checked up to byte N", "scalar whose value is in [0, 63]", or "nullable
-socket pointer, id=3, not yet checked". Path explosion is bounded by state
-pruning: when the verifier reaches an instruction with a register state at
-least as general as one it already proved safe, it stops re-exploring. Even so,
-the total work is capped at `BPF_COMPLEXITY_LIMIT_INSNS` = 1,000,000 processed
-instructions. A program that is *correct* but too branchy for the verifier to
-prove within that budget is rejected with "BPF program is too large".
+socket pointer, id=3, not yet checked".
+
+Path explosion is bounded by state pruning: when the verifier reaches an
+instruction with a register state at least as general as one it already proved
+safe, it stops re-exploring. Even so, the total work is capped at
+`BPF_COMPLEXITY_LIMIT_INSNS` = 1,000,000 processed instructions. A program that
+is *correct* but too branchy for the verifier to prove within that budget is
+rejected with "BPF program is too large".
 
 Bounded loops have been allowed since kernel 5.3; before that every loop had to
 be fully unrolled by the compiler. The privileged program size limit is 1
@@ -247,28 +252,32 @@ Common map types:
 ### Why per-CPU maps matter
 
 The per-CPU variants are not a micro-optimization; they are the difference
-between a tool that works in a demo and one that survives line rate. A global
-hash counter incremented by every packet or syscall becomes a
+between a tool that works in a demo and one that survives line rate.
+
+A global hash counter incremented by every packet or syscall becomes a
 cache-coherency bottleneck: the cacheline holding that counter ping-pongs
 between cores, and each atomic update stalls waiting for exclusive ownership.
 On a 64-core box under load this can cost hundreds of nanoseconds per event and
-serialize CPUs that should be independent. A per-CPU map gives each core its
-own copy at a distinct cacheline; the BPF program writes its local shard with
-no contention, and user space sums the shards at read time. This connects
-directly to the cache-coherency and false-sharing concerns covered in
-[Kernel Synchronization](#/kernel-sync).
+serialize CPUs that should be independent.
+
+A per-CPU map gives each core its own copy at a distinct cacheline; the BPF
+program writes its local shard with no contention, and user space sums the
+shards at read time. This connects directly to the cache-coherency and
+false-sharing concerns covered in [Kernel Synchronization](#/kernel-sync).
 
 ### The ring buffer
 
 Since kernel 5.8, `BPF_MAP_TYPE_RINGBUF` is the preferred kernel-to-user event
 channel, replacing the older per-CPU perf buffer. The perf buffer had two
 problems: it was per-CPU (wasting memory and reordering events across cores)
-and it copied twice. The ring buffer is a single shared MPSC buffer with a
-reserve/commit API: a program calls `bpf_ringbuf_reserve()` to claim space
-*before* filling it, writes directly into that space, then commits. If reserve
-fails because the buffer is full, the program knows immediately and can
-increment a drop counter instead of losing data silently. User space polls it
-via `epoll` with no syscall per event in the common case.
+and it copied twice.
+
+The ring buffer is a single shared MPSC buffer with a reserve/commit API: a
+program calls `bpf_ringbuf_reserve()` to claim space *before* filling it,
+writes directly into that space, then commits. If reserve fails because the
+buffer is full, the program knows immediately and can increment a drop counter
+instead of losing data silently. User space polls it via `epoll` with no
+syscall per event in the common case.
 
 ## BTF and CO-RE
 

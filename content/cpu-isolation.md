@@ -12,7 +12,16 @@ requires: scheduling, interrupts, timers
 
 ## Why default scheduling isn't enough
 
-The default scheduler — [EEVDF](#/scheduling) since kernel 6.6, which replaced CFS after fifteen years — gives every runnable task a fair, latency-weighted slice of the CPU. It handles hundreds of tasks per core, migrates work across cores to balance load, and relies on a periodic **timer interrupt** — the *scheduler tick* — to account for elapsed runtime and decide when to preempt. Depending on `CONFIG_HZ`, that tick fires 100, 250, 300, or 1000 times per second on *every* CPU. At the common server default of `HZ=250` that is one interrupt every 4 ms; at `HZ=1000` (many desktop and low-latency configs) it is every 1 ms.
+The default scheduler — [EEVDF](#/scheduling) since kernel 6.6, which replaced
+CFS after fifteen years — gives every runnable task a fair, latency-weighted
+slice of the CPU. It handles hundreds of tasks per core, migrates work across
+cores to balance load, and relies on a periodic **timer interrupt** — the
+*scheduler tick* — to account for elapsed runtime and decide when to preempt.
+
+Depending on `CONFIG_HZ`, that tick fires 100, 250, 300, or 1000 times per
+second on *every* CPU. At the common server default of `HZ=250` that is one
+interrupt every 4 ms; at `HZ=1000` (many desktop and low-latency configs) it
+is every 1 ms.
 
 This design is excellent for throughput and fairness. It is actively hostile to *latency determinism*. Every tick is a forced detour into the kernel: save registers, run [`update_process_times()`](https://elixir.bootlin.com/linux/v6.12/C/ident/update_process_times), poke the scheduler, walk the timer wheels, maybe run softirqs, restore registers, return. On a warm cache that costs a few hundred nanoseconds; on a cold cache, after the tick evicts your working set, the *secondary* cost — reloading L1/L2 lines and re-warming the branch predictor — can be several microseconds.
 
@@ -110,7 +119,16 @@ watch -n1 "grep -m1 LOC /proc/interrupts"
 
 [RCU (Read-Copy-Update)](#/kernel-sync) is the kernel's dominant lockless read-side synchronization mechanism. Writers install a new version of a data structure and defer freeing the old one until every CPU has passed through a *quiescent state* — a point where it provably holds no reference to the old version. A completed round of quiescent states across all CPUs is a **grace period**; when one ends, the deferred frees (RCU *callbacks*) can run.
 
-By default each CPU processes its own callbacks in a softirq (`RCU_SOFTIRQ`) driven by the tick. That is two problems for an isolated CPU: the softirq is jitter, and it depends on the very tick that `nohz_full` just removed. **`rcu_nocbs`** ("no callbacks") moves callback processing off the CPU entirely. Each offloaded CPU gets its callbacks queued to a set of dedicated kernel threads — you can see them as `rcuop/N` and `rcuog/N` (the leader/follower "grace-period kthreads") — that run on housekeeping CPUs. The isolated CPU still passes through quiescent states (it must, or grace periods never end), but it never *invokes* callbacks.
+By default each CPU processes its own callbacks in a softirq (`RCU_SOFTIRQ`)
+driven by the tick. That is two problems for an isolated CPU: the softirq is
+jitter, and it depends on the very tick that `nohz_full` just removed.
+
+**`rcu_nocbs`** ("no callbacks") moves callback processing off the CPU
+entirely. Each offloaded CPU gets its callbacks queued to a set of dedicated
+kernel threads — you can see them as `rcuop/N` and `rcuog/N` (the
+leader/follower "grace-period kthreads") — that run on housekeeping CPUs. The
+isolated CPU still passes through quiescent states (it must, or grace periods
+never end), but it never *invokes* callbacks.
 
 An extra knob, **`rcu_nocb_poll`**, changes how those offload threads learn there is work: instead of being woken by an IPI from the offloaded CPU (an interrupt — jitter), the `rcuog` thread *polls* for pending callbacks. This trades a little housekeeping-CPU busy-work for the removal of one more interrupt source on the isolated CPU.
 
@@ -290,11 +308,35 @@ Two of these deserve a warning. `idle=poll` and `intel_idle.max_cstate=1` fight 
 
 ## The RT throttle, and how to hang your machine
 
-By default `kernel.sched_rt_runtime_us = 950000` and `sched_rt_period_us = 1000000`: RT tasks may consume at most **950 ms of every second**, reserving 5% for everything else. This exists because a `SCHED_FIFO` priority-99 task that spins forever will otherwise starve *everything* below it — including the `kworker` that would process your `echo` into procfs, the RCU threads, and the console — leaving you with a wedged machine and no way in. The reservation is enforced per-runqueue via the `rt_bandwidth` accounting in **`struct rt_rq`**. Setting the runtime to `-1` disables the throttle entirely: correct for a validated, cpu-isolated RT workload, catastrophic for a buggy one.
+By default `kernel.sched_rt_runtime_us = 950000` and
+`sched_rt_period_us = 1000000`: RT tasks may consume at most **950 ms of every
+second**, reserving 5% for everything else. This exists because a `SCHED_FIFO`
+priority-99 task that spins forever will otherwise starve *everything* below
+it — including the `kworker` that would process your `echo` into procfs, the
+RCU threads, and the console — leaving you with a wedged machine and no way
+in.
+
+The reservation is enforced per-runqueue via the `rt_bandwidth` accounting in
+**`struct rt_rq`**. Setting the runtime to `-1` disables the throttle
+entirely: correct for a validated, cpu-isolated RT workload, catastrophic for
+a buggy one.
 
 ## The DPDK / AF_XDP extreme case
 
-For kernel-bypass networking — [DPDK](#/networking), AF_XDP — you don't want the scheduler to *think* about the data-plane cores at all. A DPDK poll-mode driver stacks `isolcpus` + `nohz_full` + huge pages + `idle=poll` to reach single-digit-microsecond wire-to-application latencies. The core runs a busy loop reading descriptors straight from the NIC's rings: no tick, no softirq, no scheduling decision, no syscall on the hot path. The kernel is effectively *absent* from that CPU while your application owns it end to end. Huge pages matter here for the same reason the tick does: a TLB miss walking 4 KiB page tables (the x86-64 default; arm64 can use 4/16/64 KiB base pages) is itself a source of jitter, and 2 MiB or 1 GiB pages shrink the [TLB](#/memory) footprint dramatically.
+For kernel-bypass networking — [DPDK](#/networking), AF_XDP — you don't want
+the scheduler to *think* about the data-plane cores at all. A DPDK poll-mode
+driver stacks `isolcpus` + `nohz_full` + huge pages + `idle=poll` to reach
+single-digit-microsecond wire-to-application latencies.
+
+The core runs a busy loop reading descriptors straight from the NIC's rings:
+no tick, no softirq, no scheduling decision, no syscall on the hot path. The
+kernel is effectively *absent* from that CPU while your application owns it
+end to end.
+
+Huge pages matter here for the same reason the tick does: a TLB miss walking 4
+KiB page tables (the x86-64 default; arm64 can use 4/16/64 KiB base pages) is
+itself a source of jitter, and 2 MiB or 1 GiB pages shrink the [TLB](#/memory)
+footprint dramatically.
 
 ## Follow the code (kernel v6.12)
 

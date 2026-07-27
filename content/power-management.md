@@ -22,7 +22,19 @@ Linux power management operates on three orthogonal axes:
 | **Idle states** (C-states) | How deep the CPU sleeps when idle | `/sys/devices/system/cpu/cpuN/cpuidle/` |
 | **System states** (S-states) | Suspend (S3), hibernate (S4), power off (S5) | `/sys/power/state`, `/sys/power/mem_sleep` |
 
-They interact, and the interaction is not intuitive. A CPU running at low frequency but never sleeping can use *more* total energy than a CPU that sprints at full frequency, finishes the work, and drops into a deep idle state. That "race to idle" strategy is why the naive assumption — "lower clock always saves power" — is wrong: static leakage current flows whenever the core is powered, so the fastest way to save energy is often to get back to a power-gated idle state as quickly as possible. The three axes are managed by three separate frameworks (`cpufreq`, `cpuidle`, the system-sleep core), all sitting on top of the ACPI or device-tree description of the platform.
+They interact, and the interaction is not intuitive. A CPU running at low
+frequency but never sleeping can use *more* total energy than a CPU that
+sprints at full frequency, finishes the work, and drops into a deep idle
+state.
+
+That "race to idle" strategy is why the naive assumption — "lower clock always
+saves power" — is wrong: static leakage current flows whenever the core is
+powered, so the fastest way to save energy is often to get back to a
+power-gated idle state as quickly as possible.
+
+The three axes are managed by three separate frameworks (`cpufreq`, `cpuidle`,
+the system-sleep core), all sitting on top of the ACPI or device-tree
+description of the platform.
 
 The P/C/S-state names come from ACPI, but the mechanisms below them are Linux's own. Let's take each axis in turn.
 
@@ -278,7 +290,21 @@ grep -o 'resume=[^ ]*' /proc/cmdline   # bootloader arg: which swap holds the im
 # e.g. resume=/dev/nvme0n1p3 resume_offset=34816   (offset needed for swapfiles)
 ```
 
-Under the hood, [hibernate()](https://elixir.bootlin.com/linux/v6.12/C/ident/hibernate) freezes tasks, snapshots memory into a set of image pages, then `swsusp_write()` streams them to swap. The image is compressed on the way out (LZO by default, with LZ4 and others selectable), which is usually a net speedup because storage is the bottleneck. A signature written into the swap header tells the resuming kernel to restore rather than boot clean; the `resume=` kernel parameter (see [From Power Button to Login](#/boot-process)) points at the device. Because the image can be tens of GB and the write is a large sequential [storage](#/storage-stack) transfer, hibernation is far slower than S3 — seconds to tens of seconds — even on NVMe. It is also why hibernation and encrypted swap need care: the image contains the entire contents of RAM.
+Under the hood,
+[hibernate()](https://elixir.bootlin.com/linux/v6.12/C/ident/hibernate)
+freezes tasks, snapshots memory into a set of image pages, then
+`swsusp_write()` streams them to swap. The image is compressed on the way out
+(LZO by default, with LZ4 and others selectable), which is usually a net
+speedup because storage is the bottleneck.
+
+A signature written into the swap header tells the resuming kernel to restore
+rather than boot clean; the `resume=` kernel parameter (see [From Power Button
+to Login](#/boot-process)) points at the device.
+
+Because the image can be tens of GB and the write is a large sequential
+[storage](#/storage-stack) transfer, hibernation is far slower than S3 —
+seconds to tens of seconds — even on NVMe. It is also why hibernation and
+encrypted swap need care: the image contains the entire contents of RAM.
 
 ```bash
 cat /sys/power/image_size            # target image size (0 = auto, ~2/5 of RAM)

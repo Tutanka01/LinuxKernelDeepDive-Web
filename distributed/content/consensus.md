@@ -6,10 +6,12 @@
 > consensus solution, and the core intuition of Paxos — majorities
 > overlapping with majorities. This prepares you for Raft next chapter.
 
-Every thread of this course has been quietly converging here. Failover needs
-the cluster to *agree* on one new leader. Split-brain happens when two sides
-*disagree* about who's in charge. The partition map must be *agreed* upon.
-Atomic commit needs everyone to *agree* on commit-or-abort.
+Every thread of this course has been quietly converging here.
+[Failover](#/replication) needs the cluster to *agree* on one new leader.
+[Split-brain](#/failure-models) happens when two sides *disagree* about
+who's in charge. The [partition map](#/partitioning) must be *agreed* upon.
+[Atomic commit](#/distributed-transactions) needs everyone to *agree* on
+commit-or-abort.
 
 **Consensus** is the abstract heart of all of these: getting a set of nodes
 to agree on a value, despite crashes and an unreliable network.
@@ -29,6 +31,18 @@ Agreement and validity are **safety** properties (nothing bad happens);
 termination is **liveness** (something good eventually does). Holding all
 three at once, while nodes crash and messages vanish, is the difficulty.
 
+It is worth naming why this isn't simply a locking problem. [Kernel
+Synchronization](../#/kernel-sync) enforces the very same "exactly one
+winner" requirement inside a single machine, and enforces it for a few
+nanoseconds' worth of `cmpxchg`, because every core observes one
+cache-coherent memory that the hardware arbitrates on their behalf.
+Consensus is what the identical requirement costs once that shared memory is
+gone and the arbiter has to be *built out of messages*: a round trip to a
+majority, per decision, with a proof obligation attached. Same requirement,
+six orders of magnitude apart in price — and that gap is why the rest of
+this course spends so much effort keeping the set of facts that need it very
+small.
+
 ### One decision is everything: state machine replication
 
 Deciding a single value sounds small. The lever that makes it universal is
@@ -36,19 +50,23 @@ Deciding a single value sounds small. The lever that makes it universal is
 **log** — entry 1, entry 2, entry 3… — and have every replica apply the
 agreed entries, in order, to a deterministic state machine.
 
-```text
-   agreed log:   [ set x=5 ][ del y ][ incr x ][ cfg+nodeD ] …
-                      │          │        │          │
-   every replica applies the same commands in the same order
-                      ▼
-        ⇒ every replica reaches the same state
+```mermaid
+graph LR
+    L["agreed log<br/>1 set x=5, 2 del y, 3 incr x"] -->|"same order"| R1["replica 1"]
+    L -->|"same order"| R2["replica 2"]
+    L -->|"same order"| R3["replica 3"]
+    R1 --> S["identical state"]
+    R2 --> S
+    R3 --> S
 ```
 
 Same start + same commands + same order + determinism = same state,
 everywhere. Agree on a log, and you can replicate *anything*: a database, a
 lock service, a configuration store, a leader roster. This is the design of
-ZooKeeper, etcd, Spanner's groups, Kafka's controller quorum — and the
-chapter on Raft is precisely about agreeing on a log efficiently.
+ZooKeeper, etcd, Spanner's groups and Kafka's controller quorum — all
+dissected in [Real-World Architectures](#/real-world-architectures) — and
+[Raft, Step by Step](#/raft) is precisely about agreeing on a log
+efficiently.
 
 ## FLP: the impossibility at the bottom
 
@@ -56,11 +74,11 @@ The 1985 **FLP theorem** (Fischer, Lynch, Paterson): *in an asynchronous
 system — no bound on message delays — no deterministic protocol can
 guarantee consensus if even one node may crash.*
 
-The intuition ties back to the failure-detection chapter: with unbounded
-delays, **silence is ambiguous** — a protocol can never distinguish "that
-node is dead, proceed without it" from "its message is still coming". Any
-deterministic rule for proceeding can be foiled by an adversarial schedule
-of delays, postponing the decision forever.
+The intuition ties back to [Failure Models & Detection](#/failure-models):
+with unbounded delays, **silence is ambiguous** — a protocol can never
+distinguish "that node is dead, proceed without it" from "its message is
+still coming". Any deterministic rule for proceeding can be foiled by an
+adversarial schedule of delays, postponing the decision forever.
 
 Read the fine print, though — FLP kills *guaranteed termination under
 worst-case timing*, nothing more:
@@ -73,36 +91,41 @@ worst-case timing*, nothing more:
 So practical protocols make a principled trade: **safety always, liveness
 when the network cooperates.** During a bad enough partition, etcd stops
 answering rather than risk two answers; when the partition heals, progress
-resumes. Recognize this as the CP choice from the CAP chapter — CAP is
-FLP's practical echo.
+resumes. Recognize this as the [CP choice](#/consistency-models) from CAP —
+CAP is FLP's practical echo.
 
 ## Why not just two-phase commit?
 
-A common confusion: isn't atomic commit (2PC) already consensus? Compare:
+A common confusion: isn't atomic commit (2PC) already consensus? In 2PC the
+coordinator asks "can you commit?", participants answer yes or no, and the
+coordinator decides commit only if *all* said yes. Now watch it die:
 
-```text
-   2PC: coordinator asks "can you commit?"
-        participants: "yes" / "no"
-        coordinator decides commit iff ALL said yes, tells everyone.
-
-                    coordinator
-                   ↙ prepare  ↘ prepare
-              node B            node C
-                   ↘ yes      ↙ yes
-                    coordinator ── commit ──▶ B, C
+```mermaid
+sequenceDiagram
+    participant C as coordinator
+    participant B as node B
+    participant D as node C
+    C->>B: prepare
+    C->>D: prepare
+    B->>C: yes (now bound)
+    D->>C: yes (now bound)
+    Note over C: crashes before announcing the outcome
+    Note over B,D: blocked, holding locks, unable to commit or abort
 ```
 
-The fatal scenario: B and C vote *yes*, then the **coordinator crashes**
-before sending the outcome. B and C are now **blocked** — they promised to
-commit if told, so they can't unilaterally abort; the answer might have been
-commit. They hold locks and wait… possibly until an operator intervenes.
+The fatal scenario, drawn above: B and C vote *yes*, then the **coordinator
+crashes** before sending the outcome. B and C are now **blocked** — they
+promised to commit if told, so they can't unilaterally abort; the answer
+might have been commit. They hold locks and wait… possibly until an operator
+intervenes.
 
 That's the difference in one line: **2PC requires unanimity and has a
 single point of decision; consensus decides by majority and survives the
 death of any minority — including whoever was leading.** (2PC also solves a
 slightly different problem — everyone must respect "no" votes — and remains
-genuinely useful; the transactions chapter gives it its due, including the
-modern fix: run the *coordinator itself* on a consensus group.)
+genuinely useful; [Distributed Transactions](#/distributed-transactions)
+gives it its due, including the modern fix: run the *coordinator itself* on
+a consensus group.)
 
 ## Paxos: the core trick of majority overlap
 
@@ -116,7 +139,25 @@ majority M2 contains a witness from M1. A later proposer that is *required
 to ask a majority first* cannot miss the decision.
 
 Paxos turns this into two phases, with proposals carrying increasing
-**ballot numbers** (Lamport clocks, doing exactly their job from chapter 5):
+**ballot numbers** ([Lamport clocks](#/logical-clocks) doing exactly the job
+they were built for — a counter that only moves forward and stamps who is
+later):
+
+```mermaid
+sequenceDiagram
+    participant P as proposer, ballot n
+    participant A as a majority of acceptors
+    P->>A: prepare(n)
+    A->>P: promise, plus any value already accepted
+    Note over P: if a value came back, adopt it and drop your own
+    P->>A: accept(n, value)
+    A->>P: accepted
+    Note over P,A: accepted by a majority means DECIDED
+```
+
+The single load-bearing step is the note in the middle: a proposer that
+learns of a possibly-decided value is *obliged* to re-propose it, which is
+how a past decision survives every future proposer.
 
 1. **Prepare:** a proposer picks ballot `n` and asks a majority: "promise to
    ignore anything older than `n` — and tell me any value you've already
@@ -141,8 +182,8 @@ Single-decision Paxos is then run per log slot (**Multi-Paxos**), with the
 stable leader skipping phase 1 in the steady state — one round trip per
 entry. At that point the structure is: *elect a leader with a ballot/term;
 leader appends entries; majority acknowledgment commits them.* This is
-exactly the shape of **Raft** (next chapter, with every gap filled in) and
-of **ZAB**, ZooKeeper's protocol. Paxos earned a reputation for being hard
+exactly the shape of [Raft](#/raft) (next, with every gap filled in) and of
+**ZAB**, ZooKeeper's protocol. Paxos earned a reputation for being hard
 to understand and harder to implement faithfully — Google's Chubby team
 wrote a paper essentially saying so — which is *why* Raft was designed, as
 "Paxos restructured for understandability".
@@ -151,14 +192,16 @@ wrote a paper essentially saying so — which is *why* Raft was designed, as
 > nodes (a majority must survive: 3 nodes ride out 1 failure, 5 ride out
 > 2). That's also why consensus clusters have odd sizes — 4 nodes tolerate
 > exactly as many failures as 3, with more coordination cost. And recall
-> from the failure-models chapter: Byzantine tolerance needs 3f + 1.
+> from [Failure Models & Detection](#/failure-models): Byzantine tolerance
+> needs 3f + 1.
 
 ## Consensus in your stack
 
-You rarely implement consensus; you *rent* it constantly:
+You rarely implement consensus; you *rent* it constantly — and [Real-World
+Architectures](#/real-world-architectures) opens up each of these:
 
-- **etcd** (Raft) — Kubernetes stores every object in it; the entire
-  cluster state is a replicated log.
+- **etcd** ([Raft](#/raft)) — Kubernetes stores every object in it; the
+  entire cluster state is a replicated log.
 - **ZooKeeper** (ZAB) — coordination for Kafka (historically), HBase,
   Hadoop.
 - **Raft inside databases** — CockroachDB, TiDB, YugabyteDB run one Raft
@@ -168,10 +211,12 @@ You rarely implement consensus; you *rent* it constantly:
 - **Cloud control planes** — region-spanning configuration and leases
   (Chubby at Google — Paxos — is the ancestor of them all).
 
-The pattern from the partitioning chapter completes: keep the **small,
-critical facts** (who leads, where partitions live, what the config is) in
-a consensus store, and let the big data flow through cheaper machinery
-(quorums, async replication) coordinated by those facts.
+The pattern from [Partitioning & Sharding](#/partitioning) completes: keep
+the **small, critical facts** (who leads, where partitions live, what the
+config is) in a consensus store, and let the big data flow through cheaper
+machinery ([quorums, async replication](#/replication)) coordinated by those
+facts. [CRDTs, Gossip & Anti-Entropy](#/crdts-and-gossip) is the other half
+of that sentence — what the cheap machinery can guarantee on its own.
 
 ## Key takeaways
 

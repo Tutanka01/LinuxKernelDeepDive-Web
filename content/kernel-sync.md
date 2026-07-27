@@ -79,11 +79,14 @@ test_and_clear_bit(NR_DIRTY, &flags);
 
 `atomic_t` is literally `struct { int counter; }` — a wrapper around a plain
 `int` whose only purpose is to force you to use the accessor functions instead
-of touching the field directly. On x86-64 these compile to single
-`LOCK`-prefixed instructions (`lock inc`, `lock cmpxchg`), atomic across all
-CPUs. The `LOCK` prefix also acts as a full memory barrier on x86: it drains
-the store buffer, making all prior writes visible to other CPUs before the
-atomic completes. On arm64, `atomic_inc()` generates either an `ldaxr/stlxr`
+of touching the field directly.
+
+On x86-64 these compile to single `LOCK`-prefixed instructions (`lock inc`,
+`lock cmpxchg`), atomic across all CPUs. The `LOCK` prefix also acts as a full
+memory barrier on x86: it drains the store buffer, making all prior writes
+visible to other CPUs before the atomic completes.
+
+On arm64, `atomic_inc()` generates either an `ldaxr/stlxr`
 load-acquire/store-release exclusive pair, or a single `LSE` atomic
 instruction (`stadd`) on CPUs that support the Large System Extensions —
 which most server-class arm64 parts do.
@@ -119,12 +122,13 @@ void kref_put(struct kref *kref, void (*release)(struct kref *));
 `refcount_t` is a **saturating, checked** variant of `atomic_t`. A raw
 `atomic_t` used as a refcount has a classic exploit: if an attacker can force
 the counter to wrap from `UINT_MAX` back to 0, the object is freed while still
-referenced — a use-after-free. `refcount_inc()` detects the overflow, refuses
-to wrap, and issues a `WARN`. Likewise `refcount_dec_and_test()` refuses to
-decrement below zero. This turned a whole class of CVEs into loud warnings
-instead of silent memory corruption. New code should always use `refcount_t`
-for object lifetimes and reserve raw `atomic_t` for statistics counters where
-wraparound is harmless.
+referenced — a use-after-free.
+
+`refcount_inc()` detects the overflow, refuses to wrap, and issues a `WARN`.
+Likewise `refcount_dec_and_test()` refuses to decrement below zero. This
+turned a whole class of CVEs into loud warnings instead of silent memory
+corruption. New code should always use `refcount_t` for object lifetimes and
+reserve raw `atomic_t` for statistics counters where wraparound is harmless.
 
 ## Spinlocks: the workhorse of hot paths
 
@@ -155,13 +159,16 @@ indefinitely).
 
 Since kernel 4.2 on x86-64 — and 4.19 on arm64, which kept its ticket lock
 a few years longer — the mainline spinlock is the
-**queued spinlock** (`qspinlock`). The visible `struct qspinlock` is still a
-single 32-bit word, but under contention it builds an **MCS queue**: each
-waiting CPU spins on its *own* per-CPU cacheline, and the lock is handed off
-FIFO. Only the CPU at the head of the queue touches the shared word. This turns
-O(N) cacheline bouncing into O(1) and makes acquisition fair. The fast path —
-uncontended acquire — is still a single `cmpxchg` on that word, so nothing is
-lost when there's no contention.
+**queued spinlock** (`qspinlock`).
+
+The visible `struct qspinlock` is still a single 32-bit word, but under
+contention it builds an **MCS queue**: each waiting CPU spins on its *own*
+per-CPU cacheline, and the lock is handed off FIFO. Only the CPU at the head
+of the queue touches the shared word.
+
+This turns O(N) cacheline bouncing into O(1) and makes acquisition fair. The
+fast path — uncontended acquire — is still a single `cmpxchg` on that word, so
+nothing is lost when there's no contention.
 
 ### The IRQ-safe variant
 
@@ -225,13 +232,15 @@ nanoseconds, sleeping is far more expensive than just waiting.
 So Linux mutexes do **optimistic spinning**: when you fail to grab the lock,
 the mutex checks whether the current owner is *running on another CPU right
 now* (this is why it stores the owner). If so, the lock is probably about to
-be released, so the waiter spins — briefly — instead of sleeping. The waiters
-line up in an MCS queue (`osq_lock`) so they spin on separate cachelines, just
-like qspinlock. Only if the owner goes to sleep, or the waiter has spun too
-long, does the waiter fall back to the classic path: add itself to
-`wait_list` and `schedule()` away. This makes a contended mutex nearly as fast
-as a spinlock when hold times are short, while still yielding the CPU when
-they're long.
+be released, so the waiter spins — briefly — instead of sleeping.
+
+The waiters line up in an MCS queue (`osq_lock`) so they spin on separate
+cachelines, just like qspinlock. Only if the owner goes to sleep, or the
+waiter has spun too long, does the waiter fall back to the classic path: add
+itself to `wait_list` and `schedule()` away.
+
+This makes a contended mutex nearly as fast as a spinlock when hold times are
+short, while still yielding the CPU when they're long.
 
 On `PREEMPT_RT` kernels, mutexes (and RT-converted spinlocks) implement
 **priority inheritance**: if a high-priority real-time task blocks on a mutex
@@ -304,10 +313,12 @@ The mechanism is a version counter (`struct seqcount`, one `unsigned`). A
 writer increments it to an **odd** value before modifying, and to the next
 **even** value after. A reader samples the counter before and after; if it
 changed (or was odd, meaning a write was in flight), the reader saw a torn
-value and retries. Readers never block and never write the shared line, so
-they scale perfectly — but the read side must be **retry-able**: no side
-effects, no dereferencing a pointer that a concurrent writer might have freed
-(for that, combine with RCU as `seqcount_latch`).
+value and retries.
+
+Readers never block and never write the shared line, so they scale perfectly —
+but the read side must be **retry-able**: no side effects, no dereferencing a
+pointer that a concurrent writer might have freed (for that, combine with RCU
+as `seqcount_latch`).
 
 Where to find them: `jiffies_64`, the wall-clock and monotonic timekeeping
 structures (see [Timers & Time](#/timers)), and the **vDSO** data page that
@@ -354,13 +365,15 @@ kfree(old);                        // now provably safe
 The magic is in `synchronize_rcu()`. It does **not** track which readers exist
 — that would require the readers to register, defeating the whole point.
 Instead it waits for a **grace period**: a span of time after which every CPU
-has been observed to pass through at least one **quiescent state**. A
-quiescent state is any moment a CPU provably holds no RCU read-side reference —
-a context switch, a return to user space, or an idle tick. Since a classic RCU
-reader cannot sleep or be preempted, once a CPU has context-switched, any RCU
-read section it held must have ended. When *all* CPUs have reached a quiescent
-state after the writer published its update, no reader can possibly still see
-`old`, and it's safe to free.
+has been observed to pass through at least one **quiescent state**.
+
+A quiescent state is any moment a CPU provably holds no RCU read-side
+reference — a context switch, a return to user space, or an idle tick. Since a
+classic RCU reader cannot sleep or be preempted, once a CPU has
+context-switched, any RCU read section it held must have ended.
+
+When *all* CPUs have reached a quiescent state after the writer published its
+update, no reader can possibly still see `old`, and it's safe to free.
 
 This is why the read side pays nothing: all the cost is shifted to the writer,
 which waits. A `synchronize_rcu()` typically takes on the order of tens of

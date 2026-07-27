@@ -20,10 +20,11 @@ Process](#/criu-restore) chapters described checkpoint/restore in theory:
 CRIU walks a process's `/proc` entries and kernel interfaces, serializes the
 register file, the address-space map, the open file descriptors and the dirty
 pages into a family of protobuf images, and later reverses the whole thing
-from inside a fresh task that reshapes itself into the original. This lab
-makes it happen in front of you, on a stock VM, with a process so simple you
-can *see* the state that survives — an integer that keeps climbing across a
-death and a resurrection.
+from inside a fresh task that reshapes itself into the original.
+
+This lab makes it happen in front of you, on a stock VM, with a process so
+simple you can *see* the state that survives — an integer that keeps climbing
+across a death and a resurrection.
 
 Everything here builds on [Process State & the Task Struct](#/process-state)
 (what "a process" even is that you can serialize) and pays off in
@@ -572,14 +573,16 @@ Error (criu/cr-restore.c:XXXX): Restoring FAILED.
 The restorer asked the kernel (via `clone3` + `set_tid`) for PID 6072 and the
 kernel said no — that number is taken. Inside `alloc_pid()` the occupied
 `set_tid` slot makes `idr_alloc()` return `-ENOSPC`, which the kernel remaps
-to `-EEXIST` — hence *File exists*, not a permissions complaint. A *permission*
-error (`EPERM`) would mean something different: the restorer lacking
-`CAP_CHECKPOINT_RESTORE`, which is not the case here since we ran under `sudo`.
-(If 6072 happens to be free but you have another process squatting a PID inside
-the tree, you get the same class of failure.) This is not CRIU being fragile; it's the whole reason production
-migration restores into a **fresh PID namespace**, where the original numbers
-are guaranteed available. Which is the perfect segue to the container
-porcelain.
+to `-EEXIST` — hence *File exists*, not a permissions complaint.
+
+A *permission* error (`EPERM`) would mean something different: the restorer
+lacking `CAP_CHECKPOINT_RESTORE`, which is not the case here since we ran under
+`sudo`. (If 6072 happens to be free but you have another process squatting a
+PID inside the tree, you get the same class of failure.)
+
+This is not CRIU being fragile; it's the whole reason production migration
+restores into a **fresh PID namespace**, where the original numbers are
+guaranteed available. Which is the perfect segue to the container porcelain.
 
 ## Stage 5 — The porcelain
 
@@ -711,13 +714,14 @@ and carried in a single file.
 This archive is a **cold-migration payload**, not a universal machine image.
 Moving it to another host also requires a compatible architecture, CPU and
 kernel feature envelope, CRIU/Podman/runtime and cgroup setup, plus matching
-external files, images and volumes. Preserving a TCP connection additionally
-requires `--tcp-established` at checkpoint and restore, and the destination
-must take over the saved address and routing; the flag does not migrate an IP
-address by itself. Under those constraints, copy the archive to the
-destination and import it there. [Live Migration](#/live-migration) adds
-pre-copy, a short final stop, network cutover and rollback discipline to this
-basic mechanism.
+external files, images and volumes.
+
+Preserving a TCP connection additionally requires `--tcp-established` at
+checkpoint and restore, and the destination must take over the saved address
+and routing; the flag does not migrate an IP address by itself. Under those
+constraints, copy the archive to the destination and import it there. [Live
+Migration](#/live-migration) adds pre-copy, a short final stop, network
+cutover and rollback discipline to this basic mechanism.
 
 ### Cleanup
 

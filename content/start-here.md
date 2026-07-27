@@ -26,8 +26,10 @@ Every technical claim here was checked against **Linux kernel 6.12** — the
 struct names, the function names, the default values, the sysctl knobs. Where a
 fact changed across versions, it is pinned in the text ("since 6.6", "as of
 6.12"), because "the kernel does X" is almost always a lie without a version
-attached. When you read a number like "the default page size is 4 KiB", assume
-it is architecture-specific unless stated otherwise (that particular one is the
+attached.
+
+When you read a number like "the default page size is 4 KiB", assume it is
+architecture-specific unless stated otherwise (that particular one is the
 x86-64 default; arm64 kernels can be built for 4, 16, or 64 KiB pages).
 
 The style is deliberately concrete. Instead of "the kernel tracks memory
@@ -46,6 +48,7 @@ it boots; the core kernel subsystems (processes, scheduling, memory, interrupts,
 filesystems, networking); containers; checkpoint/restore and live migration;
 hardware and virtualization; performance, observability, and security; and
 finally the kernel's own development process.
+
 You do not have to read them in order. The **paths** near the end of this
 chapter are the recommended reading orders for specific goals — start there.
 
@@ -58,12 +61,13 @@ path.
 One honest fork in the road before anything else: the main book assumes you can
 read a hex address, a C struct, and a syscall signature without flinching. If
 you administer Linux boxes competently but those three things are fog, **Part 0
-— Prerequisites** exists precisely for you. Start with
-[What This Book Assumes](#/prereq-overview): it lists the skills the book
-expects but does *not* teach (terminal fluency, mostly), lets you self-assess,
-and orders the four chapters that build everything else — the machine, the
-compiled program, just-enough C, and how to read the book's evidence. If you
-already own all that, skip Part 0 without guilt.
+— Prerequisites** exists precisely for you.
+
+Start with [What This Book Assumes](#/prereq-overview): it lists the skills the
+book expects but does *not* teach (terminal fluency, mostly), lets you
+self-assess, and orders the four chapters that build everything else — the
+machine, the compiled program, just-enough C, and how to read the book's
+evidence. If you already own all that, skip Part 0 without guilt.
 
 ### The three level badges
 

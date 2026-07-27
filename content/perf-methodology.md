@@ -104,7 +104,16 @@ cat /proc/loadavg
 # ^1min ^5min ^15min  ^running/total-threads  ^last-PID
 ```
 
-The count sampled is **the number of tasks in `TASK_RUNNING` plus `TASK_UNINTERRUPTIBLE`** — runnable tasks *and* tasks blocked in uninterruptible sleep (the `D` state), which almost always means waiting on disk I/O. That second category is why a machine with idle CPUs can still show a load of 20: twenty threads all stuck in `D` waiting on a slow NFS mount count toward load even though the CPU is doing nothing. Load average is therefore a mix of CPU saturation *and* I/O saturation — informative, but ambiguous. PSI splits them apart, which is exactly why it exists.
+The count sampled is **the number of tasks in `TASK_RUNNING` plus
+`TASK_UNINTERRUPTIBLE`** — runnable tasks *and* tasks blocked in
+uninterruptible sleep (the `D` state), which almost always means waiting on
+disk I/O. That second category is why a machine with idle CPUs can still show
+a load of 20: twenty threads all stuck in `D` waiting on a slow NFS mount
+count toward load even though the CPU is doing nothing.
+
+Load average is therefore a mix of CPU saturation *and* I/O saturation —
+informative, but ambiguous. PSI splits them apart, which is exactly why it
+exists.
 
 The averaging uses fixed-point EWMA constants (`EXP_1`, `EXP_5`, `EXP_15`) and the active-task count is folded in roughly every 5 seconds (`LOAD_FREQ = 5*HZ + 1`, the odd `+1` deliberately avoiding lockstep with other periodic ticks). Because it's a 1/5/15-minute smoothing, load average is a lagging indicator — useless for catching a 200 ms latency spike, good for confirming a sustained trend. Rule of thumb: a 1-minute load persistently above your CPU count means CPU (or D-state) saturation; compare against `nproc`.
 

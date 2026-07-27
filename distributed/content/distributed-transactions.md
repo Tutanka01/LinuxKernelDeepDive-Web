@@ -8,7 +8,9 @@
 
 A transaction's superpower is **atomicity**: a group of writes either all
 happen or none do — no torn intermediate states, even across crashes. One
-database achieves this locally with a write-ahead log. The moment the
+database achieves this locally with a write-ahead log — the same trick a
+journaling filesystem plays one layer beneath it, for the same reason
+([Files, Filesystems & the VFS](../#/filesystems)). The moment the
 writes span *two* systems — money out of bank A's database, into bank B's;
 or "update orders DB *and* publish to Kafka" — no single WAL covers them,
 and the in-between states (money gone from A, never arrived at B) become
@@ -19,16 +21,27 @@ reachable. **Atomic commit** is the problem of closing that gap.
 **2PC** is the classical answer, alive inside XA, and many distributed
 databases. A **coordinator** drives; **participants** hold the data.
 
-```text
- PHASE 1 — voting                      PHASE 2 — completion
- coordinator ─ PREPARE ─▶ A            coordinator ─ COMMIT ─▶ A
-             ─ PREPARE ─▶ B                        ─ COMMIT ─▶ B
- A: write redo+undo to WAL, lock,      A, B: apply, release locks, ack
-    vote YES (now BOUND by it)
- B: same … vote YES
- coordinator: all YES ⇒ log COMMIT     (any NO or timeout in phase 1
-              (the decision point!)     ⇒ ABORT to everyone)
+```mermaid
+sequenceDiagram
+    participant C as coordinator
+    participant A as participant A
+    participant B as participant B
+    C->>A: PREPARE
+    C->>B: PREPARE
+    A->>A: stage redo and undo in WAL, take locks
+    B->>B: stage redo and undo in WAL, take locks
+    A->>C: YES (now bound)
+    B->>C: YES (now bound)
+    Note over C: all YES, log COMMIT - this is the decision point
+    C->>A: COMMIT
+    C->>B: COMMIT
+    A->>C: applied, locks released
+    B->>C: applied, locks released
 ```
+
+Any NO vote, or a timeout in phase 1, turns the middle note into ABORT and
+the rest plays out the same way. Everything that can go badly wrong in 2PC
+goes wrong at that one note.
 
 The contract that makes it work: a participant that votes **yes** has
 durably staged everything needed to commit *or* roll back, and **surrenders
@@ -37,7 +50,7 @@ coordinator says — even after crashing and recovering (it finds the
 prepared state in its WAL and asks the coordinator how the story ended).
 
 The commit point is a single disk write on the coordinator. Which is
-exactly the weakness, as the consensus chapter previewed:
+exactly the weakness [The Consensus Problem](#/consensus) previewed:
 
 - **Coordinator dies after prepare, before broadcasting:** participants
   are **in doubt** — locked, bound, unable to commit or abort. They block
@@ -53,12 +66,14 @@ exactly the weakness, as the consensus chapter previewed:
 
 The blocking flaw isn't the protocol's phases — it's the coordinator's
 *singularity*. So modern systems keep 2PC but make the decision itself
-highly available: **run the coordinator state on a consensus group**.
-Spanner does exactly this — 2PC across shards, where each shard (and the
-coordinator's commit record) is a Paxos-replicated group. The coordinator
-can no longer "die with the answer": the answer lives on a majority.
-2PC-over-consensus is the standard architecture of NewSQL (Spanner,
-CockroachDB, TiDB) — module 5 completes this picture with TrueTime.
+highly available: **run the coordinator state on a [consensus
+group](#/consensus)**. Spanner does exactly this — 2PC across shards, where
+each shard (and the coordinator's commit record) is a Paxos-replicated
+group. The coordinator can no longer "die with the answer": the answer lives
+on a majority. 2PC-over-consensus is the standard architecture of NewSQL
+(Spanner, CockroachDB, TiDB) — [Real-World
+Architectures](#/real-world-architectures) completes this picture with
+[TrueTime](#/time-and-clocks) underneath it.
 
 > Division of labor worth engraving: **consensus agrees on a value even if
 > some nodes are down; atomic commit requires *every* participant's data
@@ -78,11 +93,17 @@ Break the transaction into a chain of **local** transactions, each atomic
 in its own service. If step `k` fails, run **compensating transactions**
 to semantically undo steps `k−1 … 1`.
 
-```text
-  happy path:   reserve stock → charge card → create shipment → done ✓
-  failure at 3: reserve stock → charge card → ✗ shipment fails
-  compensate:                 ← refund card ← release stock     (undone)
+```mermaid
+graph LR
+    S1["reserve stock"] --> S2["charge card"]
+    S2 --> S3["create shipment"]
+    S3 -->|"step 3 fails"| C2["refund card"]
+    C2 --> C1["release stock"]
 ```
+
+Note which way the compensating arrows run: backwards through the chain,
+one new transaction per undone step. Nothing is rolled back; things are
+un-done, in order, by doing more work.
 
 The two costs, stated plainly:
 
@@ -99,8 +120,9 @@ Orchestration (a central state machine drives the steps — clearer,
 debuggable; this is what workflow engines like Temporal industrialize) vs
 **choreography** (each service reacts to the previous one's events —
 looser coupling, harder to follow). Either way, every step and
-compensation **must be idempotent** — steps live in the retry-storm world
-of chapter 2.
+compensation **must be idempotent** — steps live in the retry-storm world of
+[The Network Is Hostile](#/the-network-is-hostile), and a compensation that
+runs twice is as dangerous as a step that does.
 
 ## The dual-write problem and the outbox pattern
 
@@ -124,15 +146,17 @@ outbox**:
    rows as sent. Crash anywhere ⇒ retry ⇒ possibly duplicate publishes —
    but never a *lost* one.
 
-```text
-   ┌──────────── one ACID transaction ───────────┐
-   │  INSERT INTO orders …                       │
-   │  INSERT INTO outbox (event…)                │
-   └─────────────────────────────────────────────┘
-                      │ relay (or CDC: tail the WAL —
-                      ▼  e.g. Debezium)
-                   Kafka ──▶ consumers (must dedupe: at-least-once!)
+```mermaid
+graph LR
+    T["one ACID transaction<br/>INSERT orders + INSERT outbox"] --> DB["the database"]
+    DB --> RL["relay, or CDC tailing the WAL"]
+    RL --> K["Kafka"]
+    K --> CO["consumers - must dedupe"]
 ```
+
+The crash window has not been eliminated, it has been *moved*: the only
+place it can now open is between the database and the relay, where a retry
+produces a duplicate rather than a loss.
 
 Atomicity is *borrowed* from the local database; the network leg downgrades
 to at-least-once + idempotent consumers. Which brings us to the myth.
@@ -140,8 +164,9 @@ to at-least-once + idempotent consumers. Which brings us to the myth.
 ## "Exactly-once": the myth and the truth
 
 Can a message be **delivered** exactly once? No — and you already own every
-piece of the proof. The receiver processes a message, and the ack is lost
-(chapter 2's ambiguity). The sender must choose: retry (⇒ possible second
+piece of the proof. The receiver processes a message, and the ack is lost —
+[the ambiguity](#/the-network-is-hostile) that has been following you since
+Module 1. The sender must choose: retry (⇒ possible second
 delivery: *at-least-once*) or not (⇒ possible zero deliveries:
 *at-most-once*). Exactly-once **delivery** is not an engineering gap; it's
 the ambiguity theorem wearing a different hat.
@@ -169,7 +194,7 @@ don't**:
 
 | Situation | Reach for | You accept |
 |---|---|---|
-| Multi-shard write inside one database | 2PC over consensus groups (NewSQL) | latency of 2 round trips + replication |
+| Multi-shard write inside one database | 2PC over [consensus groups](#/consensus) (NewSQL) | latency of 2 round trips + replication |
 | Multi-service workflow, one org | saga (orchestrated), idempotent steps | no isolation; compensation design |
 | Cross-organization process | saga + reconciliation jobs | eventual settlement (how banks actually work) |
 | DB write + event publish | transactional outbox (or CDC) | at-least-once + consumer dedup |
@@ -177,8 +202,8 @@ don't**:
 
 The professional instinct: distributed transactions are a cost center —
 **first try to re-draw boundaries so the transaction is local** (one
-service owns the whole invariant; partition by the key the invariant lives
-on). The best 2PC is the one you didn't need.
+service owns the whole invariant; [partition](#/partitioning) by the key the
+invariant lives on). The best 2PC is the one you didn't need.
 
 ## Key takeaways
 

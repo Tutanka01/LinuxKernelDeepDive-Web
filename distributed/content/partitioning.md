@@ -7,16 +7,21 @@
 > indexes.
 
 When a dataset or its write load outgrows one machine, you **partition**
-(a.k.a. **shard**) it: each node holds only a subset. Replication and
-partitioning compose — each partition is itself replicated:
+(a.k.a. **shard**) it: each node holds only a subset. Partitioning and
+[replication](#/replication) compose rather than compete — each partition is
+itself replicated, so a four-way split across four nodes still survives one
+node dying:
 
-```text
-              the full dataset, split into 4 partitions
-   ┌──────────┬──────────┬──────────┬──────────┐
-   │   P1     │   P2     │   P3     │   P4     │
-   └──────────┴──────────┴──────────┴──────────┘
-        │            │           │          │  each partition: 3 replicas
-   node A,B,C    node B,C,D   node C,D,A  node D,A,B
+```mermaid
+graph TD
+    DS["full dataset"] --> P1["P1"]
+    DS --> P2["P2"]
+    DS --> P3["P3"]
+    DS --> P4["P4"]
+    P1 --> R1["replicas on A, B, C"]
+    P2 --> R2["replicas on B, C, D"]
+    P3 --> R3["replicas on C, D, A"]
+    P4 --> R4["replicas on D, A, B"]
 ```
 
 The design problem: **which record lives in which partition?** A good scheme
@@ -35,8 +40,8 @@ from sensor X in March" or "users 1000–2000" hit one or two partitions.
 The curse: **skew from access patterns**. If keys are timestamps and
 everyone writes "now", every write lands in the **last** partition — one
 node does all the work while the rest idle. Workarounds prefix the key with
-something spreading (sensor ID before timestamp), trading away some range-
-query convenience.
+something spreading (sensor ID before timestamp), trading away some
+range-query convenience.
 
 Range systems also **split and merge** partitions dynamically: a partition
 growing past a threshold splits in two (like a B-tree node), keeping
@@ -55,6 +60,21 @@ is worth knowing: a **compound key** — hash the first part to pick the
 partition, sort by the rest within it. "All messages of user X in March" →
 one partition (hashed user X), efficient sorted scan inside.
 
+The two strategies are exact mirrors of each other, and the compound key is
+the only place they meet:
+
+```mermaid
+graph TD
+    K["how does a key pick its partition?"] -->|"contiguous ranges"| RG["range partitioning"]
+    K -->|"hash of the key"| HS["hash partitioning"]
+    RG --> RGP["range scans hit one or two partitions"]
+    RG --> RGC["sequential keys pile onto one partition"]
+    HS --> HSP["load spreads even for pathological keys"]
+    HS --> HSC["range scans must query everybody"]
+    RG --> CM["compound key<br/>hash a prefix, sort within it"]
+    HS --> CM
+```
+
 ### The naive trap: hash mod N
 
 The obvious scheme — `partition = hash(key) mod N` for N nodes — has a
@@ -68,6 +88,9 @@ should move only the data that's actually heading to the new node.
 **Consistent hashing** (Karger et al., 1997) arranges the hash space as a
 **ring** (0 to 2³²−1, wrapping). Each node is placed at one or more points
 on the ring; each key belongs to the **first node clockwise** from its hash.
+
+The ring is genuinely circular, so here it is drawn as one — the wrap-around
+is the whole point and no box-and-arrow figure can show it:
 
 ```text
                     ┌── node A
@@ -101,8 +124,9 @@ web caching; memcached clients use it), Dynamo-style databases, load
 balancers, and DHTs like Chord powering BitTorrent's peer discovery.
 
 > Alternative worth knowing: many modern databases skip the ring and keep an
-> explicit **partition-assignment table** managed by a coordinator (more in
-> the consensus chapters) — e.g. HBase, Kafka, and range-based stores. The
+> explicit **partition-assignment table** managed by a coordinator ([The
+> Consensus Problem](#/consensus) and [Raft](#/raft) build that coordinator)
+> — e.g. HBase, Kafka, and range-based stores. The
 > table gives precise control (and dynamic splitting); the ring gives
 > coordination-free placement that any client can compute. Both beat
 > `mod N`.
@@ -118,10 +142,11 @@ grown partitions. Rebalancing well means:
   disks and networks during one turns maintenance into an outage.
 - **Serve while moving** — the partition stays readable/writable during
   copy, with a cutover handshake at the end (and writes during the copy
-  forwarded or double-applied; the consistency guarantees from earlier
-  chapters must hold *through* this).
+  forwarded or double-applied; whatever [consistency
+  model](#/consistency-models) you promised must hold *through* this).
 - **Beware automatic rebalancing + failure detection:** a node that's merely
-  slow gets declared dead (an imperfect failure detector!), triggering a
+  slow gets declared dead (an [imperfect failure
+  detector](#/failure-models), exactly as predicted), triggering a
   rebalance that loads the remaining nodes, making *them* slow… a cascade.
   Many operators keep a human approval step on big rebalances for exactly
   this reason.
@@ -152,13 +177,30 @@ trade-offs:
 - **Local indexes** (document-partitioned): each partition indexes its own
   data. Writes stay local (fast — write one partition, update its index);
   reads must **scatter-gather across all partitions** — every search hits
-  everyone, and tail latency (chapter 2!) compounds.
+  everyone, and the [tail latency](#/the-network-is-hostile) of a hundred
+  parallel calls compounds.
 - **Global indexes** (term-partitioned): the index itself is partitioned by
   the indexed value — "red" lives on one partition, so a search hits just
   it. Reads are surgical; **writes fan out** — one document update touches
   the index partitions of each indexed field, usually asynchronously…
-  meaning the index is *eventually consistent* with the data (and now you
-  can name exactly what that implies).
+  meaning the index is [*eventually
+  consistent*](#/consistency-models) with the data, and you can now name
+  exactly which anomalies that admits.
+
+```mermaid
+graph LR
+    subgraph LOC["local index - document partitioned"]
+        LQ["one search"] --> LA["partition 1"]
+        LQ --> LB["partition 2"]
+        LQ --> LC["partition 3"]
+    end
+    subgraph GLB["global index - term partitioned"]
+        GQ["one search"] --> GA["the partition owning red"]
+    end
+```
+
+The read cost is the whole picture: the local index pays fan-out on every
+search, the global index pays it on every write instead.
 
 Write-heavy favors local; read-heavy favors global. DynamoDB offers both
 (LSI/GSI) so you can pick per index.
@@ -177,7 +219,15 @@ layouts:
 
 In every layout the partition map itself must be kept consistent somewhere —
 historically the job of ZooKeeper or etcd. That "somewhere reliable to keep
-small critical facts" keeps recurring… and is exactly what Module 4 builds.
+small critical facts" keeps recurring… and is exactly what [The Consensus
+Problem](#/consensus) builds.
+
+Worth noticing how far the routing question travels. In LLM serving it has
+overtaken load balancing outright: [The KV
+Fabric](../inference/#/the-kv-fabric) describes routers that send a request
+to the *busy* replica already holding its cached prefix rather than an idle
+one that would have to recompute it — the same "which node already has
+this?" question as above, with the answer worth more than free capacity.
 
 ## Key takeaways
 
@@ -196,7 +246,7 @@ small critical facts" keeps recurring… and is exactly what Module 4 builds.
 - Secondary indexes: **local** = cheap writes + scatter-gather reads;
   **global** = surgical reads + fan-out, eventually-consistent writes.
 - Routing needs a consistent partition map — the small-critical-state
-  problem that consensus systems (next module) exist to solve.
+  problem that [consensus systems](#/consensus) exist to solve.
 
 ```quiz
 [

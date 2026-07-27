@@ -97,9 +97,19 @@ const pageTocEl  = document.getElementById("page-toc");
 const THEME_KEY   = "ldd-theme";
 const hljsThemeEl = document.getElementById("hljs-theme");
 
+/* The highlight.js themes are vendored, not fetched from a CDN. This engine
+   and app.js both live in assets/ but are loaded from documents at two
+   different depths, so a path relative to the *document* is wrong for two of
+   the three courses: ReaderUI resolves it against its own script URL instead.
+   The fallback keeps the theme switch working if reader-ui.js failed to load,
+   deriving the same base from this file's URL. */
+const vendorUrl = window.ReaderUI
+  ? ReaderUI.vendorUrl
+  : rel => new URL("vendor/" + rel, document.currentScript.src).href;
+
 const HLJS_THEME_HREF = {
-  dark:  "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-dark-medium.min.css",
-  paper: "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/gruvbox-light-medium.min.css",
+  dark:  vendorUrl("hljs/gruvbox-dark-medium.min.css"),
+  paper: vendorUrl("hljs/gruvbox-light-medium.min.css"),
 };
 
 function currentTheme() {
@@ -111,7 +121,7 @@ function currentTheme() {
          window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
 }
 
-function applyTheme(theme) {
+function applyTheme(theme, rerenderDiagrams = false) {
   if (theme === "paper") document.documentElement.setAttribute("data-theme", "paper");
   else document.documentElement.removeAttribute("data-theme");
   if (hljsThemeEl) hljsThemeEl.href = HLJS_THEME_HREF[theme];
@@ -120,6 +130,10 @@ function applyTheme(theme) {
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-pressed", String(active));
   });
+  /* Diagram colours are baked into the SVG, so a theme change repaints them.
+     ReaderUI remembers the theme even when Mermaid has not been downloaded
+     yet, so a switch made before any diagram is seen still applies. */
+  if (window.ReaderUI) ReaderUI.setMermaidTheme(theme, rerenderDiagrams);
 }
 
 function setTheme(theme) {
@@ -128,7 +142,7 @@ function setTheme(theme) {
     document.documentElement.classList.add("theme-switching");
     setTimeout(() => document.documentElement.classList.remove("theme-switching"), 300);
   }
-  applyTheme(theme);
+  applyTheme(theme, true);
 }
 
 /* ---------------- scroll memory: keep your place across reloads ---------------- */
@@ -454,7 +468,7 @@ function renderHome() {
       ${modules}
     </div>
     <footer class="page-footer">
-      <p>Part of <a href="../">The Linux Deep Dive</a> — but a journey of its own.</p>
+      <p>One of <a href="../">three courses on this site</a> — but a journey of its own.</p>
     </footer>`;
 
   if (pageTocEl) pageTocEl.innerHTML = "";
@@ -649,8 +663,12 @@ async function renderChapter(slug, anchor) {
       <p>${COURSE_META.footer}</p>
     </footer>`;
 
+  /* Neither a quiz nor a diagram is source code: highlighting either one
+     would paint JSON keywords over a checkpoint, or colour a fence Mermaid
+     is about to replace outright. */
   viewEl.querySelectorAll(".article-body pre code").forEach(el => {
-    if (!el.classList.contains("language-quiz")) hljs.highlightElement(el);
+    if (!el.classList.contains("language-quiz") &&
+        !el.classList.contains("language-mermaid")) hljs.highlightElement(el);
   });
   renderQuizzes(slug);
   decorateHeadings(slug);
@@ -659,6 +677,11 @@ async function renderChapter(slug, anchor) {
 
   if (window.ReaderUI) {
     const body = viewEl.querySelector(".article-body");
+    /* Diagrams first: it swaps each fence for a <pre class="mermaid">
+       synchronously, so the call below measures the element the reader will
+       actually get. The 3.2 MB library itself is only fetched if this
+       chapter has a diagram at all. */
+    ReaderUI.renderMermaid(body || viewEl);
     ReaderUI.prepareContent(body || viewEl);
     ReaderUI.buildInlineToc(
       bodyHeadings().filter(h => h.tagName !== "H4"), slug,

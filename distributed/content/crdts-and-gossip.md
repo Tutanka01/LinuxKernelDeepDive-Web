@@ -1,17 +1,18 @@
 # CRDTs, Gossip & Anti-Entropy
 
 > **Goal of this chapter:** the coordination-free school of distributed
-> systems. Consensus (Module 4) pays latency to prevent divergence; this
+> systems. [Consensus](#/consensus) pays latency to prevent divergence; this
 > chapter's machinery *embraces* divergence and guarantees convergence
 > afterward: CRDTs that merge mathematically, gossip protocols that spread
 > facts like epidemics, and Merkle trees that find a needle of difference in
 > a haystack of data.
 
-The consistency chapter left a door ajar: causal and eventual consistency
-stay **available during partitions** — every replica keeps accepting writes.
-The replication chapter showed the price: concurrent conflicting writes.
-Dynamo's answer (keep siblings, let the application merge) works but pushes
-a subtle burden onto every developer. The question this chapter answers:
+[Consistency Models & CAP](#/consistency-models) left a door ajar: causal
+and eventual consistency stay **available during partitions** — every
+replica keeps accepting writes. [Replication](#/replication) showed the
+price: concurrent conflicting writes. Dynamo's answer (keep siblings, let
+the application merge) works but pushes a subtle burden onto every
+developer. The question this chapter answers:
 **can data types merge *themselves*, correctly, automatically?**
 
 Yes — if the data type is designed for it. That's a **CRDT: Conflict-free
@@ -28,10 +29,18 @@ that is:
 - **Associative:** `(a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)` — grouping doesn't matter.
 - **Idempotent:** `a ⊔ a = a` — merging the same state twice is harmless.
 
-Now recall what the hostile network does to messages: it **reorders** them
-(commutativity absorbs that), **duplicates** them (idempotence absorbs
-that), and delivers them along **arbitrary paths** (associativity absorbs
-that). The three algebraic properties are point-for-point antidotes to the
+Now recall what [the hostile network](#/the-network-is-hostile) does to
+messages. The three algebraic properties are not a coincidence — they line
+up one-to-one with the three things the network does wrong:
+
+```mermaid
+graph LR
+    CM["commutative<br/>a merge b = b merge a"] -->|"neutralises"| RE["reordering"]
+    AS["associative<br/>grouping does not matter"] -->|"neutralises"| MP["arbitrary sync paths"]
+    ID["idempotent<br/>a merge a = a"] -->|"neutralises"| DU["duplication"]
+```
+
+The three algebraic properties are point-for-point antidotes to the
 three network pathologies — replicas can sync with anyone, in any order,
 any number of times, and **provably converge** to the same state, no
 coordinator, no consensus, no waiting. This is called **strong eventual
@@ -49,9 +58,10 @@ classics:
 Naive approach — each replica stores one number, merge = max — fails:
 two replicas both increment 5→6, merge gives 6, an increment is lost.
 
-The fix mirrors vector clocks (chapter 5 pays off again): **one slot per
+The fix mirrors [vector clocks](#/logical-clocks) exactly: **one slot per
 replica**. Replica `i` increments only `slot[i]`; the value is the **sum**
-of slots; merge is **element-wise max**:
+of slots; merge is **element-wise max**. The aligned slot arrays below are
+the argument — read them column by column:
 
 ```text
   A: {A:3, B:1, C:0} = 4        increments at A and C, concurrently:
@@ -72,8 +82,9 @@ view-counters survive multi-datacenter replication.
 ### LWW-Register: a value with a timestamp
 
 Keep `(value, timestamp)`; merge takes the higher timestamp. Simple,
-converges — and inherits every lie of physical clocks from chapter 4:
-concurrent writes are resolved by whichever clock was faster, silently.
+converges — and inherits every lie of physical clocks from [Time, Clocks &
+Why They Lie](#/time-and-clocks): concurrent writes are resolved by
+whichever clock was faster, silently.
 LWW is a *legitimate* CRDT with an *honest* flaw; use it where losing one
 of two concurrent writes is acceptable (e.g. "user's last-seen status"),
 never where it isn't (account balances).
@@ -116,14 +127,20 @@ machinery.
 
 CRDTs define *what* merging means; something must still carry states
 between replicas. The robust classic is **gossip** (epidemic protocols):
+every T milliseconds, each node picks `k` random peers, exchanges state and
+merges. Nobody coordinates, and the rumour still reaches everyone fast,
+because the number of infected nodes doubles every round:
 
-```text
-  every T ms, each node:                round 0:  ●○○○○○○○○○○○○○○○
-    pick k random peers                 round 1:  ●●○○○○○○○○○○○○○○
-    exchange + merge state              round 2:  ●●●●○○○○○○○○○○○○
-                                        round 3:  ●●●●●●●●○○○○○○○○
-  infection doubles per round  ⇒  all N nodes in O(log N) rounds
+```mermaid
+graph LR
+    R0["round 0<br/>1 node knows"] --> R1["round 1<br/>2 nodes"]
+    R1 --> R2["round 2<br/>4 nodes"]
+    R2 --> R3["round 3<br/>8 nodes"]
+    R3 --> RN["round log N<br/>all N nodes"]
 ```
+
+Doubling per round is the finding: a thousand-node cluster is fully infected
+in about ten rounds, and a ten-thousand-node cluster in about fourteen.
 
 Why architects love it: **no coordinator, no topology, no single point** —
 any node can die mid-rumor and the rumor survives; a node that was down
@@ -133,8 +150,8 @@ simply gets re-infected on return; load is uniform and tunable
 eventual consistency, never of linearizability.
 
 Production gossip is everywhere you read "decentralized": Cassandra and
-Riak share cluster membership and node health by gossip (the phi-accrual
-suspicion values from chapter 3 ride on it); Consul and modern Cassandra
+Riak share cluster membership and node health by gossip (the [phi-accrual
+suspicion values](#/failure-models) ride on it); Consul and modern Cassandra
 descendants use **SWIM**-family protocols — gossip specialized for
 membership, where "is node X alive?" is itself the gossiped CRDT-ish state
 (with indirect probes to avoid false accusations through one flaky link).
@@ -149,18 +166,24 @@ absurdly expensive for terabytes that are 99.99% identical.
 The tool that fixes it is the **Merkle tree**: hash the data in chunks,
 then hash the hashes, up to a single root.
 
-```text
-                 root = H(H01, H23)
-               /                  \
-        H01 = H(H0,H1)        H23 = H(H2,H3)
-        /        \             /        \
-      H0          H1         H2          H3
-    chunk0      chunk1     chunk2      chunk3
-
-  compare roots: equal ⇒ DONE (one hash compared, nothing sent)
-  differ ⇒ descend only into differing subtrees ⇒ locate the
-  divergent chunks in O(log n) comparisons
+```mermaid
+graph TD
+    ROOT["root = H(H01, H23)"] --> H01["H01 = H(H0, H1)"]
+    ROOT --> H23["H23 = H(H2, H3)"]
+    H01 --> H0["H0"]
+    H01 --> H1["H1"]
+    H23 --> H2["H2"]
+    H23 --> H3["H3"]
+    H0 --> C0["chunk 0"]
+    H1 --> C1["chunk 1"]
+    H2 --> C2["chunk 2"]
+    H3 --> C3["chunk 3"]
 ```
+
+Equal roots prove the whole dataset is in sync after comparing exactly one
+hash. Unequal roots are descended only along the branches that disagree, so
+the divergent chunks are located in O(log n) comparisons and nothing else
+crosses the network.
 
 Two replicas compare roots; identical ⇒ provably in sync. Different ⇒
 recurse only where hashes differ, transferring exactly the divergent
@@ -173,18 +196,19 @@ root hash commits to every byte below).
 
 You now own both ends of the field's central trade-off:
 
-| | Consensus world (Module 4) | CRDT/gossip world (this chapter) |
+| | [Consensus](#/consensus) world | CRDT/gossip world (this chapter) |
 |---|---|---|
-| During partition | minority side refuses (CP) | everyone keeps writing (AP) |
+| During partition | minority side refuses ([CP](#/consistency-models)) | everyone keeps writing ([AP](#/consistency-models)) |
 | Latency | round trips before acking | local write, sync later |
 | Conflicts | prevented by ordering | absorbed by merge algebra |
-| Guarantee | linearizable | strong eventual + causal |
+| Guarantee | [linearizable](#/consistency-models) | strong eventual + causal |
 | Cost | availability + latency | metadata + weaker reads |
 | Use for | uniqueness, locks, money, config | counters, sets, presence, carts, collaborative docs, membership |
 
 Real architectures use **both**: a consensus core for the small critical
-facts, CRDT/gossip machinery for the high-volume convergent state. The
-final chapter shows exactly that composition in the systems you run.
+facts, CRDT/gossip machinery for the high-volume convergent state.
+[Real-World Architectures](#/real-world-architectures) shows exactly that
+composition in the systems you run.
 
 ## Key takeaways
 

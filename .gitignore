@@ -1,0 +1,12 @@
+# Test tooling. The site itself is dependency-free and build-free; everything
+# below is produced by the suite under tests/ and never belongs in the repo.
+tests/node_modules/
+tests/test-results/
+tests/playwright-report/
+tests/blob-report/
+tests/.cache/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp

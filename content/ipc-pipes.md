@@ -37,10 +37,12 @@ These three are the *byte-stream* family. They are not the whole IPC universe:
 System V and POSIX message queues, POSIX shared memory (`shm_open` + `mmap`),
 futexes, and `eventfd`/`signalfd`/`memfd` all exist for cases these three
 handle poorly — shared memory when you truly cannot afford a copy, message
-queues when you need prioritized fixed-size records. But pipes, FIFOs, and Unix
-sockets carry the overwhelming majority of real IPC traffic on a running Linux
-box, and they share a single mental model: a kernel-owned buffer, a wait queue,
-and a wake-up. Master that model and the rest are variations.
+queues when you need prioritized fixed-size records.
+
+But pipes, FIFOs, and Unix sockets carry the overwhelming majority of real IPC
+traffic on a running Linux box, and they share a single mental model: a
+kernel-owned buffer, a wait queue, and a wake-up. Master that model and the
+rest are variations.
 
 **Which one do you actually want?** A quick decision guide before the details:
 
@@ -81,9 +83,11 @@ The fd-closing choreography matters: the pipe only reports EOF to `grep` when
 *every* copy of the write end is closed. A shell that forgot `close(4)` in the
 second child would leave `grep` hanging forever, waiting for data from a write
 end that `grep` itself still holds open. This "who still holds the write end?"
-question is the single most common pipe bug in real programs. The kernel tracks
-it with two plain reference counts (`pipe->readers`, `pipe->writers`) that are
-decremented in [pipe_release()](https://elixir.bootlin.com/linux/v6.12/C/ident/pipe_release)
+question is the single most common pipe bug in real programs.
+
+The kernel tracks it with two plain reference counts (`pipe->readers`,
+`pipe->writers`) that are decremented in
+[pipe_release()](https://elixir.bootlin.com/linux/v6.12/C/ident/pipe_release)
 when the *last fd referring to one open file description* for that end is
 closed; EOF and `SIGPIPE` fire when the corresponding count hits zero. A
 `dup()` or `fork()` adds fd references to the same description, so closing one
@@ -121,13 +125,17 @@ whole game. `dup()`, `dup2()`, and the fd-table copy that `fork()` performs all
 create new *descriptors* pointing at the *same* description: they share `f_pos`
 and `f_flags`. Two independent `open()` calls on the same path create two
 *separate* descriptions with independent offsets, even though the bytes on disk
-are identical. Several processes that inherited one ordinary writable fd share
-one offset, so each completed write advances the position seen by all of them;
-separate `open()` calls without `O_APPEND` start with independent positions and
-can overwrite the same bytes. `O_APPEND` is an important exception: even with
-separate open file descriptions, each `write()` is positioned at end-of-file
-atomically by the kernel, so independently executing `cmd >> log` does not
-clobber earlier data (although the order of concurrent writes is unspecified).
+are identical.
+
+Several processes that inherited one ordinary writable fd share one offset, so
+each completed write advances the position seen by all of them; separate
+`open()` calls without `O_APPEND` start with independent positions and can
+overwrite the same bytes.
+
+`O_APPEND` is an important exception: even with separate open file
+descriptions, each `write()` is positioned at end-of-file atomically by the
+kernel, so independently executing `cmd >> log` does not clobber earlier data
+(although the order of concurrent writes is unspecified).
 
 `f_count` is why `close()` on one of several dup'd fds does not tear down the
 description: only the *last* close, when `f_count` hits zero, runs the release
@@ -140,8 +148,10 @@ From outside a process you cannot recover this sharing by comparing fd numbers
 description. The kernel exposes the answer through
 [kcmp(2)](https://man7.org/linux/man-pages/man2/kcmp.2.html): `kcmp(pid1, pid2,
 KCMP_FILE, fd1, fd2)` returns 0 iff the two descriptors refer to the *same*
-open file description. `kcmp` was added in kernel 3.5 for exactly one customer
-— checkpoint/restore in user space (CRIU) — and until 5.12 it was gated behind
+open file description.
+
+`kcmp` was added in kernel 3.5 for exactly one customer — checkpoint/restore
+in user space (CRIU) — and until 5.12 it was gated behind
 `CONFIG_CHECKPOINT_RESTORE`. Its very existence is a tell: "which fds secretly
 share a description?" is a question so specific to snapshotting a process tree
 that the kernel grew a syscall to answer it. Why that question is unavoidable
@@ -190,12 +200,13 @@ The default ring is 16 slots × one page = **64 KiB** on x86-64 with its 4 KiB
 default pages (`PIPE_DEF_BUFFERS` is 16). Because each slot holds one page,
 capacity is page-size dependent: arm64 configured with 64 KiB pages gets a
 1 MiB default from the same 16 slots — a genuinely observable architecture
-difference (arm64 supports 4/16/64 KiB page sizes; x86-64 uses 4 KiB). The
-head/tail-index ring design dates from kernel 5.5; before that the same idea
-used `curbuf`/`nrbufs` counters. Since 4.5, if a user already holds a lot of
-pipe memory (past `/proc/sys/fs/pipe-user-pages-soft`, default 16384 pages),
-new unprivileged pipes are created with only **1 slot** rounded up — in
-practice a small pipe — a classic "why is my pipeline suddenly slow on this
+difference (arm64 supports 4/16/64 KiB page sizes; x86-64 uses 4 KiB).
+
+The head/tail-index ring design dates from kernel 5.5; before that the same
+idea used `curbuf`/`nrbufs` counters. Since 4.5, if a user already holds a lot
+of pipe memory (past `/proc/sys/fs/pipe-user-pages-soft`, default 16384
+pages), new unprivileged pipes are created with only **1 slot** rounded up —
+in practice a small pipe — a classic "why is my pipeline suddenly slow on this
 busy box" surprise.
 
 Slots are allocated lazily. An idle pipe holds the `bufs` array but no data
@@ -256,10 +267,13 @@ Pipes are a favorite of event loops, so their `poll` behavior is worth
 pinning down. The read end is *readable* when the pipe holds data **or** when
 `writers == 0` (so EOF wakes a poller too); the write end is *writable* when
 there is room for at least one `PIPE_BUF`-sized write, or when `readers == 0`
-(so a broken pipe also wakes the poller, who then gets `EPIPE`). The kernel
-does not wake sleepers on every byte: `pipe_write()` only kicks `rd_wait` and
-`epoll` watchers when it transitions the pipe from empty to non-empty, and
-`pipe_read()` only wakes writers when it frees space in a previously full ring.
+(so a broken pipe also wakes the poller, who then gets `EPIPE`).
+
+The kernel does not wake sleepers on every byte: `pipe_write()` only kicks
+`rd_wait` and `epoll` watchers when it transitions the pipe from empty to
+non-empty, and `pipe_read()` only wakes writers when it frees space in a
+previously full ring.
+
 This edge-triggered internal wake-up is why a lazy reader that never drains can
 stall a writer indefinitely with no extra wake-up churn — and why level- vs
 edge-triggered `epoll` (`EPOLLET`) on a pipe fd needs the usual "drain until
@@ -301,14 +315,18 @@ splice(pipe_read_fd, NULL, file_fd, &offset, len, SPLICE_F_MOVE);
 pages** (see [Virtual Memory](#/memory) and
 [Lab: Watch the Page Cache Work](#/lab-page-cache)); the buffer's `ops` become
 the page-cache buffer ops, so releasing the slot drops a page reference rather
-than freeing a page. `tee()` duplicates pipe contents into a second pipe
-without consuming them (it just bumps the reference count on the shared pages);
-`vmsplice()` maps user memory pages into a pipe, and with `SPLICE_F_GIFT` the
-pages are donated to the kernel. `sendfile(out_fd, in_fd, ...)` is the same
-machinery with the intermediate pipe hidden inside the kernel — it's how
-nginx serves static files: page cache → socket, zero user-space copies. One
-honest caveat: `SPLICE_F_MOVE` has been a hint the kernel largely ignores for
-years; the win is the avoided *userspace* copy, not literal page stealing.
+than freeing a page.
+
+`tee()` duplicates pipe contents into a second pipe without consuming them (it
+just bumps the reference count on the shared pages); `vmsplice()` maps user
+memory pages into a pipe, and with `SPLICE_F_GIFT` the pages are donated to
+the kernel.
+
+`sendfile(out_fd, in_fd, ...)` is the same machinery with the intermediate
+pipe hidden inside the kernel — it's how nginx serves static files: page cache
+→ socket, zero user-space copies. One honest caveat: `SPLICE_F_MOVE` has been
+a hint the kernel largely ignores for years; the win is the avoided
+*userspace* copy, not literal page stealing.
 [Modern I/O & io_uring](#/modern-io) covers where zero-copy I/O went next.
 
 > **Security aside — Dirty Pipe (CVE-2022-0847).** This page-reference design
@@ -441,7 +459,9 @@ Flow control is the socket buffer accounting you already know: in-flight bytes
 are charged against the sender's send buffer, capped by `SO_SNDBUF`, which
 defaults to `net.core.wmem_default` (**212992 bytes ≈ 208 KiB** on stock
 kernels; the value you set with `SO_SNDBUF` is doubled internally for
-bookkeeping). When the peer's receive buffer (`SO_RCVBUF`, default
+bookkeeping).
+
+When the peer's receive buffer (`SO_RCVBUF`, default
 `net.core.rmem_default`, also ~208 KiB) is full, a `SOCK_STREAM` sender blocks
 in [unix_stream_sendmsg()](https://elixir.bootlin.com/linux/v6.12/C/ident/unix_stream_sendmsg)
 on the peer's write-space wait queue; a `SOCK_DGRAM` sender blocks (or gets
@@ -535,15 +555,18 @@ sequenceDiagram
 There's a dark corner: fds can carry Unix sockets, and those sockets can
 themselves hold queued messages containing fds — including, circularly, each
 other. Two processes can build a reference cycle and exit, leaving files
-alive with no reachable owner. The kernel runs a special **garbage collector**
+alive with no reachable owner.
+
+The kernel runs a special **garbage collector**
 ([unix_gc()](https://elixir.bootlin.com/linux/v6.12/C/ident/unix_gc)) just
 for in-flight `SCM_RIGHTS` fds; as of 6.10 it was rewritten to model in-flight
 fds as an explicit graph and detect dead cycles with Tarjan's
-strongly-connected-components algorithm. Yes: there is a graph-theory garbage
-collector in the kernel purely because of this one feature. (The pre-6.10
-version was the source of several subtle bugs and lock-ordering headaches; the
-rewrite made the invariant explicit — an in-flight fd is a graph edge — which
-is the real lesson.)
+strongly-connected-components algorithm.
+
+Yes: there is a graph-theory garbage collector in the kernel purely because of
+this one feature. (The pre-6.10 version was the source of several subtle bugs
+and lock-ordering headaches; the rewrite made the invariant explicit — an
+in-flight fd is a graph edge — which is the real lesson.)
 
 ### Credential passing: kernel-verified identity
 
@@ -560,12 +583,13 @@ getsockopt(sock, SOL_SOCKET, SO_PEERCRED, &creds, &len);
 was established — it never changes for the life of the connection, which is
 exactly what you want for authentication. This is the foundation of D-Bus
 authentication, polkit decisions, and systemd's permission model: no passwords,
-no tokens — the kernel itself vouches for the caller's UID. Its per-message
-cousin, `SCM_CREDENTIALS` (enabled with the `SO_PASSCRED` socket option),
-attaches the sender's credentials to *each datagram* and is used with
-`SOCK_DGRAM` control channels; the kernel validates that a process can only
-claim its own PID/UID (or others if it holds `CAP_SYS_ADMIN`/`CAP_SETUID`).
-Two further refinements worth knowing:
+no tokens — the kernel itself vouches for the caller's UID.
+
+Its per-message cousin, `SCM_CREDENTIALS` (enabled with the `SO_PASSCRED`
+socket option), attaches the sender's credentials to *each datagram* and is
+used with `SOCK_DGRAM` control channels; the kernel validates that a process
+can only claim its own PID/UID (or others if it holds
+`CAP_SYS_ADMIN`/`CAP_SETUID`). Two further refinements worth knowing:
 
 - Credentials are translated across [user namespaces](#/namespaces): a
   container's "root" shows up as its mapped host UID.

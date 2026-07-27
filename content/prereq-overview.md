@@ -24,10 +24,11 @@ And yet everything *below* the command line is fog. You know `nginx` is "a
 process," but not what a process is made of. You have heard "it ran out of
 memory," but the memory in question is an abstraction you have never had to
 open. You know a container "isolates" things, without knowing which kernel
-feature does the isolating or what it means for that feature to leak. None of
-this has stopped you doing your job — operational knowledge is real knowledge —
-but it caps how deep you can go when something breaks in a way the runbook
-didn't predict.
+feature does the isolating or what it means for that feature to leak.
+
+None of this has stopped you doing your job — operational knowledge is real
+knowledge — but it caps how deep you can go when something breaks in a way the
+runbook didn't predict.
 
 That is exactly who Part 0 is for. It does not teach you Linux from zero; you
 are past zero. It takes the competence you already have and pours a foundation

@@ -25,7 +25,17 @@ The whole thing is a control loop clocked by ACKs. Each ACK is feedback from the
 
 ### Slow start: exponential probing
 
-Every new connection starts in **slow start** with an initial window of **10 segments** (IW10, the default since kernel 2.6.39; the value comes from [TCP_INIT_CWND](https://elixir.bootlin.com/linux/v6.12/C/ident/TCP_INIT_CWND)). With a 1460-byte MSS that is ~14.2 KB — enough to fit a small HTTP response in the first burst without waiting for the window to open. Each ACK during slow start grows cwnd by the number of newly acknowledged segments, so the window roughly **doubles every RTT**: 10 → 20 → 40 → 80. The growth is driven by [tcp_slow_start()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_slow_start), which adds the acked count to cwnd and clamps at `snd_ssthresh`.
+Every new connection starts in **slow start** with an initial window of **10
+segments** (IW10, the default since kernel 2.6.39; the value comes from
+[TCP_INIT_CWND](https://elixir.bootlin.com/linux/v6.12/C/ident/TCP_INIT_CWND)).
+With a 1460-byte MSS that is ~14.2 KB — enough to fit a small HTTP response in
+the first burst without waiting for the window to open.
+
+Each ACK during slow start grows cwnd by the number of newly acknowledged
+segments, so the window roughly **doubles every RTT**: 10 → 20 → 40 → 80. The
+growth is driven by
+[tcp_slow_start()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_slow_start),
+which adds the acked count to cwnd and clamps at `snd_ssthresh`.
 
 Slow start ends one of two ways: cwnd crosses `snd_ssthresh` (the slow-start threshold — initialized to effectively infinity, `TCP_INFINITE_SSTHRESH`, so a fresh connection stays in slow start until its *first* loss), or a loss is detected. Either way the connection switches to the algorithm's **congestion avoidance** mode, where growth becomes linear or curve-shaped instead of exponential.
 
@@ -47,7 +57,25 @@ sender                                    receiver
   │──── seq=2001..3000 ──────────────────→│  (fast retransmit, cwnd reduced)
 ```
 
-The diagram above shows the *classic* three-duplicate-ACK loss detector. Modern Linux mostly doesn't wait for three dupacks: since 4.18 the default loss detection is **RACK-TLP** (RFC 8985, `net.ipv4.tcp_recovery=1`), which marks a segment lost when a segment sent *later* has been (S)ACKed and more than a small reordering window has elapsed. That window is adaptive — it starts around a quarter of the smoothed RTT (`tp->srtt_us / 4`) and stretches when reordering is actually observed, so a path that shuffles packets doesn't trigger spurious retransmits. Time-based detection recovers from tail losses that dupack-counting never sees: if the last segment of a response is dropped, there are no *later* segments to generate dupacks, so classic Reno would sit until the retransmission timeout. The **Tail Loss Probe (TLP)** fires first, after ~2 sRTT, resending the last segment (or sending a new one) to provoke a SACK instead of waiting out the full RTO. The RTO itself has a 200 ms floor on Linux (`TCP_RTO_MIN`) and an initial value of 1 s per RFC 6298.
+The diagram above shows the *classic* three-duplicate-ACK loss detector.
+Modern Linux mostly doesn't wait for three dupacks: since 4.18 the default
+loss detection is **RACK-TLP** (RFC 8985, `net.ipv4.tcp_recovery=1`), which
+marks a segment lost when a segment sent *later* has been (S)ACKed and more
+than a small reordering window has elapsed.
+
+That window is adaptive — it starts around a quarter of the smoothed RTT
+(`tp->srtt_us / 4`) and stretches when reordering is actually observed, so a
+path that shuffles packets doesn't trigger spurious retransmits.
+
+Time-based detection recovers from tail losses that dupack-counting never
+sees: if the last segment of a response is dropped, there are no *later*
+segments to generate dupacks, so classic Reno would sit until the
+retransmission timeout.
+
+The **Tail Loss Probe (TLP)** fires first, after ~2 sRTT, resending the last
+segment (or sending a new one) to provoke a SACK instead of waiting out the
+full RTO. The RTO itself has a 200 ms floor on Linux (`TCP_RTO_MIN`) and an
+initial value of 1 s per RFC 6298.
 
 The congestion window is not `socket.send_buffer_size`. It's a dynamic cap managed *per connection* by the kernel. Every ACK increases it slightly; every loss decreases it sharply. This loop is the entire game.
 
@@ -97,7 +125,21 @@ Congestion control algorithms are pluggable modules implementing [struct tcp_con
 
 Modules register themselves with [tcp_register_congestion_control()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_register_congestion_control) in `net/ipv4/tcp_cong.c`. That's the whole plugin API — CUBIC, BBR, DCTCP, Vegas and a dozen others are just modules filling in this table. Each algorithm gets `ICSK_CA_PRIV_SIZE` (currently 168 bytes in 6.12) of per-socket private scratch space in `icsk->icsk_ca_priv[]`, cast to the algorithm's own state struct — CUBIC stores its `struct bictcp` there, BBR its `struct bbr`. Since kernel 5.6 you can even write a congestion control algorithm in eBPF and load it without a module, using the struct_ops mechanism (see [eBPF Internals](#/ebpf-internals)).
 
-The five `icsk_ca_state` values drive recovery: `Open` is normal operation; `Disorder` means SACKs/dupacks arrived but nothing is marked lost yet; `CWR` (Congestion Window Reduced) means the window is being reduced in response to ECN or local congestion, via [tcp_enter_cwr()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_enter_cwr); `Recovery` means fast retransmit is in progress (entered via [tcp_fastretrans_alert()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_fastretrans_alert)); `Loss` means an RTO fired and cwnd collapsed to 1 segment ([tcp_enter_loss()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_enter_loss)). The reduction during `Recovery` is metered out gradually by **Proportional Rate Reduction** (PRR, RFC 6937, [tcp_cwnd_reduction()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_cwnd_reduction)) rather than dropped in one step, so the flow keeps sending at roughly the reduced rate instead of stalling and bursting.
+The five `icsk_ca_state` values drive recovery: `Open` is normal operation;
+`Disorder` means SACKs/dupacks arrived but nothing is marked lost yet; `CWR`
+(Congestion Window Reduced) means the window is being reduced in response to
+ECN or local congestion, via
+[tcp_enter_cwr()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_enter_cwr);
+`Recovery` means fast retransmit is in progress (entered via
+[tcp_fastretrans_alert()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_fastretrans_alert));
+`Loss` means an RTO fired and cwnd collapsed to 1 segment
+([tcp_enter_loss()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_enter_loss)).
+
+The reduction during `Recovery` is metered out gradually by **Proportional
+Rate Reduction** (PRR, RFC 6937,
+[tcp_cwnd_reduction()](https://elixir.bootlin.com/linux/v6.12/C/ident/tcp_cwnd_reduction))
+rather than dropped in one step, so the flow keeps sending at roughly the
+reduced rate instead of stalling and bursting.
 
 ## The classic: CUBIC
 
@@ -121,7 +163,18 @@ window size
          loss     loss     loss
 ```
 
-On loss, CUBIC multiplies cwnd by **0.7** (the `beta` module parameter, 717/1024) instead of Reno's 0.5 — a gentler backoff suited to large windows. Because growth depends on *time* rather than on ACK arrivals, CUBIC is RTT-fair: a connection with 200 ms RTT probes at the same clock-time rate as one with 5 ms RTT. Reno grows per-ACK, so high-RTT connections grow painfully slowly (the "RTT unfairness" problem). CUBIC also runs a **Reno-friendly region**: it computes what a Reno flow's window would be and uses the larger of the two, so on short-RTT paths where cubic growth would be slower than Reno's, CUBIC doesn't lose ground to legacy TCP.
+On loss, CUBIC multiplies cwnd by **0.7** (the `beta` module parameter,
+717/1024) instead of Reno's 0.5 — a gentler backoff suited to large windows.
+
+Because growth depends on *time* rather than on ACK arrivals, CUBIC is
+RTT-fair: a connection with 200 ms RTT probes at the same clock-time rate as
+one with 5 ms RTT. Reno grows per-ACK, so high-RTT connections grow painfully
+slowly (the "RTT unfairness" problem).
+
+CUBIC also runs a **Reno-friendly region**: it computes what a Reno flow's
+window would be and uses the larger of the two, so on short-RTT paths where
+cubic growth would be slower than Reno's, CUBIC doesn't lose ground to legacy
+TCP.
 
 Linux's CUBIC also ships **HyStart**: instead of slow-starting blindly until the first loss (overshooting badly on big-BDP paths), HyStart watches two signals — the spacing of ACK trains and a rise in the minimum RTT within a round — and exits slow start into congestion avoidance *before* the queue overflows. Kernel 5.11 refined this toward the standardized **HyStart++** heuristics (RFC 9406), which replace the fragile ACK-train detector with a more robust RTT-based trigger and add a "conservative slow start" ramp after the exit.
 
@@ -216,7 +269,16 @@ sysctl net.ipv4.tcp_ecn     # 2 (default): accept ECN if peer requests, never re
 ss -tin | grep ecn          # connections that negotiated ECN show "ecn"
 ```
 
-ECN avoids the retransmission penalty of loss-based signaling. For datacenter workloads (small flows, shallow switch buffers), it can cut tail latency by orders of magnitude. The catch: a small number of broken middleboxes strip or mangle ECN bits — which is why the default (`tcp_ecn=2`) is passive. Note the default is *accept-only*, not off. Classic RFC 3168 ECN is also coarse — one mark per RTT triggers a full back-off. **Accurate ECN** (AccECN, RFC 9768) fixes that by feeding back an exact *count* of CE marks, which is what DCTCP and BBRv2/v3 want; Linux has had experimental AccECN support gated behind `net.ipv4.tcp_ecn` mode bits.
+ECN avoids the retransmission penalty of loss-based signaling. For datacenter
+workloads (small flows, shallow switch buffers), it can cut tail latency by
+orders of magnitude. The catch: a small number of broken middleboxes strip or
+mangle ECN bits — which is why the default (`tcp_ecn=2`) is passive. Note the
+default is *accept-only*, not off.
+
+Classic RFC 3168 ECN is also coarse — one mark per RTT triggers a full
+back-off. **Accurate ECN** (AccECN, RFC 9768) fixes that by feeding back an
+exact *count* of CE marks, which is what DCTCP and BBRv2/v3 want; Linux has
+had experimental AccECN support gated behind `net.ipv4.tcp_ecn` mode bits.
 
 ### DCTCP: ECN as a proportional signal
 
@@ -224,7 +286,16 @@ ECN avoids the retransmission penalty of loss-based signaling. For datacenter wo
 
 ### RTT-based signals (delay-based)
 
-BBR, Vegas, and CDG use increasing RTT as an early congestion signal — the queue is growing, so back off *before* it overflows. This is the fundamental split in the design space: loss-based algorithms fill queues until they overflow; delay/model-based algorithms try to never fill them at all. The weakness of pure delay-based schemes is that they lose to loss-based ones when sharing a link — a Vegas flow backs off on rising RTT while a CUBIC flow keeps pushing, so CUBIC steals the capacity. BBR sidesteps this by not backing off on delay alone; it paces to its bandwidth *model* and only visits low-RTT territory briefly during PROBE_RTT.
+BBR, Vegas, and CDG use increasing RTT as an early congestion signal — the
+queue is growing, so back off *before* it overflows. This is the fundamental
+split in the design space: loss-based algorithms fill queues until they
+overflow; delay/model-based algorithms try to never fill them at all.
+
+The weakness of pure delay-based schemes is that they lose to loss-based ones
+when sharing a link — a Vegas flow backs off on rising RTT while a CUBIC flow
+keeps pushing, so CUBIC steals the capacity. BBR sidesteps this by not backing
+off on delay alone; it paces to its bandwidth *model* and only visits low-RTT
+territory briefly during PROBE_RTT.
 
 ## The complete sysctl landscape
 
@@ -303,7 +374,17 @@ tc qdisc replace dev eth0 root cake bandwidth 100mbit
 tc qdisc add dev vethXXXX root cake bandwidth 10mbit
 ```
 
-CoDel's algorithm in one sentence: track each packet's **sojourn time** through the queue, and if it stays above the **target (5 ms)** for a full **interval (100 ms)**, start dropping — at an increasing rate that grows with the inverse square root of the number of drops — until sojourn time falls back below target. Crucially CoDel measures *time in queue*, not queue *length* in bytes, so it adapts automatically to any link rate without tuning. `fq_codel` wraps that in stochastic fair queuing (1024 flow buckets by default, hashed from the packet 5-tuple), so one bulk flow can't bloat the queue for everyone else's SSH keystrokes, and it gives a small priority boost to sparse (interactive) flows. It's "no knobs" by design.
+CoDel's algorithm in one sentence: track each packet's **sojourn time**
+through the queue, and if it stays above the **target (5 ms)** for a full
+**interval (100 ms)**, start dropping — at an increasing rate that grows with
+the inverse square root of the number of drops — until sojourn time falls back
+below target. Crucially CoDel measures *time in queue*, not queue *length* in
+bytes, so it adapts automatically to any link rate without tuning.
+
+`fq_codel` wraps that in stochastic fair queuing (1024 flow buckets by
+default, hashed from the packet 5-tuple), so one bulk flow can't bloat the
+queue for everyone else's SSH keystrokes, and it gives a small priority boost
+to sparse (interactive) flows. It's "no knobs" by design.
 
 Note the division of labor: **fq_codel** manages *queue delay* (great as a default everywhere); **fq** provides *pacing* for TCP (preferred on servers running BBR). On a busy BBR server the usual choice is `net.core.default_qdisc=fq`; at a network edge facing an uplink you don't control, CAKE with an explicit `bandwidth` shaper is what actually kills bufferbloat, because it moves the queue from the ISP's un-managed buffer into your CAKE-managed one.
 
@@ -385,7 +466,17 @@ Read the two files side by side — [tcp_input.c](https://elixir.bootlin.com/lin
 
 ## The QUIC future
 
-TCP runs in the kernel; QUIC runs in user space (over UDP). QUIC congestion control is implemented in libraries (quiche, lsquic, msquic, Chromium) rather than the kernel — the same CUBIC and BBR algorithms, reimplemented per library. It's an architectural shift: application developers can deploy custom congestion algorithms without kernel patches, and QUIC's per-packet monotonic numbering plus mandatory ACK-delay reporting make its loss and RTT signals cleaner than TCP's. The cost is losing two decades of kernel-side tuning (TSQ, autotuning, hardware offload maturity) and paying more CPU per byte in userspace.
+TCP runs in the kernel; QUIC runs in user space (over UDP). QUIC congestion
+control is implemented in libraries (quiche, lsquic, msquic, Chromium) rather
+than the kernel — the same CUBIC and BBR algorithms, reimplemented per
+library.
+
+It's an architectural shift: application developers can deploy custom
+congestion algorithms without kernel patches, and QUIC's per-packet monotonic
+numbering plus mandatory ACK-delay reporting make its loss and RTT signals
+cleaner than TCP's. The cost is losing two decades of kernel-side tuning (TSQ,
+autotuning, hardware offload maturity) and paying more CPU per byte in
+userspace.
 
 The kernel's UDP stack still decides QUIC performance: UDP GRO/GSO (`UDP_SEGMENT`), `SO_REUSEPORT` with an eBPF steering program (see [eBPF Internals](#/ebpf-internals)), busy polling, and receive buffer sizing. An in-kernel QUIC implementation has been proposed upstream, but as of 6.12 QUIC remains userspace.
 

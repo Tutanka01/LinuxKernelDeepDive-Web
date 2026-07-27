@@ -211,11 +211,13 @@ The `uname -r` line is the punchline: an Alpine container, an Ubuntu
 container, and your Fedora host all report the same kernel version, because
 **the kernel is never in the image**. Images contain only user space (the
 [Kernel, User Space & Syscalls](#/kernel-vs-userspace) distinction paying
-off): a libc, a shell, some binaries. And the `/proc/$PID/ns` listing shows
-you the whole isolation state of the container as a handful of symlinks —
-that's all there is. Any namespace whose inode number *matches* yours is one
-the container is sharing with the host (by default, none of them are shared;
-`--net=host` would make the network row match).
+off): a libc, a shell, some binaries.
+
+And the `/proc/$PID/ns` listing shows you the whole isolation state of the
+container as a handful of symlinks — that's all there is. Any namespace whose
+inode number *matches* yours is one the container is sharing with the host
+(by default, none of them are shared; `--net=host` would make the network row
+match).
 
 ## Containers vs virtual machines
 
@@ -250,18 +252,21 @@ the same nginx binary cache it twice. Containers share one kernel and one page
 cache ([Virtual Memory](#/memory)): if ten containers run the same image
 layer, the `libc.so` inside it is one set of physical pages (4 KiB each on
 x86-64 by default; arm64 kernels may be built for 4, 16, or 64 KiB pages),
-mapped ten times. The kernel deduplicates by inode: OverlayFS presents the
-lower layer as the *same* underlying file to all ten containers, so the page
-cache keys on one inode and every mapping shares it copy-on-write. This — not
-startup time — is the real density win, and it's why "1000 containers, 4 GiB
-of RAM" is plausible while "1000 VMs, 4 GiB" is not.
+mapped ten times.
+
+The kernel deduplicates by inode: OverlayFS presents the lower layer as the
+*same* underlying file to all ten containers, so the page cache keys on one
+inode and every mapping shares it copy-on-write. This — not startup time — is
+the real density win, and it's why "1000 containers, 4 GiB of RAM" is
+plausible while "1000 VMs, 4 GiB" is not.
 
 **Security.** Every container on a host talks to one shared kernel through the
 full syscall interface — roughly **375 syscalls on x86-64 as of 6.12**
-(numbered up to 462 — the table has gaps). A
-kernel vulnerability reachable from inside a container can mean escape to the
-host: the boundary is a software API surface, not a hardware trap. This is why
-high-stakes multi-tenant platforms wrap containers in micro-VMs
+(numbered up to 462 — the table has gaps). A kernel vulnerability reachable
+from inside a container can mean escape to the host: the boundary is a
+software API surface, not a hardware trap.
+
+This is why high-stakes multi-tenant platforms wrap containers in micro-VMs
 (**Firecracker** boots a stripped guest kernel in ~125 ms with <5 MiB overhead
 per microVM; **Kata Containers** does the same with standard runtimes) or
 interpose a user-space kernel (**gVisor**, which implements the syscall ABI
@@ -399,8 +404,9 @@ Root was split into **41 capabilities** as of 6.12 (`CAP_CHOWN` = 0 through
 `CAP_CHECKPOINT_RESTORE` = 40; `CAP_LAST_CAP` = 40). A default Docker container
 keeps only **14** of them (`CAP_CHOWN`, `CAP_NET_BIND_SERVICE`, `CAP_KILL`,
 `CAP_SETUID`, `CAP_SETGID`…) and crucially drops `CAP_SYS_ADMIN` — the "new
-root" that gates mount, most namespace tricks, BPF loading, and much more. A
-capability check is one call to
+root" that gates mount, most namespace tricks, BPF loading, and much more.
+
+A capability check is one call to
 [ns_capable()](https://elixir.bootlin.com/linux/v6.12/C/ident/ns_capable),
 which tests a bit in `cred->cap_effective` *relative to a user namespace* — the
 same bit means "can do X on the host" or "can do X only inside this container"
@@ -412,10 +418,11 @@ the ~375 x86-64 syscalls (`mount(2)`, `reboot(2)`, `kexec_load(2)`,
 exploit). The filter is a classic-BPF program stored in the
 `struct seccomp_filter` chain; the kernel runs it on **every** syscall entry
 via [__secure_computing()](https://elixir.bootlin.com/linux/v6.12/C/ident/__secure_computing),
-returning one of `ALLOW`, `ERRNO`, `TRAP`, `KILL`, or `TRACE`. The cost is on
-the order of tens of nanoseconds per syscall — cheap enough that it's on by
-default, and the reason a filter should match with as few instructions as
-possible.
+returning one of `ALLOW`, `ERRNO`, `TRAP`, `KILL`, or `TRACE`.
+
+The cost is on the order of tens of nanoseconds per syscall — cheap enough
+that it's on by default, and the reason a filter should match with as few
+instructions as possible.
 
 ```bash
 # See exactly which caps and seccomp mode a running process has.
@@ -428,13 +435,15 @@ capsh --decode=$(grep CapEff /proc/self/status | awk '{print $2}')
 A Kubernetes **pod** is a group of containers that share **network** and
 **IPC** namespaces (and optionally PID). They reach each other on `localhost`.
 This is achieved by: create the shared namespaces once, then start each
-container's process inside them via `setns(2)`. A tiny "pause" container
-(an infinite `pause()` in a few kilobytes of static binary) holds the shared
-namespaces open — necessary because a namespace is freed when its `ns_common`
-reference count reaches zero, and without the pause process the namespaces
-would evaporate whenever an app container restarted. The pause container is the
-reference holder that keeps the pod's identity stable across restarts. This is
-why `localhost` works within a pod but not between pods.
+container's process inside them via `setns(2)`.
+
+A tiny "pause" container (an infinite `pause()` in a few kilobytes of static
+binary) holds the shared namespaces open — necessary because a namespace is
+freed when its `ns_common` reference count reaches zero, and without the
+pause process the namespaces would evaporate whenever an app container
+restarted. The pause container is the reference holder that keeps the pod's
+identity stable across restarts. This is why `localhost` works within a pod
+but not between pods.
 
 ## A 10-line container, as a teaser
 
@@ -457,8 +466,9 @@ container — because `unshare(2)` + a root filesystem *is* a container. Notice
 the `--fork`: `unshare(CLONE_NEWPID)` deliberately does **not** move the
 calling process into the new PID namespace (a process's PID is fixed at birth,
 because too much code assumes `getpid()` never changes); it only sets
-`nsproxy->pid_ns_for_children`, so the *next child* becomes PID 1. The
-[Build a Container by Hand](#/build-a-container) chapter does all of this
+`nsproxy->pid_ns_for_children`, so the *next child* becomes PID 1.
+
+The [Build a Container by Hand](#/build-a-container) chapter does all of this
 properly (pivot_root instead of the escapable chroot, cgroups, caps, seccomp —
 the full assembly) and explains every line.
 

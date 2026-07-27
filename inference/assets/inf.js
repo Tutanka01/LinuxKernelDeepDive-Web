@@ -139,7 +139,9 @@ const COURSE_META = {
   searchKey: "inf-search-index-v1",       /* localStorage: cached search index */
   name:      "Inference Engineering",
   homeTitle: "Inference Engineering — A Guided Course",
-  heroTitle: "Inference Engineering,<br>from first principles",
+  /* No hard <br>: course.css sets `text-wrap: balance` on .hero h1, which
+     breaks the line where the width actually wants it. */
+  heroTitle: "Inference Engineering, from first principles",
   heroLede:  `Every answer an LLM streams back is a fight against physics: a
               model too big for its GPU, generating one token at a time, for
               thousands of users at once. This course builds the whole

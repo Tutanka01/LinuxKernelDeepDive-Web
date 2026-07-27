@@ -32,11 +32,28 @@ write() / read()
   disk / SSD
 ```
 
-Every layer exists because someone ran a workload, measured, and found a bottleneck. Understanding the stack means understanding *why* each layer is there. The [VFS layer above it](#/filesystems) decides *which* blocks a file maps to; this chapter is about everything that happens after that decision. And the numbers explain the design: a 7200 RPM disk needs ~4 ms average seek plus ~4.2 ms average rotational latency per random access (call it 8 ms, ~125 random IOPS), a SATA SSD answers in 50–200 µs, and a decent NVMe drive in 10–100 µs while sustaining over a million IOPS. A stack designed around hiding 8 ms had to be rebuilt when the device started answering in 10 µs.
+Every layer exists because someone ran a workload, measured, and found a
+bottleneck. Understanding the stack means understanding *why* each layer is
+there. The [VFS layer above it](#/filesystems) decides *which* blocks a file
+maps to; this chapter is about everything that happens after that decision.
+
+And the numbers explain the design: a 7200 RPM disk needs ~4 ms average seek
+plus ~4.2 ms average rotational latency per random access (call it 8 ms, ~125
+random IOPS), a SATA SSD answers in 50–200 µs, and a decent NVMe drive in
+10–100 µs while sustaining over a million IOPS. A stack designed around hiding
+8 ms had to be rebuilt when the device started answering in 10 µs.
 
 ## The page cache: where writes begin
 
-Every buffered `write()` lands in the **page cache** first — file data cached in RAM, indexed per file by `(inode, page offset)`. The write returns to user space the instant the data is copied into the cache; the kernel writes it to disk later, asynchronously. On x86-64 the base page is 4 KiB (arm64 kernels can be built with 4, 16, or 64 KiB pages), and since roughly v5.16 the page cache is managed in **folios** — a `struct folio` is one or more physically contiguous pages handled as a unit, which lets ext4/XFS cache and write back in chunks larger than 4 KiB.
+Every buffered `write()` lands in the **page cache** first — file data cached
+in RAM, indexed per file by `(inode, page offset)`. The write returns to user
+space the instant the data is copied into the cache; the kernel writes it to
+disk later, asynchronously.
+
+On x86-64 the base page is 4 KiB (arm64 kernels can be built with 4, 16, or 64
+KiB pages), and since roughly v5.16 the page cache is managed in **folios** —
+a `struct folio` is one or more physically contiguous pages handled as a unit,
+which lets ext4/XFS cache and write back in chunks larger than 4 KiB.
 
 The core data structure is `struct address_space` (one per cached inode, `inode->i_mapping`), whose fields you'll meet constantly in mm and fs code:
 
@@ -278,7 +295,16 @@ mdadm --detail /dev/md0 | grep -E 'Level|State|Journal|Consistency'
 
 ## The NVMe revolution
 
-NVMe (Non-Volatile Memory Express) is a command protocol designed from scratch for flash attached over PCIe. Compare the queueing models: SATA/AHCI gives you **one** command queue, 32 entries deep, with heavyweight per-command register access. NVMe gives you up to 65,535 I/O queue pairs, 65,536 entries each, living in ordinary host RAM: the driver writes a 64-byte command into a **submission queue**, rings a doorbell register, and the controller DMAs the command, executes it (out of order, freely), and posts a 16-byte entry to the paired **completion queue**, raising an MSI-X interrupt.
+NVMe (Non-Volatile Memory Express) is a command protocol designed from scratch
+for flash attached over PCIe. Compare the queueing models: SATA/AHCI gives you
+**one** command queue, 32 entries deep, with heavyweight per-command register
+access.
+
+NVMe gives you up to 65,535 I/O queue pairs, 65,536 entries each, living in
+ordinary host RAM: the driver writes a 64-byte command into a **submission
+queue**, rings a doorbell register, and the controller DMAs the command,
+executes it (out of order, freely), and posts a 16-byte entry to the paired
+**completion queue**, raising an MSI-X interrupt.
 
 The Linux driver (`drivers/nvme/host/pci.c`) creates one queue pair per CPU and registers them with blk-mq as hardware contexts — the two designs fit like they were made for each other (blk-mq was, in fact, designed on NVMe prototypes).
 

@@ -18,12 +18,15 @@ requires: criu-restore, live-migration, container-runtimes
 The last three chapters dissected one snapshot technology — CRIU — down to the
 syscall. This chapter zooms out twice. First to the *software stack*: CRIU is
 a low-level tool nobody calls directly in production; container engines wrap
-it, and Kubernetes wraps the engines. Second to the *design space*: CRIU's way
-of freezing a workload — serialize the kernel objects of a process tree from
-userspace — is only one of four fundamentally different places to draw the
-snapshot boundary. gVisor draws it higher. Firecracker draws it lower. vLLM
-draws it inside the application itself. Each choice buys and costs something
-specific, and the trade-offs are not incremental — they are categorical.
+it, and Kubernetes wraps the engines.
+
+Second to the *design space*: CRIU's way of freezing a workload — serialize
+the kernel objects of a process tree from userspace — is only one of four
+fundamentally different places to draw the snapshot boundary.
+
+gVisor draws it higher. Firecracker draws it lower. vLLM draws it inside the
+application itself. Each choice buys and costs something specific, and the
+trade-offs are not incremental — they are categorical.
 
 ## The integration chain
 
@@ -150,15 +153,18 @@ runtime-dependent**, not specified by the kubelet API.
 The name — *forensic* checkpointing — encodes the intended use: freeze a
 suspicious container's full state for offline analysis without tipping off
 the workload (the container keeps running; the dump uses CRIU's
-leave-running mode). But note the **asymmetry**, because it is the single
-most misunderstood fact about this API: **there is no kubelet restore
-endpoint.** A documented CRI-O workflow converts its archive into a specially
-annotated OCI image with `buildah`, pushes it, then creates a new container;
-CRI-O recognizes the annotation and selects its restore path. That is a
-runtime-specific extension, not a portable Kubernetes restore contract and
-not a promise that every CRI archive can become an OCI image. Kubernetes
-standardizes the checkpoint request; restoration and live migration still
-require runtime/orchestrator-specific machinery.
+leave-running mode).
+
+But note the **asymmetry**, because it is the single most misunderstood fact
+about this API: **there is no kubelet restore endpoint.** A documented CRI-O
+workflow converts its archive into a specially annotated OCI image with
+`buildah`, pushes it, then creates a new container; CRI-O recognizes the
+annotation and selects its restore path.
+
+That is a runtime-specific extension, not a portable Kubernetes restore
+contract and not a promise that every CRI archive can become an OCI image.
+Kubernetes standardizes the checkpoint request; restoration and live
+migration still require runtime/orchestrator-specific machinery.
 
 ## What a container checkpoint contains (beyond the process)
 
@@ -428,9 +434,10 @@ new snapshot system crosses your feed — (1) find the interface where it
 captures state; (2) that tells you who must cooperate; (3) that tells you
 what leaks (device fds at level 1, syscall compatibility at level 2,
 passthrough hardware at level 3, developer diligence at level 4); (4) blob
-size and restore latency follow from the boundary, not the marketing.* Try
-it: "CRIU inside a Kata VM" — level 1 running inside level 3, inheriting the
-fragilities of 1 and the isolation of 3. "Docker commit" — none of the
+size and restore latency follow from the boundary, not the marketing.*
+
+Try it: "CRIU inside a Kata VM" — level 1 running inside level 3, inheriting
+the fragilities of 1 and the isolation of 3. "Docker commit" — none of the
 above: it snapshots the *filesystem* only, no execution state, which is why
 it never appears in this table.
 
@@ -441,19 +448,26 @@ sellable. The arithmetic is blunt: an H100 that sits allocated-but-idle
 between requests costs the same dollars as one doing work. Without
 snapshots, a platform faces a dilemma — keep models resident (pay for idle)
 or cold-boot per request (pay 30–60 s of load time per invocation, which
-users refuse). Snapshots dissolve the dilemma: **scale-to-zero** stops
-paying for idle, because restore is fast enough to hide inside a request;
-**model hot-swap** lets one GPU serve many models by sleeping one and waking
-another; **bin-packing** improves because workloads can be paused, migrated
-(see [Live Migration](#/live-migration)), and resumed to defragment a
-fleet. This is why Modal publishes p50 restore latencies, why AWS built
-SnapStart, and why vLLM grew a sleep API driven by RLHF users who refused to
-dedicate separate GPU pools to training and inference. Cold-start latency is
-the number that decides whether the economics close — and every point in
-the taxonomy is, at bottom, a different answer to "how little can we pay to
-bring this workload back?" The hardest version of that question — the one
-where the state lives in 80 GB of vRAM behind a driver the kernel can't
-introspect — is the [next chapter](#/gpu-checkpoint).
+users refuse).
+
+Snapshots dissolve the dilemma:
+
+- **scale-to-zero** stops paying for idle, because restore is fast enough to
+  hide inside a request
+- **model hot-swap** lets one GPU serve many models by sleeping one and
+  waking another
+- **bin-packing** improves because workloads can be paused, migrated (see
+  [Live Migration](#/live-migration)), and resumed to defragment a fleet.
+
+This is why Modal publishes p50 restore latencies, why AWS built SnapStart,
+and why vLLM grew a sleep API driven by RLHF users who refused to dedicate
+separate GPU pools to training and inference.
+
+Cold-start latency is the number that decides whether the economics close —
+and every point in the taxonomy is, at bottom, a different answer to "how
+little can we pay to bring this workload back?" The hardest version of that
+question — the one where the state lives in 80 GB of vRAM behind a driver the
+kernel can't introspect — is the [next chapter](#/gpu-checkpoint).
 
 ## Follow the code
 

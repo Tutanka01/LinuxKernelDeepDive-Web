@@ -139,20 +139,22 @@ What TCP itself gives you (all inside the kernel): ordered, reliable delivery
 (sequence numbers + retransmission, with retransmit timers built on the
 [timer subsystem](#/timers)), flow control (don't drown the receiver), and
 congestion control (don't drown the network — CUBIC by default, dissected in
-[TCP Congestion Control & Tuning](#/tcp-congestion)). UDP gives you none of
-that — just addressed datagrams — which is why DNS, games and QUIC use it.
-And for processes on the *same* machine, Unix domain sockets skip the whole
-stack below the socket layer — see [Pipes, FIFOs & Unix
-Sockets](#/ipc-pipes).
+[TCP Congestion Control & Tuning](#/tcp-congestion)).
+
+UDP gives you none of that — just addressed datagrams — which is why DNS,
+games and QUIC use it. And for processes on the *same* machine, Unix domain
+sockets skip the whole stack below the socket layer — see [Pipes, FIFOs &
+Unix Sockets](#/ipc-pipes).
 
 ### Kernel bypass for performance
 
 A normal socket path involves copies, sk_buff allocations, and kernel
 processing — call it 1–3 µs and a few thousand cycles per packet. At 10 Gbit/s
 with minimum-size 64-byte frames that's 14.88 million packets per second,
-about 67 ns per packet: no per-packet kernel path fits in that budget. For
-that regime, kernel-bypass frameworks like **DPDK** and **AF_XDP** let user
-space directly send and receive raw packets from NIC hardware queues,
+about 67 ns per packet: no per-packet kernel path fits in that budget.
+
+For that regime, kernel-bypass frameworks like **DPDK** and **AF_XDP** let
+user space directly send and receive raw packets from NIC hardware queues,
 bypassing the kernel stack entirely. This is how high-frequency trading and
 carrier-grade load balancers work — but it's a niche: you lose all kernel
 TCP/UDP/IP processing, netfilter, and `ss`-style observability, and must
@@ -235,13 +237,15 @@ One interrupt per packet melts a CPU at high rates (recall
 driver uses it: on the first packet the driver *disables* its RX interrupt
 and schedules a poll (`napi_schedule()` raises `NET_RX_SOFTIRQ`). The softirq
 handler `net_rx_action()` then calls the driver's poll function in a loop,
-harvesting packets from the ring **without further interrupts**. Two budgets
-bound the loop: each NAPI instance may process 64 packets per poll (its
-weight), and one softirq invocation stops after `net.core.netdev_budget`
-packets (default 300) or `netdev_budget_usecs` (default 2000 µs = 2 ms),
-re-arming the interrupt when the ring runs dry. Under sustained load the
-polling migrates into the per-CPU `ksoftirqd` threads — which is why a
-loaded server shows `ksoftirqd/N` burning CPU: that's your network stack.
+harvesting packets from the ring **without further interrupts**.
+
+Two budgets bound the loop: each NAPI instance may process 64 packets per
+poll (its weight), and one softirq invocation stops after
+`net.core.netdev_budget` packets (default 300) or `netdev_budget_usecs`
+(default 2000 µs = 2 ms), re-arming the interrupt when the ring runs dry.
+Under sustained load the polling migrates into the per-CPU `ksoftirqd`
+threads — which is why a loaded server shows `ksoftirqd/N` burning CPU:
+that's your network stack.
 
 Then **GRO** (Generic Receive Offload) — the receive-side twin of TSO —
 coalesces consecutive segments of the same flow into one large skb (up to
@@ -290,12 +294,14 @@ TCP ignores the `core` defaults and uses its own `tcp_rmem`/`tcp_wmem`
 triples — typically `4096 131072 6291456` and `4096 16384 4194304` (min /
 initial / max, in bytes). **Auto-tuning** then grows each connection's
 buffers within `[min, max]` based on the measured **BDP**
-(Bandwidth-Delay Product). The arithmetic is unforgiving: a 10 Gbit/s path
-at 100 ms RTT needs 10⁹ B/s × 0.1 s = **125 MB** in flight to stay full —
-if the buffer caps at 6 MB, you get at most 6 MB / 0.1 s ≈ 480 Mbit/s no
-matter how fat the pipe. That's the single most common "fast network, slow
-transfer" cause. (Note: calling `setsockopt(SO_RCVBUF)` *disables*
-auto-tuning for that socket — usually a downgrade.)
+(Bandwidth-Delay Product).
+
+The arithmetic is unforgiving: a 10 Gbit/s path at 100 ms RTT needs 10⁹ B/s
+× 0.1 s = **125 MB** in flight to stay full — if the buffer caps at 6 MB,
+you get at most 6 MB / 0.1 s ≈ 480 Mbit/s no matter how fat the pipe. That's
+the single most common "fast network, slow transfer" cause. (Note: calling
+`setsockopt(SO_RCVBUF)` *disables* auto-tuning for that socket — usually a
+downgrade.)
 
 ## Routing: every Linux box is a router
 

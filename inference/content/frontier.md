@@ -191,8 +191,8 @@ cluster waits on the serving path.
 So the tools of this course — continuous batching, PagedAttention, speculative
 decoding, disaggregation — are now being pointed at rollout generation, and a
 dedicated literature has appeared: rollouts on serving GPUs via cooperative
-elasticity (ROSE), rollout-budget allocation (TRACE), asynchronous single-
-rollout optimization. The [agentic era](#/agentic-serving) had already blurred
+elasticity (ROSE), rollout-budget allocation (TRACE), asynchronous
+single-rollout optimization. The [agentic era](#/agentic-serving) had already blurred
 "one request" into long tool-using sessions; RL rollout erases the line between
 *training* and *serving* entirely. Inference is no longer only how you *ship* a
 model — increasingly it's how you *build* one.

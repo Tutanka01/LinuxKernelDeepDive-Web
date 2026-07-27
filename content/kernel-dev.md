@@ -207,10 +207,12 @@ for a VM and a learning build.
 `update-initramfs` on Debian/Ubuntu) to build an **initramfs** — a small cpio
 archive with just enough drivers and tools to find and mount your real root
 filesystem — and finally regenerates the GRUB config so a new menu entry
-appears. If your kernel needs the disk/filesystem driver to *reach* the root
-device but you built that driver as a module not present in the initramfs, you
-get the classic "unable to mount root fs" panic. Building storage and root-fs
-drivers as `y` (built-in) sidesteps it.
+appears.
+
+If your kernel needs the disk/filesystem driver to *reach* the root device but
+you built that driver as a module not present in the initramfs, you get the
+classic "unable to mount root fs" panic. Building storage and root-fs drivers
+as `y` (built-in) sidesteps it.
 
 ### Signed kernels and Secure Boot
 
@@ -306,12 +308,13 @@ Your module called `proc_create("counter", …, &counter_ops)`, which registers 
 `struct proc_dir_entry` in procfs. When `cat` does `openat("/proc/counter")`,
 the VFS ([Files, Filesystems & the VFS](#/filesystems)) walks the path via
 `link_path_walk()`, reaches procfs, and wires the open file's operations to
-procfs's generic handlers. On the first `read(2)`, procfs's `proc_reg_read`
-calls into the seq_file layer —
-[seq_read()](https://elixir.bootlin.com/linux/v6.12/C/ident/seq_read) — which,
-because you used `single_open()`, invokes your `counter_show()` exactly once,
-lets `seq_printf()` format the number into a kernel buffer, and then
-`copy_to_user()` hands those bytes across the [kernel/user-space
+procfs's generic handlers.
+
+On the first `read(2)`, procfs's `proc_reg_read` calls into the seq_file
+layer — [seq_read()](https://elixir.bootlin.com/linux/v6.12/C/ident/seq_read)
+— which, because you used `single_open()`, invokes your `counter_show()`
+exactly once, lets `seq_printf()` format the number into a kernel buffer, and
+then `copy_to_user()` hands those bytes across the [kernel/user-space
 boundary](#/kernel-vs-userspace) into `cat`'s buffer. `read()` returns, `cat`
 does `write(1, …)`, and you see the number. Every arrow in that sentence is a
 function you can click through on Elixir.
@@ -415,14 +418,16 @@ unrecoverable and halts the machine. The most useful line in either is
 `RIP:`/`PC:` — the instruction pointer where it died — followed by the call
 trace. Feed the trace through `decode_stacktrace.sh` with the matching
 `vmlinux` and you get real function names and line numbers instead of hex.
+
 Beyond `printk`, the two big in-kernel instruments are **ftrace**
 (`/sys/kernel/tracing/`, function and event tracing with near-zero overhead
 when off) and **eBPF** ([eBPF Internals](#/ebpf-internals)); both are covered
 from the user side in [Observability](#/observability) and
-[Performance Analysis Methodology](#/perf-methodology). For live source-level
-debugging of a physical machine there's **KGDB** (`kgdboc` over a serial line),
-but the QEMU gdb-stub loop above is far easier and is what most developers
-actually use.
+[Performance Analysis Methodology](#/perf-methodology).
+
+For live source-level debugging of a physical machine there's **KGDB**
+(`kgdboc` over a serial line), but the QEMU gdb-stub loop above is far easier
+and is what most developers actually use.
 
 ## Navigating the kernel with git
 

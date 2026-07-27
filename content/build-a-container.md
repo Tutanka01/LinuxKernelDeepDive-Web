@@ -418,13 +418,17 @@ and the namespace-aware version is the punchline: a capability is only
 honored *in the user namespace the target resource belongs to*.
 `cap_capable()` walks from the task's `user_ns` up the `parent` chain; if the
 resource's owning namespace isn't found before the chain ends, the answer is
-no. That's the clean solution we skipped — UID-remapped **user namespaces**
+no.
+
+That's the clean solution we skipped — UID-remapped **user namespaces**
 (`unshare --user --map-root-user`), where container-root has a full CapEff
 mask *inside its own user namespace* and is structurally an unprivileged
-UID like 100000 on the host. A `CAP_SYS_ADMIN` that only means something in a
-namespace owning nothing the host cares about is nearly harmless. Rootless
-podman and rootless Docker lean entirely on this; you met the mechanics
-(`/proc/<pid>/uid_map`, `newuidmap`) in [Namespaces](#/namespaces).
+UID like 100000 on the host.
+
+A `CAP_SYS_ADMIN` that only means something in a namespace owning nothing the
+host cares about is nearly harmless. Rootless podman and rootless Docker lean
+entirely on this; you met the mechanics (`/proc/<pid>/uid_map`, `newuidmap`)
+in [Namespaces](#/namespaces).
 
 ## Step 4 — seccomp: filter the syscalls
 
@@ -432,19 +436,24 @@ Last fence, guarding the deepest layer.
 [Kernel, User Space & Syscalls](#/kernel-vs-userspace) called the syscall
 boundary "a perfect choke point"; **seccomp-BPF** is the filter installed on
 it. A process declares: "from now on, for me and all my children, only these
-syscalls" — irrevocably. Filters are inherited across `fork()` and preserved
-across `execve()`, and installing one requires either `CAP_SYS_ADMIN` or —
-the normal path — setting the one-way `no_new_privs` bit
-(`prctl(PR_SET_NO_NEW_PRIVS, 1)`) first, so an unprivileged process can't use
-a malicious filter to trick a setuid binary into running with a crippled view
-of its own syscalls.
+syscalls" — irrevocably.
+
+Filters are inherited across `fork()` and preserved across `execve()`, and
+installing one requires either `CAP_SYS_ADMIN` or — the normal path — setting
+the one-way `no_new_privs` bit (`prctl(PR_SET_NO_NEW_PRIVS, 1)`) first, so an
+unprivileged process can't use a malicious filter to trick a setuid binary
+into running with a crippled view of its own syscalls.
 
 Get the direction right: Docker's default profile is an **allowlist**, not
-a blocklist. Its default action is `SCMP_ACT_ERRNO` (return `EPERM`), with
-~350+ syscalls explicitly allowed — out of roughly 375 wired up on x86-64
-as of 6.12 — leaving ~40 dangerous ones unreachable by omission: `mount`,
-`umount2`, `reboot`, `init_module`/`finit_module`, `kexec_load`,
-`open_by_handle_at` (the 2014 "Shocker" container escape used it), `bpf` (load
+a blocklist.
+
+Its default action is `SCMP_ACT_ERRNO` (return `EPERM`), with 340 syscalls
+explicitly allowed — out of the 375 wired up on x86-64 as of 6.12 — leaving
+35 unreachable by omission. Some of those 35 are dead stubs the kernel no
+longer implements (`create_module`, `query_module`, `nfsservctl`); the rest
+are the ones that matter: `mount`, `umount2`,
+`reboot`, `init_module`/`finit_module`, `kexec_load`, `open_by_handle_at`
+(the 2014 "Shocker" container escape used it), `bpf` (load
 [eBPF programs](#/ebpf-internals) into the shared kernel), `unshare` and
 `clone` with new-namespace flags, `ptrace` (allowed again since Docker 19.03
 on kernels ≥ 4.8, where a TOCTOU hole between seccomp and ptrace was fixed)…
@@ -472,11 +481,14 @@ Filters can only inspect *register values*, never memory behind pointers —
 deliberately, because a sibling thread sharing the address space could rewrite
 pointed-to memory between the filter's check and the kernel's use (TOCTOU). So
 a filter can block `socket(AF_VSOCK, …)` by argument value but cannot match on
-a pathname string. Verdicts range from `SCMP_ACT_ALLOW` through `ERRNO`,
-`TRAP` (raise `SIGSYS`), `LOG`, `NOTIFY` (delegate the decision to a userspace
-supervisor over an fd — how runtimes forward `mknod` from rootless
-containers), to `KILL_PROCESS`. Stacked filters all run; the **numerically
-lowest (most restrictive) verdict wins**, and `KILL_PROCESS` is lowest of all.
+a pathname string.
+
+Verdicts range from `SCMP_ACT_ALLOW` through `ERRNO`, `TRAP` (raise
+`SIGSYS`), `LOG`, `NOTIFY` (delegate the decision to a userspace supervisor
+over an fd — how runtimes forward `mknod` from rootless containers), to
+`KILL_PROCESS`. Stacked filters all run; the **numerically lowest (most
+restrictive) verdict wins**, and `KILL_PROCESS` is lowest of all.
+
 Cost: a few dozen extra nanoseconds per syscall for a typical profile —
 measurable in a tight `getpid()` microbenchmark (a few percent), lost in the
 noise for real work.
@@ -499,7 +511,7 @@ scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ERRNO(EPERM)); // default: deny
 seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
 seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
 seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(openat), 0);
-/* … allow the ~350 safe syscalls, leave the ~40 dangerous ones denied … */
+/* … allow the 340 safe syscalls, leave the 35 remaining ones denied … */
 seccomp_load(ctx);          // point of no return
 execve(entrypoint, …);
 ```
@@ -624,6 +636,7 @@ siblings), then calls
 which delegates to
 [create_new_namespaces()](https://elixir.bootlin.com/linux/v6.12/C/ident/create_new_namespaces)
 in [kernel/nsproxy.c](https://elixir.bootlin.com/linux/v6.12/source/kernel/nsproxy.c).
+
 That function allocates a fresh `struct nsproxy` and, per flag, either
 bumps a refcount on the old namespace or builds a new one:
 [copy_mnt_ns()](https://elixir.bootlin.com/linux/v6.12/C/ident/copy_mnt_ns)
@@ -636,11 +649,12 @@ just clones a small hostname/domainname struct;
 [copy_pid_ns()](https://elixir.bootlin.com/linux/v6.12/C/ident/copy_pid_ns)
 and
 [copy_net_ns()](https://elixir.bootlin.com/linux/v6.12/C/ident/copy_net_ns)
-do their kin. `copy_net_ns()` is quietly the slowest — creating a network
-namespace means allocating a fresh loopback device and per-namespace netfilter
-state, tens of microseconds to low milliseconds, which is why runtimes reuse a
-pre-created netns where they can. The new `nsproxy` is swapped into the task
-with
+do their kin.
+
+`copy_net_ns()` is quietly the slowest — creating a network namespace means
+allocating a fresh loopback device and per-namespace netfilter state, tens of
+microseconds to low milliseconds, which is why runtimes reuse a pre-created
+netns where they can. The new `nsproxy` is swapped into the task with
 [switch_task_namespaces()](https://elixir.bootlin.com/linux/v6.12/C/ident/switch_task_namespaces).
 
 Note what `copy_pid_ns()` returns to: `nsproxy->pid_ns_for_children`. The
@@ -665,6 +679,7 @@ which invokes
 →
 [__seccomp_filter()](https://elixir.bootlin.com/linux/v6.12/C/ident/__seccomp_filter)
 in [kernel/seccomp.c](https://elixir.bootlin.com/linux/v6.12/source/kernel/seccomp.c).
+
 There,
 [seccomp_run_filters()](https://elixir.bootlin.com/linux/v6.12/C/ident/seccomp_run_filters)
 fills a `struct seccomp_data` from the saved registers (`struct pt_regs`) and
@@ -675,6 +690,7 @@ filter it stacks on; `refs`, the shared refcount across fork). Each program
 runs via
 [bpf_prog_run_pin_on_cpu()](https://elixir.bootlin.com/linux/v6.12/C/ident/bpf_prog_run_pin_on_cpu),
 and the lowest (most restrictive) action across the chain wins.
+
 `__seccomp_filter()`'s switch then implements the verdict: forge an errno
 return, raise `SIGSYS` (`SECCOMP_RET_TRAP`), hand the syscall to a userspace
 supervisor (`SECCOMP_RET_USER_NOTIF`), or `do_exit(SIGSYS)` for

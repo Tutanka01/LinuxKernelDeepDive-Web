@@ -387,10 +387,11 @@ function it binds; the behavior is identical.
 Google's Android team has stated plainly that Rust in the kernel is among
 the most effective things they can do to shrink Android's attack surface,
 and Android's own userspace data already shows new-code-in-Rust driving the
-memory-safety-bug fraction down. The kernel bet is the same over a 5–10 year
-horizon: as the *new* code that vendors write shifts to Rust, the long-flat
-memory-safety-bug curve finally bends. It is a bet on the margin — new code,
-new drivers — not a rewrite. See
+memory-safety-bug fraction down.
+
+The kernel bet is the same over a 5–10 year horizon: as the *new* code that
+vendors write shifts to Rust, the long-flat memory-safety-bug curve finally
+bends. It is a bet on the margin — new code, new drivers — not a rewrite. See
 [Linux Security & Confinement](#/security-hardening) for the broader
 defense-in-depth picture Rust slots into.
 

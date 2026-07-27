@@ -238,7 +238,9 @@ syscall (since 3.8; the older `init_module()` takes a memory buffer instead
 of an fd) hands the kernel an ELF file, and the kernel allocates executable
 memory, resolves every undefined symbol against its exported symbol table
 (`EXPORT_SYMBOL`/`EXPORT_SYMBOL_GPL`), applies relocations, and runs the
-module's init function. The bookkeeping lives in
+module's init function.
+
+The bookkeeping lives in
 [`struct module`](https://elixir.bootlin.com/linux/v6.12/C/ident/module):
 `state` (COMING → LIVE → GOING), `name`, the symbol tables it exports, `init`
 and `exit` function pointers, and a per-CPU reference count (`refcnt`) that
@@ -369,15 +371,18 @@ ps aux | grep '\[irq/'          # threaded IRQ handlers, if any
 ```
 
 For very fast devices, interrupt-per-event is too slow — at 10 Gb/s line rate
-you'd take over a million interrupts per second. So NVMe and modern NICs use
-polling hybrids and many hardware queues: **NAPI** for networking takes one
-interrupt, disables that queue's IRQ, then polls packets in batches (default
-weight: 64 packets per poll, with a global `net.core.netdev_budget` of 300
-per softirq round); NVMe allocates one submission/completion queue pair per
-CPU with its own **MSI-X** vector (PCIe message-signaled interrupts — up to
-2048 per device, vs. 1 shared line for legacy INTx), so completions land on
-the CPU that submitted the I/O. [Modern I/O & io_uring](#/modern-io) pushes
-this even further toward pure polling.
+you'd take over a million interrupts per second.
+
+So NVMe and modern NICs use polling hybrids and many hardware queues: **NAPI**
+for networking takes one interrupt, disables that queue's IRQ, then polls
+packets in batches (default weight: 64 packets per poll, with a global
+`net.core.netdev_budget` of 300 per softirq round); NVMe allocates one
+submission/completion queue pair per CPU with its own **MSI-X** vector (PCIe
+message-signaled interrupts — up to 2048 per device, vs. 1 shared line for
+legacy INTx), so completions land on the CPU that submitted the I/O.
+
+[Modern I/O & io_uring](#/modern-io) pushes this even further toward pure
+polling.
 
 ## DMA: how devices touch memory directly
 
@@ -410,9 +415,10 @@ reintroduces the memcpy DMA was supposed to avoid.
 
 Then there's the **IOMMU** (Intel VT-d / AMD-Vi / ARM SMMU): a page table
 *for devices*. With it enabled, devices see I/O virtual addresses, and the
-kernel maps only the exact buffers a device is allowed to touch. This is
-critical for security — without an IOMMU, any bus-mastering device (or a
-malicious Thunderbolt gadget) can DMA over arbitrary kernel memory. It's also
+kernel maps only the exact buffers a device is allowed to touch.
+
+This is critical for security — without an IOMMU, any bus-mastering device (or
+a malicious Thunderbolt gadget) can DMA over arbitrary kernel memory. It's also
 what makes safe device passthrough to VMs possible: VFIO hands a whole
 **IOMMU group** to a guest, and the IOMMU confines the device to that guest's
 memory — see [KVM internals](#/kvm-internals).

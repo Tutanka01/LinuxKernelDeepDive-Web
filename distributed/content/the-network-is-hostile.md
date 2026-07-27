@@ -5,27 +5,34 @@
 > three tools every practitioner must master: timeouts, retries and
 > idempotency. This chapter is the foundation for everything that follows.
 
-A distributed system is nodes plus messages. We covered nodes; now the
-messages. The network is where the optimism of fresh designs goes to die, so
-we'll study it with the respect it deserves.
+A distributed system is nodes plus messages. [What Is a Distributed
+System?](#/what-is-a-distributed-system) covered nodes; now the messages —
+and in particular the first two fallacies that chapter listed, which between
+them cause more outages than the other six combined. The network is where
+the optimism of fresh designs goes to die, so we'll study it with the
+respect it deserves.
 
 ## A message's life is more fragile than it looks
 
-When node A sends a message to node B, here is the gauntlet it runs:
+When node A sends a message to node B, here is the gauntlet it runs — and
+the reply runs the same one back:
 
-```text
- A: application ─▶ serialization ─▶ kernel buffers ─▶ NIC
-        │                                              │
-        ▼                                              ▼
-   switch queues ─▶ routers (×N) ─▶ maybe an ocean ─▶ B's NIC
-        │                                              │
-        ▼                                              ▼
-   B: kernel buffers ─▶ deserialization ─▶ application ─▶ ... reply
-                                                            runs the same
-                                                            gauntlet back
+```mermaid
+graph TD
+    App["A: application"] --> Ser["serialize"]
+    Ser --> KB["A kernel buffers"]
+    KB --> NIC["A NIC"]
+    NIC --> SW["switch queues"]
+    SW --> R["routers, maybe an ocean"]
+    R --> NIC2["B NIC"]
+    NIC2 --> KB2["B kernel buffers"]
+    KB2 --> De["deserialize"]
+    De --> App2["B: application"]
+    App2 -->|"reply: same gauntlet, reversed"| App
 ```
 
-At every hop, things can go wrong:
+Ten hops each way, none of which your code can see. At every one of them,
+things can go wrong:
 
 - **Loss** — a queue overflows, a link flaps, a packet is dropped.
 - **Delay** — congestion, a slow garbage-collection pause on B, a router
@@ -36,7 +43,10 @@ At every hop, things can go wrong:
   twice.
 
 "But TCP fixes this!" — partially. Within one connection, TCP gives you
-in-order, non-duplicated delivery *of what arrives*. It does not save you
+in-order, non-duplicated delivery *of what arrives* — the sequencing,
+retransmission and reordering machinery that [The Networking
+Stack](../#/networking) and [TCP Congestion Control &
+Tuning](../#/tcp-congestion) take apart hop by hop. It does not save you
 when the connection breaks: you still don't know which of your in-flight
 requests were processed. And the moment you retry on a *new* connection, you
 can create duplicates at the application level. TCP narrows the problem; it
@@ -44,8 +54,10 @@ doesn't remove it.
 
 ## Latency: the numbers you must know by heart
 
-Latency is the time for a message to make the round trip. These
-orders of magnitude should be reflexes:
+Latency is the time for a message to make the round trip. These orders of
+magnitude should be reflexes — the top rows are the machine-local numbers
+from [The Machine Underneath](../#/prereq-hardware), and everything below
+them is what the wire adds:
 
 | Operation | Typical latency |
 |---|---|
@@ -69,7 +81,10 @@ pure network time, before any work is done.
 latency of 100 ms, a request that fans out to 100 such calls in parallel will
 hit that 1% slow case almost every time (1 − 0.99¹⁰⁰ ≈ 63%). At scale, *your
 users live at the tail*. This is why serious systems obsess over p99 and
-p999, not averages.
+p999, not averages. The reasoning travels intact into other fields:
+[Operating It](../inference/#/operating-it) in the inference course opens by
+saying tail-at-scale carries over verbatim to GPU fleets, and that what
+*doesn't* carry over is utilisation as a load signal.
 
 > **Latency vs bandwidth:** latency is how long one message takes; bandwidth
 > is how many bytes per second you can push. You can buy more bandwidth.
@@ -123,11 +138,19 @@ the original request may have been processed. Retrying then means
 
 For some operations that's fine. `GET /balance` twice — harmless. But:
 
-```text
-A ──▶ "transfer €100 from X to Y" ──▶ B   (processed! reply lost)
-A ──▶ "transfer €100 from X to Y" ──▶ B   (retry… processed AGAIN)
-                                           X is now down €200.
+```mermaid
+sequenceDiagram
+    participant A as node A
+    participant B as node B
+    A->>B: transfer 100 from X to Y
+    B->>B: applied (X down 100)
+    B--xA: reply lost
+    A->>B: retry (same request)
+    B->>B: applied AGAIN (X down 200)
 ```
+
+A did everything right — waited, timed out, retried — and X is still down
+€200. Correct retry logic plus a lost reply is enough to corrupt money.
 
 Retries also have a macro-level danger: **retry storms**. A service slows
 down → callers time out → callers retry → load doubles → service slows
@@ -175,6 +198,22 @@ everywhere.)
 > (make retries safe). Most production-grade client libraries are
 > implementations of exactly this triad.
 
+Read the triad as one control loop, and notice where the arrow refuses to
+close: a non-idempotent call cannot be retried until you have given it a
+key.
+
+```mermaid
+graph TD
+    S["issue remote call"] --> T["wait, bounded by timeout"]
+    T -->|"reply arrives"| D["done"]
+    T -->|"timeout fires"| R["back off, add jitter"]
+    R --> I["is the operation idempotent?"]
+    I -->|"yes"| S
+    I -->|"no"| K["attach an idempotency key"]
+    K --> S
+    R -->|"budget exhausted"| CB["circuit breaker opens"]
+```
+
 ## RPC: the convenient, leaky abstraction
 
 Most systems wrap messaging in **RPC** (Remote Procedure Call): you call
@@ -194,8 +233,11 @@ The main alternative style is **asynchronous messaging**: instead of calling
 B directly, A drops a message on a **queue** (Kafka, RabbitMQ, SQS) and
 moves on; B consumes it whenever it can. You lose the immediate answer, but
 gain decoupling: B can be down for ten minutes and nothing is lost — the
-queue holds the messages. We'll revisit this trade-off in the transactions
-chapter, where queues become a building block for reliability patterns.
+queue holds the messages. [Distributed
+Transactions](#/distributed-transactions) revisits this trade-off, where
+queues become a building block for reliability patterns — and where the
+"no reply" ambiguity above resurfaces as the reason exactly-once delivery
+cannot exist.
 
 ## Key takeaways
 

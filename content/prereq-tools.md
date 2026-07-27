@@ -27,6 +27,7 @@ Each of those is a separate reading skill, and most people who use Linux every
 day have never formally learned any of them. You can drive a shell for years
 without once reading a man page past the first screen, without ever wondering
 why a `/proc` file is zero bytes, and without opening the kernel source at all.
+
 This book leans on all three constantly. This chapter is the decoder ring. It
 teaches you nothing about how the kernel *works* — that is the rest of the book
 — only how to read the evidence the book keeps pointing at. Think of it as
@@ -129,8 +130,9 @@ Read that the way [Just Enough C to Read the Kernel](#/prereq-c) showed you: the
 `read`; it takes an `int fd` (a file descriptor — see
 [From Source Code to Running Process](#/prereq-programs)), a `void *buf` (a pointer to a chunk of
 memory to fill), and a `size_t count` (how many bytes); it returns an
-`ssize_t`, a signed size — signed precisely so it can return `-1` on error. The
-first `#include` line tells you which header declares it. That single block
+`ssize_t`, a signed size — signed precisely so it can return `-1` on error.
+
+The first `#include` line tells you which header declares it. That single block
 tells you everything you need to *call* it; the DESCRIPTION and ERRORS sections
 tell you everything you need to *survive* calling it.
 
@@ -175,13 +177,16 @@ Type `cat /proc/meminfo` and you get a screen of memory statistics. It looks
 like a file. It is not a file in any normal sense: **nothing is stored on
 disk.** `/proc` and `/sys` are *virtual filesystems* — the kernel pretends to
 have files there, and each "read" runs a small piece of kernel code that
-generates the answer on the spot. The content is assembled the instant you read
-it, which is why it is always current and why the file's size is reported as
-**zero** (the kernel cannot know how many bytes it will produce until it
-produces them). *How* a read of a fake file turns into a kernel function call
-is the whole subject of [Kernel, User Space & Syscalls](#/kernel-vs-userspace);
-here you only need the mental model: **a `/proc` file is a question, and reading
-it is asking.**
+generates the answer on the spot.
+
+The content is assembled the instant you read it, which is why it is always
+current and why the file's size is reported as **zero** (the kernel cannot know
+how many bytes it will produce until it produces them).
+
+*How* a read of a fake file turns into a kernel function call is the whole
+subject of [Kernel, User Space & Syscalls](#/kernel-vs-userspace); here you only
+need the mental model: **a `/proc` file is a question, and reading it is
+asking.**
 
 ### The greatest hits
 
