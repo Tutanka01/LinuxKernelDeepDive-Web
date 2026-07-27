@@ -13,7 +13,7 @@
 const BOOK = [
   {
     part: "Start Here",
-    blurb: "The map before the territory: what this book covers, how a chapter is built, and six ordered paths through the 56 of them.",
+    blurb: "The map before the territory: what this book covers, how a chapter is built, and six ordered paths through the 67 of them.",
     chapters: [
       { slug: "start-here", title: "How to Use This Book: Paths & Prerequisites",
         desc: "What this book is, the level badges, and six ordered paths through it." },
@@ -169,21 +169,45 @@ const BOOK = [
         desc: "The merge window, the maintainer chain, patches on the list, stable and LTS, the culture." },
       { slug: "observability", title: "/proc, strace, perf & eBPF",
         desc: "From /proc reads to strace, perf and bpftrace — with the cost model for each layer." },
+      { slug: "ftrace", title: "ftrace: The Kernel's Built-in Tracer",
+        desc: "tracefs, the function graph, events and triggers, dynamic probes, and how the patching works." },
       { slug: "perf-methodology", title: "Performance Analysis Methodology",
         desc: "USE and RED, workload characterization, the 60-second checklist, and flame graphs." },
     ],
   },
   {
     part: "Part X — Tools & Going Deeper",
-    blurb: "Stop reading about the source and open it: the tree layout, Kconfig and Kbuild, and a kernel built and booted in a throwaway VM.",
+    blurb: "Stop reading about the source and open it: the tree layout, Kconfig and Kbuild, a kernel built and booted in a throwaway VM, and how work becomes an accepted patch.",
     chapters: [
       { slug: "kernel-dev", title: "Reading & Building the Kernel",
         desc: "The tree layout, Kconfig and Kbuild, a kernel built and booted in a VM, a first module." },
+      { slug: "contributing-upstream", title: "Getting a Patch Accepted: Kernel, CRIU & vLLM",
+        desc: "Three review cultures compared: the mailing list, CRIU's zdtm gate, and vLLM's RFC flow." },
     ],
   },
   {
-    part: "Part XI — Hands-On Labs",
-    blurb: "Six sessions at a real root shell — the OOM killer, the page cache, cgroup throttling, a kernel module, CRIU and userfaultfd.",
+    part: "Part XI — The GPU–Kernel Boundary",
+    blurb: "Where the kernel meets the accelerator: arm64 paging, DMA and the IOMMU, the DRM driver, device memory and HMM, unified memory, allocators, and how to instrument all of it.",
+    chapters: [
+      { slug: "arm64-memory", title: "Memory on arm64: Page Tables, ASIDs & Cache Maintenance",
+        desc: "Two translation roots, 4K/16K/64K granules, the descriptor format, ASIDs and break-before-make." },
+      { slug: "dma-and-iommu", title: "DMA, Coherence & the IOMMU",
+        desc: "The DMA API, bounce buffers, IOVA and IOMMU groups, and why pinned pages cannot move." },
+      { slug: "gpu-drivers", title: "The GPU Driver Under Linux: DRM, GEM & dma-buf",
+        desc: "Render nodes, the ioctl contract, GEM handles versus fds, dma-buf, amdkfd and the NVIDIA modules." },
+      { slug: "hmm-and-mmu-notifiers", title: "Device Memory in the Kernel: HMM, MMU Notifiers & migrate_vma",
+        desc: "ZONE_DEVICE pages, notifier invalidation, hmm_range_fault, and three-phase device migration." },
+      { slug: "unified-memory", title: "Unified & Coherent Memory: UVM, Grace-Blackwell & GB10",
+        desc: "Three different things called unified memory, what /proc shows, and why UVM resists checkpointing." },
+      { slug: "gpu-memory-allocation", title: "Where VRAM Goes: Allocators, the VMM API & Engine Memory",
+        desc: "cudaMalloc, the VMM API's address/backing split, caching allocators, and vLLM's sleep mode." },
+      { slug: "gpu-observability", title: "Instrumenting the GPU: NVML, DCGM, CUPTI & Nsight",
+        desc: "The layered toolbox and its cost model, the numbers that lie, and tracing the driver boundary." },
+    ],
+  },
+  {
+    part: "Part XII — Hands-On Labs",
+    blurb: "Eight sessions at a real root shell — the OOM killer, the page cache, cgroup throttling, a kernel module, CRIU and userfaultfd, eBPF, and a CUDA checkpoint.",
     chapters: [
       { slug: "lab-oom-killer", title: "Lab: Trigger & Autopsy the OOM Killer",
         desc: "A cgroup-local OOM kill, the dmesg autopsy line by line, oom_score_adj and PSI." },
@@ -197,6 +221,10 @@ const BOOK = [
         desc: "A counting process frozen and restored mid-count, then autopsied with CRIT." },
       { slug: "lab-userfaultfd", title: "Lab: Serve Page Faults from Userspace",
         desc: "A C fault server that fills missing pages: register, read, ioctl — timed and broken." },
+      { slug: "lab-ebpf", title: "Lab: Answer a Real Question with eBPF",
+        desc: "One-liners to a bpftrace script to a libbpf CO-RE ioctl tracer — and a verifier error read." },
+      { slug: "lab-gpu-checkpoint", title: "Lab: Checkpoint a CUDA Process",
+        desc: "Three tiers: any machine, an NVIDIA GPU, and the unmeasured unified-memory frontier." },
     ],
   },
   {
@@ -228,7 +256,7 @@ const PLATFORM_KEY = "@platform";
    the same origin, which is the only reason a single page can answer "where am
    I across all three". */
 const COURSES = [
-  { id: "linux", name: "The Linux Deep Dive", href: "#/course", total: 56,
+  { id: "linux", name: "The Linux Deep Dive", href: "#/course", total: 67,
     blurb: "The machinery under the command line: processes, memory, the " +
            "storage and network stacks, containers, checkpoint/restore.",
     /* Counted the same way the course home counts it — against the chapters
@@ -974,6 +1002,16 @@ function renderPlatform() {
       </header>
 
       <div class="course-cards">${rows}</div>
+
+      <a class="track-card" href="path/">
+        <span class="track-card-kicker">A guided track across all three</span>
+        <span class="track-card-title">The GPU–Kernel Track</span>
+        <span class="track-card-desc">Six phases over twelve months, ordered for one
+          ambition: knowing exactly what happens between a GPU and the Linux
+          kernel. It holds no chapters of its own — it sequences these three, and
+          closes every phase on a deliverable rather than a page count.</span>
+        <span class="card-arrow" aria-hidden="true">&rarr;</span>
+      </a>
 
       <p class="path-legend">Each course stands on its own and can be read
         first. They do cross-reference each other where the same problem shows

@@ -2,7 +2,7 @@
 level: internals
 kernel: 6.12
 verified: 2026-07
-minutes: 29
+minutes: 30
 requires: criu-dump, criu-restore, snapshot-taxonomy, devices-modules
 ---
 
@@ -43,6 +43,9 @@ places the kernel has no map of:
 - **DMA and mapped regions.** The host and device are stitched together by
   pinned host buffers, `mmap`'d BAR windows, and IOMMU mappings that let the
   GPU DMA into host RAM. These bindings are live hardware state, not data.
+  ([DMA, Coherence & the IOMMU](#/dma-and-iommu) is the mechanism behind this
+  bullet; [The GPU Driver Under Linux](#/gpu-drivers) is the one behind the
+  bullet above it.)
 
 Here is the irreducible fact, and it is an *architectural* fact, not an
 implementation gap somebody will fix next quarter. A CUDA process holds a
@@ -401,13 +404,28 @@ PCIe bus, where "checkpoint" fundamentally means *copy device memory to host
 memory*. On a 129 GiB model that copy **is** the checkpoint — it dominates the
 cost, the image size, and the restore latency.
 
-Now change the hardware. On **unified-memory platforms** — Grace-Blackwell
-desk-side machines like DGX Spark / GB10, and the Jetson line — the CPU and GPU
-share the *same physical memory* over a coherent interconnect. There is no
-separate VRAM to copy *from*. The single most expensive operation in the
-discrete story — the device→host DMA of the weights — either disappears or
-changes nature entirely, because the weights may already be in memory the host
-can address.
+Now change the hardware. On **unified-memory platforms** the weights may
+already be in memory the host can address, so the single most expensive
+operation in the discrete story — the device→host DMA — either disappears or
+changes nature entirely.
+
+Be careful here, because "unified memory" names more than one arrangement and
+this paragraph used to conflate two of them. On **DGX Spark / GB10 and the
+Jetson line**, CPU and GPU sit in one package over a single physical DRAM pool
+— there is no second pool and nothing to migrate between. On **GH200 / GB200**,
+there are still two physical pools, kept coherent across NVLink-C2C. Both
+differ again from **CUDA Managed Memory on a discrete card**, where "unified"
+is a software illusion maintained by migrating pages on fault. The three have
+different answers to every question below. [Unified & Coherent
+Memory](#/unified-memory) separates them properly and tells you how to check
+which one you are on; what follows here is the checkpoint consequence.
+
+"Unified memory" names at least three different arrangements, and conflating
+them is the most common error in this area — [Unified & Coherent
+Memory](#/unified-memory) separates them, and [Device Memory in the
+Kernel](#/hmm-and-mmu-notifiers) is the kernel-side machinery (MMU notifiers,
+`ZONE_DEVICE`, `migrate_vma`) that any of it rests on. What follows here is the
+checkpoint consequence.
 
 This is where I owe you honesty rather than confidence. Let me separate the
 three tiers explicitly.
@@ -742,6 +760,10 @@ discipline this frontier demands.
   microconference) — the AMD KFD CRIU design as originally presented:
   [LPC 2021 slides](https://lpc.events/event/11/contributions/891/attachments/745/1404/LPC%20-%20Fast%20Checkpoint%20Restore%20for%20GPUs.pdf).
 
-**Next:** enough theory — go do it. [Lab: Checkpoint & Restore a Real
-Process](#/lab-criu) walks you through a hands-on CRIU checkpoint/restore from
-first principles, the foundation every GPU snapshot in this chapter is built on.
+**Next:** enough theory — go do it. [Lab: Checkpoint a CUDA
+Process](#/lab-gpu-checkpoint) turns this chapter's measurement protocol into
+something you run and record, in three tiers so that it is useful with no GPU,
+with one, and on the unified-memory hardware where the numbers do not yet
+exist. If you have not done [Lab: Checkpoint & Restore a Real
+Process](#/lab-criu) yet, do that one first — it is the foundation every GPU
+snapshot in this chapter is built on.

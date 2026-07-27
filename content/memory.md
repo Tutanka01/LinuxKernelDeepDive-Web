@@ -92,6 +92,18 @@ grep -E 'address sizes' /proc/cpuinfo | head -1   # "48 bits virtual" = 4-level
 getconf PAGE_SIZE                                  # 4096 on x86-64
 ```
 
+> **On arm64 this section is different in almost every particular.** There are
+> two translation roots rather than one, the page size is a build-time choice
+> of 4K, 16K or 64K rather than a constant, the descriptor encodes memory type
+> through an index into a register rather than through bits in place, and TLB
+> invalidation is tagged by ASID and broadcast across cores. None of it changes
+> the *model* you have just read — everything below this section, from VMAs to
+> reclaim, is architecture-independent — but all of it changes the code you
+> will read and the numbers you will measure. [Memory on
+> arm64](#/arm64-memory) is the counterpart to this section, and it matters as
+> soon as your work leaves x86: Grace-Blackwell, Jetson, Graviton and Ampere
+> are all arm64.
+
 ## The kernel's bookkeeping: `mm_struct` and VMAs
 
 The page tables are the hardware's view. The kernel's own view of an address
@@ -355,6 +367,16 @@ Keep the three interfaces separate:
 You will drive the last interface yourself in [Lab: Serve Page Faults from
 Userspace](#/lab-userfaultfd). Together these mechanisms turn the abstract VMA
 and PTE model into a serializable, migratable process.
+
+That last sentence carries an assumption worth naming, because the rest of this
+course spends a whole part dismantling it: **that every page a process owns is
+a page the CPU can read.** Two things break it. A page pinned for device DMA
+cannot be moved or reclaimed at all, and `/proc` cannot express *why*
+([DMA, Coherence & the IOMMU](#/dma-and-iommu)). And a page can be resident on
+a device rather than in RAM, represented in the page tables by a special entry
+that a `pagemap` walk will report but cannot dereference
+([Device Memory in the Kernel](#/hmm-and-mmu-notifiers)). Both are the
+foundation of [GPU Checkpointing](#/gpu-checkpoint).
 
 ## The page cache: where your RAM "goes"
 

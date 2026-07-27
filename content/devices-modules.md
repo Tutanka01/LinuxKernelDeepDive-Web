@@ -628,6 +628,13 @@ rule or group membership grants access).
 **Next:** [the networking stack](#/networking) — sockets, TCP/IP inside the
 kernel, and the plumbing (veth, bridges, iptables) containers will reuse.
 
+If you would rather go deeper into devices than sideways into networking, the
+three chapters that continue this one are [DMA, Coherence & the
+IOMMU](#/dma-and-iommu) — how a device reads host memory, and what an address
+even means once an IOMMU is in the path — and then [The GPU Driver Under
+Linux](#/gpu-drivers), which takes the ops-table and char-device patterns you
+just learned and applies them to the largest driver subsystem in the kernel.
+
 ## Sources & further reading
 
 - [Linux device driver model — kernel docs](https://docs.kernel.org/driver-api/driver-model/index.html)

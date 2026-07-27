@@ -528,3 +528,48 @@ html[data-theme="paper"] {
   .course-ring svg { width: 52px; height: 52px; }
   .course-card .card-arrow { align-self: flex-start; margin-top: 0.35rem; }
 }
+
+/* ---- The GPU–Kernel Track card, platform landing ----
+   Not a fourth course card: it is a route *through* the three above it, so it
+   reads as a different kind of object — full width, quieter surface, the
+   accent carried by the left edge rather than by a progress ring. */
+.track-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  align-items: start;
+  margin-top: 1.25rem;
+  padding: 1.35rem 1.5rem;
+  border: 1px solid var(--rule-mid);
+  border-left: 2px solid var(--accent-dim);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.track-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.track-card-kicker {
+  grid-column: 1;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.track-card-title {
+  grid-column: 1;
+  font-family: var(--serif);
+  font-size: 1.2rem;
+  color: var(--ink);
+}
+.track-card-desc {
+  grid-column: 1;
+  font-family: var(--serif);
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  margin-top: 0.15rem;
+}
+.track-card .card-arrow { grid-column: 2; grid-row: 1 / span 3; align-self: center; color: var(--text-faint); }
+.track-card:hover .card-arrow { color: var(--accent); }

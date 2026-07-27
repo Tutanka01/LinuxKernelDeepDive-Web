@@ -472,6 +472,12 @@ How the kernel project works, in brief:
   ~90% of style rejections. Use `git send-email`; patches mangled by a
   graphical mail client are the classic newcomer mistake.
 
+That is the outline. The craft — splitting work into a reviewable series,
+writing a commit message that argues rather than describes, and the fact that
+the two projects where this course's own subject matter actually lands
+(**CRIU** and **vLLM**) are GitHub projects where `git send-email` opens no
+door at all — is [Getting a Patch Accepted](#/contributing-upstream).
+
 ## Where to go from here — the bookshelf
 
 - **Brendan Gregg — *Systems Performance* & *BPF Performance Tools***: the

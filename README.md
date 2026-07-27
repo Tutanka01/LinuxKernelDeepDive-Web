@@ -1,10 +1,10 @@
 # Deep Dive Courses
 
-Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **93 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
+Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **104 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
 
 | Course | Chapters | URL | Scope |
 |---|---:|---|---|
-| The Linux Deep Dive | 56 | `/#/course` | Kernel internals from processes and virtual memory through containers, checkpoint/restore, eBPF and KVM, pinned to Linux 6.12 |
+| The Linux Deep Dive | 67 | `/#/course` | Kernel internals from processes and virtual memory through containers, checkpoint/restore, eBPF and KVM, the GPU–kernel boundary and upstream contribution, pinned to Linux 6.12 |
 | Distributed Systems | 13 | `/distributed/` | A guided course from partial failure and logical clocks through replication, consensus and CRDTs |
 | Inference Engineering | 24 | `/inference/` | A guided course on LLM serving: the roofline, KV cache, batching, quantization, kernels and disaggregated fleets |
 
@@ -61,12 +61,13 @@ The course is pinned to **Linux kernel 6.12**. Discussions name the relevant str
 | Part VI — Hardware & Platform | 4 | Power management, NUMA, CPU isolation and real-time operation, and CPU vulnerability mitigations |
 | Part VII — Modern Kernel | 5 | eBPF, security and confinement, trusted computing, io_uring, and Rust in the kernel |
 | Part VIII — Virtualization | 1 | KVM and hardware-assisted virtualization internals |
-| Part IX — Kernel Engineering | 4 | Locks, atomics, RCU, kernel governance, observability, and performance methodology |
-| Part X — Tools & Going Deeper | 1 | Reading and building the Linux kernel |
-| Part XI — Hands-On Labs | 6 | Guided experiments with memory, cgroups, modules, CRIU, and userfaultfd |
+| Part IX — Kernel Engineering | 5 | Locks, atomics, RCU, kernel governance, observability, ftrace, and performance methodology |
+| Part X — Tools & Going Deeper | 2 | Reading and building the Linux kernel, and getting a patch accepted upstream |
+| Part XI — The GPU–Kernel Boundary | 7 | arm64 paging, DMA and the IOMMU, DRM drivers, HMM and device memory, unified memory, GPU allocators, and GPU instrumentation |
+| Part XII — Hands-On Labs | 8 | Guided experiments with memory, cgroups, modules, CRIU, userfaultfd, eBPF, and a CUDA checkpoint |
 | Reference | 1 | A glossary of kernel and systems terms, listed in this course's outline |
 
-That is **56 entries in total**: the opening guide, five prerequisite chapters, 43 core chapters, six labs, and the glossary.
+That is **67 entries in total**: the opening guide, five prerequisite chapters, 52 core chapters, eight labs, and the glossary.
 
 ### Prerequisites
 
@@ -85,7 +86,7 @@ Reading the text only requires a modern browser. Following the examples requires
 
 ### Hands-on labs
 
-The six labs are:
+The eight labs are:
 
 1. **Trigger and autopsy the OOM killer** — create controlled memory pressure and interpret the kernel's decision.
 2. **Watch the page cache work** — observe cached file data, dirty pages, writeback, and cache effects.
@@ -93,6 +94,8 @@ The six labs are:
 4. **Write, build, and load a kernel module** — use kbuild, module parameters, `/proc`, and kernel logs.
 5. **Checkpoint and restore a real process with CRIU** — dump process state, inspect CRIU images, and resume execution.
 6. **Serve page faults from userspace** — build a `userfaultfd` handler and connect it to lazy restore and post-copy migration.
+7. **Answer a real question with eBPF** — escalate from `bpftrace` one-liners to a libbpf CO-RE ioctl tracer, and read a verifier rejection.
+8. **Checkpoint a CUDA process** — three tiers: a GPU-free baseline, an NVIDIA GPU round trip, and the unmeasured unified-memory frontier.
 
 Use a disposable Linux VM for the labs unless a lab explicitly says otherwise. In particular, the OOM and kernel-module exercises can disrupt or crash a system, and privileged containers still share the host kernel. Do not run destructive experiments on a machine whose uptime or data matters.
 
@@ -124,6 +127,19 @@ The `inference/` directory contains a second standalone guided course, built on 
 
 Its entry point is `inference/index.html`, served under `/inference/`. It also ships the only interactive material in the three courses: a KV-cache and deployment-sizing calculator, a roofline explorer, a token-cost calculator, a serving-engine simulator (also hosted full-page at `inference/simulator.html`), and a serving-stack orientation map at the head of every chapter. Each is a placeholder `<div class="inf-widget">` in the Markdown, filled in by the scripts under `inference/assets/`, and each carries a plain-text fallback for readers without JavaScript.
 
+## The GPU–Kernel Track
+
+The `path/` directory holds a **guided track**, not a fourth course. It contains no chapters of its own: it is an ordering of chapters that live in the three courses above, grouped into **six phases over twelve months**, aimed at one specific ambition — knowing exactly what happens between a GPU and the Linux kernel, and turning that into work other people can use.
+
+What distinguishes it from the six reading paths inside the Linux course is the **deliverable** that closes each phase: two annotated functions, a measured checkpoint, an annotated CUDA address space, a profile of a VRAM release-and-reacquire cycle, the unified-memory results table, and a patch accepted upstream. A reading path tracks pages; this tracks artifacts.
+
+Progress works in two directions, and keeping them apart is the design:
+
+- **Chapters tick themselves.** All three courses store reading progress in `localStorage` on the same origin, so the track reads `ldd-read`, `ds-course-progress-v1` and `inf-course-progress-v1` directly. It never writes them — a track is a view over the courses, not a second source of truth.
+- **Deliverables you tick yourself**, under the track's own `path-gpu-kernel-deliverables-v1` key. They are the part a reading tracker cannot infer.
+
+Its entry point is `path/index.html`, served under `/path/`. It is reachable from the landing page and from the course switcher in every sidebar.
+
 ## Features
 
 ### Shared by all three courses
@@ -147,7 +163,7 @@ Its entry point is `inference/index.html`, served under `/inference/`. It also s
 ### The Linux Deep Dive only
 
 - Per-chapter frontmatter for difficulty, reading time, verification date, kernel version, and prerequisites
-- Reading progress: a chapter is marked read automatically when you reach the end of it, or by hand with the control in the chapter's meta line. The sidebar shows how many of the 56 chapters are read.
+- Reading progress: a chapter is marked read automatically when you reach the end of it, or by hand with the control in the chapter's meta line. The sidebar shows how many of the 67 chapters are read.
 
 ### The two guided courses (Distributed Systems, Inference Engineering)
 
@@ -233,7 +249,7 @@ It can be run directly, without the wrapper:
 cd tests && node --test "tier1/*.test.js"
 ```
 
-**Tier 2 — browser.** Playwright drives headless Chromium against `python3 -m http.server` on an ephemeral port. It renders **all 93 chapters** and asserts, for each one, that the article holds real content and not the loading placeholder, that `document.title` is the chapter's, that there is exactly one `<h1>` and no heading-level skips, and that nothing was logged to the console or failed on the wire. It then exercises search, deep links, the 375 px layout and the theme toggle on one chapter per course. The whole tier takes about fifteen seconds.
+**Tier 2 — browser.** Playwright drives headless Chromium against `python3 -m http.server` on an ephemeral port. It renders **all 104 chapters** and asserts, for each one, that the article holds real content and not the loading placeholder, that `document.title` is the chapter's, that there is exactly one `<h1>` and no heading-level skips, and that nothing was logged to the console or failed on the wire. It then exercises search, deep links, the 375 px layout and the theme toggle on one chapter per course. The whole tier takes about fifteen seconds.
 
 The first run installs Playwright and downloads Chromium (~100 MB) into `tests/node_modules` and the shared Playwright cache; `./tests/run.sh tier2` does this for you.
 

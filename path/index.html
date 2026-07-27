@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>The GPU–Kernel Track — a twelve-month route through all three courses</title>
+  <meta name="description" content="A guided track, not a course: six phases over twelve months through the Linux, distributed systems and inference courses, each phase closed by a deliverable — ending in a published measurement and an accepted patch.">
+  <script>
+    /* Same pre-paint theme restore as the three course shells, so arriving
+       here from a course does not flash the other theme. This page has no
+       code blocks, so it does not need the highlight.js stylesheet. */
+    (function () {
+      var theme = window.matchMedia &&
+                  window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
+      try {
+        var saved = localStorage.getItem("ldd-theme");
+        if (saved === "paper" || saved === "dark") theme = saved;
+      } catch (e) {}
+      if (theme === "paper") document.documentElement.dataset.theme = "paper";
+    })();
+  </script>
+  <link rel="stylesheet" href="../assets/style.css?v=20260727">
+  <link rel="stylesheet" href="assets/path.css?v=20260727">
+</head>
+<body class="track-body">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <main id="main" class="track" tabindex="-1">
+
+    <nav class="track-back" aria-label="Courses">
+      <a href="../">All courses</a>
+      <a href="../#/course">Linux</a>
+      <a href="../distributed/">Distributed</a>
+      <a href="../inference/">Inference</a>
+      <span class="track-theme">
+        <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
+        <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
+      </span>
+    </nav>
+
+    <header class="track-hero">
+      <p class="track-kicker">A guided track · six phases · twelve months</p>
+      <h1>The GPU–Kernel Track</h1>
+      <p class="track-lede">
+        Everything on this page lives somewhere else. This is not a course —
+        it holds no chapters of its own. It is a route through the three that
+        exist, ordered for one specific ambition: <strong>to know exactly what
+        happens between a GPU and the Linux kernel</strong>, and to turn that
+        into work other people can use.
+      </p>
+      <p class="track-lede">
+        What makes it a programme rather than a reading list is the last row of
+        every phase. Each one closes on a <strong>deliverable</strong> — a
+        measurement, an annotated map, a tool, a patch. Chapters tick
+        themselves off as you read them in the courses. The deliverables you
+        tick yourself, and they are the only ones that count.
+      </p>
+      <div id="track-progress" class="track-progress"></div>
+    </header>
+
+    <section id="phases" class="phases"><!-- injected by assets/path.js --></section>
+
+    <footer class="track-foot">
+      <h2>What this track deliberately leaves out</h2>
+      <p>
+        A route is defined as much by what it skips. The three courses contain
+        a great deal of excellent material that is not on the way to this
+        particular destination — CPU vulnerability mitigations, power
+        management, trusted computing, Rust in the kernel, TCP congestion
+        control, most of consensus and replication, and the economics half of
+        the inference course. None of it is filler. It is simply not this
+        road, and a track that pretended otherwise would be a table of
+        contents wearing a costume.
+      </p>
+      <p>
+        Read them afterwards, or when a problem sends you there. Not first.
+      </p>
+    </footer>
+
+  </main>
+
+  <script src="assets/path.js?v=20260727"></script>
+</body>
+</html>

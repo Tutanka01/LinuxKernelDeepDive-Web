@@ -1,0 +1,275 @@
+/* The GPU–Kernel Track — a single reading column, no rails.
+   Everything here reuses the site's tokens from ../assets/style.css; this
+   file adds no colours of its own, so the two themes come free. The page is
+   an orientation surface, not a reader: hierarchy comes from ink weight and
+   spacing, and the amber accent stays reserved for links and state, as
+   everywhere else on the site. */
+
+.track-body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.track {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 6rem;
+}
+
+/* ---------- back-links row ---------- */
+
+.track-back {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  padding-bottom: 1.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.track-back a { color: var(--text-faint); text-decoration: none; }
+.track-back a:hover { color: var(--accent); }
+
+.track-theme { margin-left: auto; display: flex; gap: 0.35rem; }
+
+.track-theme .theme-btn {
+  font: inherit;
+  color: var(--text-faint);
+  background: none;
+  border: 1px solid var(--rule-mid);
+  border-radius: 2px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+}
+.track-theme .theme-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+/* ---------- hero ---------- */
+
+.track-hero { padding: 3rem 0 2.5rem; }
+
+.track-kicker {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 1rem;
+}
+
+.track-hero h1 {
+  font-family: var(--serif);
+  font-size: clamp(2.1rem, 6vw, 3rem);
+  line-height: 1.1;
+  color: var(--ink);
+  margin: 0 0 1.5rem;
+}
+
+.track-lede {
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--text);
+  margin: 0 0 1.1rem;
+}
+.track-lede strong { color: var(--ink); }
+
+/* ---------- overall progress ---------- */
+
+.track-progress { margin-top: 2.25rem; }
+
+.track-progress .bar {
+  height: 3px;
+  background: var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.track-progress .bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.bar-label {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin: 0.6rem 0 0;
+}
+.bar-label strong { color: var(--text); font-weight: 600; }
+
+/* ---------- phases ---------- */
+
+.phase {
+  padding: 3rem 0;
+  border-top: 1px solid var(--rule);
+}
+
+.phase-months {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 0.5rem;
+}
+
+.phase-head h2 {
+  font-family: var(--serif);
+  font-size: 1.6rem;
+  line-height: 1.25;
+  color: var(--ink);
+  margin: 0 0 0.9rem;
+}
+
+.phase-n {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+
+.phase-thesis {
+  font-family: var(--serif);
+  line-height: 1.65;
+  color: var(--text-dim);
+  margin: 0 0 1.75rem;
+}
+
+/* ---------- steps ---------- */
+
+.steps { list-style: none; margin: 0; padding: 0; }
+
+.step {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr auto;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.42rem 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.step-tick {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--accent);
+  text-align: center;
+}
+
+.step-link {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  line-height: 1.4;
+}
+.step-link:hover { color: var(--accent); border-bottom-color: var(--accent-dim); }
+
+.step.is-read .step-link { color: var(--text-faint); }
+
+.step-course {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.phase-count {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin: 0.9rem 0 0;
+}
+
+/* ---------- the deliverable ---------- */
+
+.deliverable {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem;
+  margin-top: 1.75rem;
+  padding: 1.25rem;
+  border: 1px solid var(--rule-mid);
+  border-left: 2px solid var(--accent-dim);
+  border-radius: 3px;
+  background: var(--bg-raised);
+}
+
+.phase.is-delivered .deliverable { background: var(--accent-soft); }
+
+.deliverable-tick {
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  background: none;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.deliverable-tick[aria-pressed="true"] { border-color: var(--accent-dim); }
+.deliverable-tick:hover { border-color: var(--accent); }
+
+.deliverable-label {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.4rem;
+}
+
+.deliverable-title {
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin: 0 0 0.5rem;
+}
+
+.deliverable-detail {
+  font-family: var(--serif);
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+/* ---------- footer ---------- */
+
+.track-foot {
+  padding-top: 3rem;
+  border-top: 1px solid var(--rule);
+}
+
+.track-foot h2 {
+  font-family: var(--serif);
+  font-size: 1.2rem;
+  color: var(--ink);
+  margin: 0 0 1rem;
+}
+
+.track-foot p {
+  font-family: var(--serif);
+  line-height: 1.65;
+  color: var(--text-dim);
+  margin: 0 0 1rem;
+}
+
+@media (max-width: 34rem) {
+  .track { padding: 1.25rem 1.1rem 4rem; }
+  .step { grid-template-columns: 1.2rem 1fr; }
+  .step-course { grid-column: 2; margin-top: 0.15rem; }
+}

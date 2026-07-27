@@ -268,11 +268,31 @@ It turns lazy restore's central mechanism into a program you can trace.
 21. [Devices, Drivers & Modules](#/devices-modules)
 22. [GPU Checkpointing: cuda-checkpoint & CRIU Plugins](#/gpu-checkpoint)
 
+**Phase D — the GPU–kernel boundary**
+
+Phase C ends at a chapter that names more open questions than it answers. Part
+XI is what stands underneath it: the kernel machinery that makes a GPU process
+different from every other process.
+
+23. [Memory on arm64](#/arm64-memory)
+24. [DMA, Coherence & the IOMMU](#/dma-and-iommu)
+25. [The GPU Driver Under Linux: DRM, GEM & dma-buf](#/gpu-drivers)
+26. [Device Memory in the Kernel: HMM, MMU Notifiers & migrate_vma](#/hmm-and-mmu-notifiers)
+27. [Unified & Coherent Memory: UVM, Grace-Blackwell & GB10](#/unified-memory)
+28. [Where VRAM Goes: Allocators, the VMM API & Engine Memory](#/gpu-memory-allocation)
+29. [Instrumenting the GPU: NVML, DCGM, CUPTI & Nsight](#/gpu-observability)
+
+**Milestone 3:** [Lab: Checkpoint a CUDA Process](#/lab-gpu-checkpoint) — the
+protocol from chapter 22, executed and recorded. Its third tier is an
+experiment nobody has published the result of.
+
 The first milestone makes CRIU's images tangible; the second makes lazy
-migration's page-fault path yours. Learn
-[/proc, strace, perf & eBPF](#/observability) and [eBPF
-Internals](#/ebpf-internals) in parallel once Phase A is comfortable: they are
-the instruments you will use to measure every later phase.
+migration's page-fault path yours; the third produces numbers. Learn
+[/proc, strace, perf & eBPF](#/observability), [eBPF
+Internals](#/ebpf-internals) and [ftrace](#/ftrace) in parallel once Phase A is
+comfortable: they are the instruments you will use to measure every later
+phase, and [Lab: Answer a Real Question with eBPF](#/lab-ebpf) builds the tool
+Phase D needs.
 
 ### 4. Performance & SRE
 
@@ -313,6 +333,7 @@ correct, how it is governed, and how to build and modify it.
 1. [Kernel Synchronization: Locks, Atomics & RCU](#/kernel-sync)
 2. [How the Kernel Is Made: Process & Governance](#/kernel-governance)
 3. [Reading & Building the Kernel](#/kernel-dev)
+4. [Getting a Patch Accepted: Kernel, CRIU & vLLM](#/contributing-upstream)
 
 **Capstone:** [Lab: Write, Build & Load a Kernel Module](#/lab-kernel-module) —
 your first real code running in kernel space. (Do this one in a VM.)

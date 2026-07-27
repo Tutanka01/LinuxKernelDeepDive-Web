@@ -567,3 +567,11 @@ from every container regardless of its namespaces.
 **Next:** turn those instruments into a repeatable investigation process —
 USE, RED, the 60-second checklist, and on/off-CPU flame graphs — in
 [Performance Analysis Methodology](#/perf-methodology).
+
+Two instruments this chapter only gestured at get chapters of their own.
+[ftrace](#/ftrace) is the tracer already compiled into every kernel you will
+ever meet — no toolchain, no verifier, and a call-graph view eBPF does not
+naturally give you. And when the work you are trying to see is on an
+accelerator, none of the tools above can follow it: [Instrumenting the
+GPU](#/gpu-observability) is this chapter's counterpart on the other side of
+the driver boundary, cost model and all.
