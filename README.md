@@ -140,6 +140,8 @@ Progress works in two directions, and keeping them apart is the design:
 
 Its entry point is `path/index.html`, served under `/path/`. It is reachable from the landing page and from the course switcher in every sidebar.
 
+It runs in the same shell as the three courses, and deliberately borrows their vocabulary rather than inventing a second one: a phase is drawn as a course module, a step as a chapter card, and the rail, drawer, theme switch, progress bar and search modal are the ones every other page has. The search here is over the track's own steps, phases and deliverables — the track holds no prose of its own, and the full-text search of a course lives in that course.
+
 ## Features
 
 ### Shared by all three courses
@@ -183,7 +185,7 @@ Its entry point is `path/index.html`, served under `/path/`. It is reachable fro
 │   ├── course.js              Shared engine for the two guided courses: router, renderer, quizzes, search, progress
 │   ├── reader-ui.js           Shared reader layer used by all three: scroll regions, inline TOC, focus, Mermaid
 │   └── vendor/                marked, highlight.js, Mermaid and the two hljs themes, served from this origin
-├── content/                   56 Linux course Markdown chapters
+├── content/                   67 Linux course Markdown chapters
 ├── distributed/
 │   ├── index.html             Distributed Systems course shell
 │   ├── assets/ds.js           Course data (the COURSE array) and config; loads ../assets/course.js
@@ -201,6 +203,11 @@ Its entry point is `path/index.html`, served under `/path/`. It is reachable fro
 │   │   └── diagrams/          Hand-drawn SVG figures, themed through CSS custom properties
 │   ├── content/               24 Inference Engineering chapters
 │   └── research/              Source and style notes; excluded from the image by .dockerignore
+├── path/
+│   ├── index.html             The GPU–Kernel Track, in the same shell as the three courses
+│   └── assets/
+│       ├── path.js            The six phases, their steps and deliverables; rail, drawer, search, progress
+│       └── path.css           Only what the courses have no equivalent of: the deliverable panel
 ├── tests/                     Test suite; not part of the served site (see Development)
 ├── docs/                      Audits and design notes
 ├── Dockerfile                 nginx-based image

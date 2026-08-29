@@ -44,8 +44,17 @@
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --mono:  "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
-  /* one place to tune the reading measure */
-  --measure: 720px;
+  /* One place to tune the reading column, and one column for everything in
+     it. --measure is the *outer* width (text plus gutters); every block a
+     chapter can contain — prose, code, tables, figures, widgets, the pager,
+     the footer — is laid out inside it and shares its two edges.
+
+     760px minus two 2.75rem gutters leaves 672px of content, which is where
+     the two things this book sets both come out right: ~80 characters of
+     17px serif, and exactly 80 columns of the 13.1px mono. Wider prose stops
+     being comfortable; narrower code starts wrapping shell output that was
+     written to fit a terminal. */
+  --measure: 760px;
   --gutter:  2.75rem;
 
   --selection: rgba(217, 160, 91, 0.22);
@@ -416,6 +425,28 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   font-style: italic;
   line-height: 1.45;
 }
+
+/* The track is not a fourth course — it is a route through the three above
+   it, and every shell listed it in the same shape as them with no style of
+   its own to say otherwise. A rule to separate it from the list it draws
+   from, and a label naming what kind of thing it is. */
+.course-chip.chip-track {
+  margin-top: 0.5rem;
+  padding-top: 0.62rem;
+  border-top: 1px solid var(--rule-soft);
+  border-top-left-radius: 0;
+}
+.chip-track .chip-title::before {
+  content: "Track";
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--accent-dim);
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.chip-track.current .chip-title::before { color: var(--accent); }
 
 .sidebar-footer {
   margin-top: 2rem;
@@ -1292,32 +1323,40 @@ body.modal-open { overflow: hidden; }
 }
 
 /* ============================================================
-   Wide evidence on a wide screen.
+   One column, one pair of edges.
 
-   The reading measure is right for prose and much too narrow for a
-   1500px comparison table or a 12-column ASCII diagram: at 1440px the
-   code column was 632px with 106px of empty page on either side. Code,
-   tables and figures step outside the measure once — and only once —
-   there is genuinely room for them. Below 1400px nothing changes.
+   Code, tables and figures used to step *outside* the measure on wide
+   screens — 200px past it on both sides at 1800px. The intent was to give a
+   wide comparison table room, but the cost was paid on every block on the
+   page: nothing shared an edge with the prose any more, and a reader saw
+   evidence sticking out of the text rather than belonging to it.
+
+   The room is bought inside the column now (see --measure), not outside it,
+   and everything the column contains is bound to the same two edges. When a
+   block is genuinely wider than 672px it scrolls in its own frame — the
+   contract it already had on every screen under 1400px, with the labelled,
+   focusable "scroll →" marker that goes with it.
+
+   Nothing here sets a width: the point is that these boxes inherit the
+   column's. What the rule does is stop the ones that ship an intrinsic
+   size (SVG, canvas, embedded media) from pushing it wider.
    ============================================================ */
 
-.article > pre,
-.article > .table-scroll,
-.article > .figure-scroll,
-.article-body > pre,
-.article-body > .table-scroll,
-.article-body > .figure-scroll {
-  width: calc(100% + 2 * var(--bleed, 0px));
-  /* .article pre carries max-width:100%, which would clamp the widened
-     box straight back to the measure */
-  max-width: calc(100% + 2 * var(--bleed, 0px));
-  margin-left: calc(-1 * var(--bleed, 0px));
-  margin-right: calc(-1 * var(--bleed, 0px));
+.article > *,
+.article-body > * {
+  max-width: 100%;
 }
 
-@media (min-width: 1400px) { .article, .article-body { --bleed: 56px; } }
-@media (min-width: 1600px) { .article, .article-body { --bleed: 130px; } }
-@media (min-width: 1800px) { .article, .article-body { --bleed: 200px; } }
+/* The gutter is a token so the pieces of the column cannot drift apart: the
+   article, the pager and the footer are three separate elements stacked in
+   one shell, and between 901px and 1279px the article alone was being
+   indented 3rem while the other two stayed at 2.75rem. `padding-inline`
+   overrides only the sides of the `padding` shorthands set above, so each
+   keeps its own vertical rhythm. */
+.article, .pager, .page-footer {
+  padding-inline: max(var(--gutter), env(safe-area-inset-left))
+                  max(var(--gutter), env(safe-area-inset-right));
+}
 
 /* ============================================================
    Responsive — tuned around the reading column and touch.
@@ -1337,23 +1376,24 @@ body.modal-open { overflow: hidden; }
 }
 
 /* ---- iPad landscape & mid widths: give the reading column room ----
-   The measure used to *shrink* by 83px as the window grew across 900→901
-   (44rem in the tablet band, then a 264px sidebar eating the width before
-   720px could be reached). Holding 44rem into this band keeps the reading
-   column monotonic. */
+   The measure used to *shrink* as the window grew across 900→901 (a 264px
+   sidebar eating the width before the full measure could be reached).
+   Holding 46rem into this band keeps the reading column monotonic: it only
+   ever grows as the window does. */
 @media (min-width: 900.02px) and (max-width: 1279.98px) {
-  :root { --measure: 44rem; }
+  :root { --measure: 46rem; --gutter: 3rem; }
   .sidebar { width: 264px; padding-right: 1rem; }
-  .article { padding-left: 3rem; padding-right: 3rem; }
 }
 
 /* ---- ≤ 900px: stack the layout, sidebar becomes a drawer ---- */
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
 
-  /* the height of the sticky bar, so anchors and the scroll-spy agree
-     with the thing that is actually covering the text */
-  :root { --sticky-h: 3.25rem; }
+  /* --sticky-h is the height of the sticky bar, so anchors and the
+     scroll-spy agree with the thing that is actually covering the text.
+     --gutter is the one value the shared padding-inline rule hands to the
+     article, the pager and the footer together. */
+  :root { --sticky-h: 3.25rem; --gutter: 1.75rem; }
 
   /* ------------------------------------------------------------
      The mobile top bar.
@@ -1478,16 +1518,7 @@ body.modal-open { overflow: hidden; }
   .search-open { min-height: 2.85rem; font-size: 0.95rem; }
   .theme-btn { padding: 0.7rem 0; }
 
-  .article {
-    padding: 2.4rem
-             max(1.75rem, env(safe-area-inset-right))
-             1.5rem
-             max(1.75rem, env(safe-area-inset-left));
-  }
-  .pager, .page-footer {
-    padding-left: max(1.75rem, env(safe-area-inset-left));
-    padding-right: max(1.75rem, env(safe-area-inset-right));
-  }
+  .article { padding-top: 2.4rem; padding-bottom: 1.5rem; }
 
   body { font-size: 16px; }
   .article h1 { font-size: 1.75rem; }
@@ -1498,24 +1529,14 @@ body.modal-open { overflow: hidden; }
 /* ---- iPad / tablet portrait: the priority — larger, calmer type ---- */
 @media (min-width: 600.02px) and (max-width: 900px) {
   body { font-size: 18px; line-height: 1.75; }
-  :root { --measure: 44rem; }
+  :root { --measure: 46rem; --gutter: 2.5rem; }
 
-  .article {
-    padding: 3rem
-             max(2.5rem, env(safe-area-inset-right))
-             2rem
-             max(2.5rem, env(safe-area-inset-left));
-  }
+  .article { padding-top: 3rem; padding-bottom: 2rem; }
   .article h1 { font-size: 2rem; }
   .article h2 { font-size: 1.45rem; margin-top: 2.6rem; }
   .article h3 { font-size: 1.18rem; }
   .article pre code { font-size: 0.86rem; }
   .article table { font-size: 0.95rem; }
-
-  .pager, .page-footer {
-    padding-left: max(2.5rem, env(safe-area-inset-left));
-    padding-right: max(2.5rem, env(safe-area-inset-right));
-  }
 }
 
 /* ============================================================
@@ -1523,13 +1544,9 @@ body.modal-open { overflow: hidden; }
    ============================================================ */
 @media (max-width: 600px) {
   body { font-size: 16px; line-height: 1.68; }
+  :root { --gutter: 1.15rem; }
 
-  .article {
-    padding: 1.85rem
-             max(1.15rem, env(safe-area-inset-right))
-             1rem
-             max(1.15rem, env(safe-area-inset-left));
-  }
+  .article { padding-top: 1.85rem; padding-bottom: 1rem; }
   .article h1 { font-size: 1.55rem; }
   .article h1::after { width: 2rem; margin-top: 0.9rem; }
   .article h2 { font-size: 1.22rem; margin-top: 1.9rem; }
@@ -1577,16 +1594,15 @@ body.modal-open { overflow: hidden; }
   .pager {
     flex-direction: column;
     gap: 0.5rem;
-    padding: 0.9rem max(1.15rem, env(safe-area-inset-right)) 0
-             max(1.15rem, env(safe-area-inset-left));
+    padding-top: 0.9rem;
+    padding-bottom: 0;
   }
   .pager a { max-width: 100%; padding: 0.55rem 0; }
   .pager .next { text-align: left; margin-left: 0; }
 
   .page-footer {
-    padding: 1rem max(1.15rem, env(safe-area-inset-right))
-             calc(2rem + env(safe-area-inset-bottom))
-             max(1.15rem, env(safe-area-inset-left));
+    padding-top: 1rem;
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom));
   }
 
   .toc-part { font-size: 0.66rem; }
@@ -1604,10 +1620,7 @@ body.modal-open { overflow: hidden; }
    ============================================================ */
 @media (max-width: 420.98px) {
   body { font-size: 15.5px; }
-  .article {
-    padding-left: max(1rem, env(safe-area-inset-left));
-    padding-right: max(1rem, env(safe-area-inset-right));
-  }
+  :root { --gutter: 1rem; }
   .article h1 { font-size: 1.42rem; }
   .article h2 { font-size: 1.12rem; }
   .article h3 { font-size: 1rem; }
@@ -1624,10 +1637,6 @@ body.modal-open { overflow: hidden; }
   .article details > *:not(summary) { padding: 0 0.65rem; }
   .article details summary { padding: 0.55rem 0.65rem; font-size: 0.8rem; }
 
-  .pager, .page-footer {
-    padding-left: max(1rem, env(safe-area-inset-left));
-    padding-right: max(1rem, env(safe-area-inset-right));
-  }
   .search-box { margin: 6vh 0.6rem 0; }
   #search-input { font-size: 1rem; padding: 0.85rem 0.9rem; }
   .search-result { padding: 0.5rem 0.55rem; }

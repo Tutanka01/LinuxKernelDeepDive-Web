@@ -6,79 +6,134 @@
   <title>The GPU–Kernel Track — a twelve-month route through all three courses</title>
   <meta name="description" content="A guided track, not a course: six phases over twelve months through the Linux, distributed systems and inference courses, each phase closed by a deliverable — ending in a published measurement and an accepted patch.">
   <script>
-    /* Same pre-paint theme restore as the three course shells, so arriving
-       here from a course does not flash the other theme. This page has no
-       code blocks, so it does not need the highlight.js stylesheet. */
+    /* The same pre-paint restore the three course shells run, and for the same
+       reason: arriving here from a course must not flash the other theme, and
+       a reader who collapsed the rail expects it to stay collapsed across the
+       whole site rather than per page.
+
+       No highlight.js stylesheet is injected: this page renders no code
+       blocks. Everything else about the boot is deliberately identical. */
     (function () {
       var theme = window.matchMedia &&
                   window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "dark";
       try {
         var saved = localStorage.getItem("ldd-theme");
         if (saved === "paper" || saved === "dark") theme = saved;
+        if (localStorage.getItem("ldd-nav-collapsed") === "1") document.documentElement.classList.add("nav-collapsed");
       } catch (e) {}
       if (theme === "paper") document.documentElement.dataset.theme = "paper";
     })();
   </script>
-  <link rel="stylesheet" href="../assets/style.css?v=20260727">
-  <link rel="stylesheet" href="assets/path.css?v=20260727">
+  <link rel="stylesheet" href="../assets/style.css?v=20260729">
+  <!-- The track reuses the course-home vocabulary wholesale — .home, .hero,
+       the progress ring, .module-head, .chapter-card — so a phase reads
+       exactly like a module of a course. path.css only adds what is genuinely
+       new here: the deliverable panel and the course tag on a step. -->
+  <link rel="stylesheet" href="../assets/course.css?v=20260727">
+  <link rel="stylesheet" href="assets/path.css?v=20260729">
 </head>
-<body class="track-body">
+<body>
   <a class="skip-link" href="#main">Skip to content</a>
+  <div id="progress-bar"></div>
+  <div class="layout">
 
-  <main id="main" class="track" tabindex="-1">
-
-    <nav class="track-back" aria-label="Courses">
-      <a href="../">All courses</a>
-      <a href="../#/course">Linux</a>
-      <a href="../distributed/">Distributed</a>
-      <a href="../inference/">Inference</a>
-      <span class="track-theme">
-        <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
-        <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
-      </span>
-    </nav>
-
-    <header class="track-hero">
-      <p class="track-kicker">A guided track · six phases · twelve months</p>
-      <h1>The GPU–Kernel Track</h1>
-      <p class="track-lede">
-        Everything on this page lives somewhere else. This is not a course —
-        it holds no chapters of its own. It is a route through the three that
-        exist, ordered for one specific ambition: <strong>to know exactly what
-        happens between a GPU and the Linux kernel</strong>, and to turn that
-        into work other people can use.
-      </p>
-      <p class="track-lede">
-        What makes it a programme rather than a reading list is the last row of
-        every phase. Each one closes on a <strong>deliverable</strong> — a
-        measurement, an annotated map, a tool, a patch. Chapters tick
-        themselves off as you read them in the courses. The deliverables you
-        tick yourself, and they are the only ones that count.
-      </p>
-      <div id="track-progress" class="track-progress"></div>
+    <header id="topbar" class="topbar">
+      <button id="sidebar-toggle" type="button"
+              aria-label="Table of contents" aria-controls="sidebar" aria-expanded="false">☰ Phases</button>
+      <span id="topbar-title" class="topbar-title"></span>
     </header>
 
-    <section id="phases" class="phases"><!-- injected by assets/path.js --></section>
+    <button id="sidebar-show" class="sidebar-show" type="button"
+            aria-label="Show sidebar" title="Show contents ( [ )">☰ Contents</button>
 
-    <footer class="track-foot">
-      <h2>What this track deliberately leaves out</h2>
-      <p>
-        A route is defined as much by what it skips. The three courses contain
-        a great deal of excellent material that is not on the way to this
-        particular destination — CPU vulnerability mitigations, power
-        management, trusted computing, Rust in the kernel, TCP congestion
-        control, most of consensus and replication, and the economics half of
-        the inference course. None of it is filler. It is simply not this
-        road, and a track that pretended otherwise would be a table of
-        contents wearing a costume.
-      </p>
-      <p>
-        Read them afterwards, or when a problem sends you there. Not first.
-      </p>
-    </footer>
+    <nav id="sidebar" class="sidebar" aria-label="Phases">
+      <button id="sidebar-collapse" class="sidebar-collapse" type="button"
+              aria-label="Collapse sidebar" title="Hide contents ( [ )" aria-expanded="true">«</button>
+      <div class="site-title">
+        <a href="./">The GPU–Kernel<br>Track</a>
+        <p class="site-subtitle">a route through all three</p>
+      </div>
 
-  </main>
+      <button id="search-open" class="search-open" type="button">
+        <span class="search-open-icon">⌕</span> Search
+        <kbd class="search-kbd">/</kbd>
+      </button>
+      <div class="theme-switch" role="group" aria-label="Colour theme">
+        <button class="theme-btn" data-theme-value="dark" type="button" aria-pressed="true">Terminal</button>
+        <button class="theme-btn" data-theme-value="paper" type="button" aria-pressed="false">Paper</button>
+      </div>
 
-  <script src="assets/path.js?v=20260727"></script>
+      <nav class="course-switch" aria-label="Courses on this site">
+        <p class="course-switch-title">Courses</p>
+        <a class="course-chip chip-all" href="../">
+          <span class="chip-title">All three courses</span>
+        </a>
+        <a class="course-chip" href="../#/course">
+          <span class="chip-title">The Linux Deep Dive</span>
+          <span class="chip-desc">67 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
+        </a>
+        <a class="course-chip" href="../distributed/">
+          <span class="chip-title">Distributed Systems</span>
+          <span class="chip-desc">13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span>
+        </a>
+        <a class="course-chip" href="../inference/">
+          <span class="chip-title">Inference Engineering</span>
+          <span class="chip-desc">24 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
+        </a>
+        <span class="course-chip chip-track current" aria-current="page">
+          <span class="chip-title">The GPU–Kernel Track</span>
+          <span class="chip-desc">A guided route through all three, in six phases.</span>
+        </span>
+      </nav>
+
+      <div id="toc"><!-- the six phases, injected by assets/path.js --></div>
+
+      <div class="sidebar-footer">
+        <p id="progress-summary"></p>
+        <p>Chapters tick themselves off<br>in the courses. Deliverables<br>you tick here.</p>
+      </div>
+    </nav>
+
+    <main id="main" class="content" tabindex="-1">
+      <div id="track" class="home">
+        <p class="loading">Loading…</p>
+      </div>
+      <footer class="page-footer">
+        <p>The GPU–Kernel Track — a route through the three courses, not a fourth one.</p>
+      </footer>
+    </main>
+
+    <!-- Empty, and present on purpose: the on-this-page rail belongs to a
+         chapter, and the three course homes leave it empty too. Keeping the
+         element holds the same three-column geometry the rest of the site
+         has, so arriving here does not shift the reading column sideways. -->
+    <aside id="page-toc" class="page-toc" aria-label="On this page"></aside>
+
+    <p id="live-region" class="sr-only" role="status" aria-live="polite"></p>
+
+  <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
+
+  </div>
+
+  <!-- Same modal, same keys, smaller corpus: the track owns no prose, so what
+       there is to find here is its own steps, phases and deliverables. The
+       full-text search of a course lives in that course. -->
+  <div id="search-modal" class="search-modal" role="dialog" aria-modal="true"
+       aria-label="Search this track" hidden>
+    <div class="search-box">
+      <input id="search-input" type="text" placeholder="Search this track…"
+             autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="true" aria-autocomplete="list"
+             aria-controls="search-results">
+      <ul id="search-results" role="listbox" aria-label="Search results"></ul>
+      <p class="search-footer">↑↓ navigate · Enter open · Esc close</p>
+    </div>
+  </div>
+
+  <!-- reader-ui.js is the shell's shared behaviour — the focus trap the drawer
+       and the modal both need. It is loaded here for the same reason the three
+       courses load it: so a fix lands on every page at once. -->
+  <script src="../assets/reader-ui.js?v=20260727"></script>
+  <script src="assets/path.js?v=20260729"></script>
 </body>
 </html>

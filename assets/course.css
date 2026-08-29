@@ -20,10 +20,15 @@ html[data-theme="paper"] {
 
 /* Course home */
 
+/* The course map is the same column as a chapter — same measure, same
+   gutter — so moving between the two does not shift the text sideways.
+   style.css owns the gutter; this file only has to stop overriding it. */
 .home {
   max-width: var(--measure);
   margin: 0 auto;
   padding: 3.25rem var(--gutter) 2rem;
+  padding-inline: max(var(--gutter), env(safe-area-inset-left))
+                  max(var(--gutter), env(safe-area-inset-right));
   overflow-wrap: break-word;
 }
 
@@ -342,10 +347,7 @@ html[data-theme="paper"] {
 }
 
 @media (max-width: 900px) {
-  .home {
-    padding: 2.4rem max(1.75rem, env(safe-area-inset-right)) 1.5rem
-             max(1.75rem, env(safe-area-inset-left));
-  }
+  .home { padding-top: 2.4rem; padding-bottom: 1.5rem; }
   .hero { flex-direction: column-reverse; align-items: flex-start; gap: 1rem; }
   .hero-ring { align-self: flex-end; }
   .hero h1 { font-size: 1.75rem; }
@@ -353,17 +355,11 @@ html[data-theme="paper"] {
 }
 
 @media (min-width: 601px) and (max-width: 900px) {
-  .home {
-    padding: 3rem max(2.5rem, env(safe-area-inset-right)) 2rem
-             max(2.5rem, env(safe-area-inset-left));
-  }
+  .home { padding-top: 3rem; padding-bottom: 2rem; }
 }
 
 @media (max-width: 600px) {
-  .home {
-    padding: 1.85rem max(1.15rem, env(safe-area-inset-right)) 1rem
-             max(1.15rem, env(safe-area-inset-left));
-  }
+  .home { padding-top: 1.85rem; padding-bottom: 1rem; }
   .hero h1 { font-size: 1.55rem; }
   .hero-ring svg { width: 100px; height: 100px; }
   .ring-label strong { font-size: 1.1rem; }

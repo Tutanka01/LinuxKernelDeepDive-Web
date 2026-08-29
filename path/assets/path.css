@@ -1,275 +1,162 @@
-/* The GPU–Kernel Track — a single reading column, no rails.
-   Everything here reuses the site's tokens from ../assets/style.css; this
-   file adds no colours of its own, so the two themes come free. The page is
-   an orientation surface, not a reader: hierarchy comes from ink weight and
-   spacing, and the amber accent stays reserved for links and state, as
-   everywhere else on the site. */
+/* The GPU–Kernel Track — the little that is genuinely new here.
+   ============================================================
 
-.track-body {
-  background: var(--bg);
-  color: var(--text);
-}
+   The page runs in the shell (../assets/style.css) and speaks the course-home
+   vocabulary (../assets/course.css): .home, .hero, the progress ring,
+   .module/.module-head for a phase, .chapter-card for a step. That is
+   deliberate — a phase *is* a module and a step *is* a chapter, so they should
+   not be a second design.
 
-.track {
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: 2rem 1.5rem 6rem;
-}
+   What is left for this file is the one object the courses do not have: the
+   deliverable that closes a phase. Plus the two small adjustments a borrowed
+   card needs when the thing it points at lives in another course.
 
-/* ---------- back-links row ---------- */
+   No colours are defined here. Both themes come from the shell's tokens. */
 
-.track-back {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 1.25rem;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.02em;
-  padding-bottom: 1.75rem;
-  border-bottom: 1px solid var(--rule);
-}
+/* ---------- a phase ---------- */
 
-.track-back a { color: var(--text-faint); text-decoration: none; }
-.track-back a:hover { color: var(--accent); }
+/* The rail and the search results both jump to a phase; the sticky bar on a
+   phone would otherwise land on top of the heading they jumped to. Same
+   expression the shell uses for chapter headings. */
+.phase, .track-omits { scroll-margin-top: calc(var(--sticky-h) + 1rem); }
 
-.track-theme { margin-left: auto; display: flex; gap: 0.35rem; }
-
-.track-theme .theme-btn {
-  font: inherit;
-  color: var(--text-faint);
-  background: none;
-  border: 1px solid var(--rule-mid);
-  border-radius: 2px;
-  padding: 0.2rem 0.5rem;
-  cursor: pointer;
-}
-.track-theme .theme-btn[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent-dim);
-}
-
-/* ---------- hero ---------- */
-
-.track-hero { padding: 3rem 0 2.5rem; }
-
-.track-kicker {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin: 0 0 1rem;
-}
-
-.track-hero h1 {
-  font-family: var(--serif);
-  font-size: clamp(2.1rem, 6vw, 3rem);
-  line-height: 1.1;
-  color: var(--ink);
-  margin: 0 0 1.5rem;
-}
-
-.track-lede {
-  font-family: var(--serif);
-  font-size: 1.05rem;
-  line-height: 1.65;
-  color: var(--text);
-  margin: 0 0 1.1rem;
-}
-.track-lede strong { color: var(--ink); }
-
-/* ---------- overall progress ---------- */
-
-.track-progress { margin-top: 2.25rem; }
-
-.track-progress .bar {
-  height: 3px;
-  background: var(--rule);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.track-progress .bar span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.3s ease;
-}
-
-.bar-label {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--text-faint);
-  margin: 0.6rem 0 0;
-}
-.bar-label strong { color: var(--text); font-weight: 600; }
-
-/* ---------- phases ---------- */
-
-.phase {
-  padding: 3rem 0;
-  border-top: 1px solid var(--rule);
-}
-
-.phase-months {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin: 0 0 0.5rem;
-}
-
-.phase-head h2 {
-  font-family: var(--serif);
-  font-size: 1.6rem;
-  line-height: 1.25;
-  color: var(--ink);
-  margin: 0 0 0.9rem;
-}
-
-.phase-n {
-  display: block;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 0.3rem;
-}
-
+/* The thesis is argument, not blurb: it earns the reading measure and the
+   body size, sitting between the phase heading and its chapters the way a
+   chapter's opening paragraph sits under its title. */
 .phase-thesis {
-  font-family: var(--serif);
-  line-height: 1.65;
+  margin: 0 0 1.4rem;
   color: var(--text-dim);
-  margin: 0 0 1.75rem;
+  line-height: 1.7;
 }
 
-/* ---------- steps ---------- */
+.phase-count { font-style: normal; font-family: var(--mono); font-size: 0.78em; }
 
-.steps { list-style: none; margin: 0; padding: 0; }
+/* ---------- the deliverable ----------
 
-.step {
-  display: grid;
-  grid-template-columns: 1.4rem 1fr auto;
-  align-items: baseline;
-  gap: 0.6rem;
-  padding: 0.42rem 0;
-  border-bottom: 1px solid var(--rule-soft);
-}
-
-.step-tick {
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--accent);
-  text-align: center;
-}
-
-.step-link {
-  color: var(--text);
-  text-decoration: none;
-  border-bottom: 1px solid transparent;
-  line-height: 1.4;
-}
-.step-link:hover { color: var(--accent); border-bottom-color: var(--accent-dim); }
-
-.step.is-read .step-link { color: var(--text-faint); }
-
-.step-course {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-.phase-count {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--text-faint);
-  margin: 0.9rem 0 0;
-}
-
-/* ---------- the deliverable ---------- */
+   The one thing on this page that is not a view over something else: it is
+   ticked here, by hand, and nothing in the three courses can infer it. It
+   takes the shell's raised-panel treatment (as a quiz block does) with the
+   accent carried on the left edge — the site's mark for "this is the point". */
 
 .deliverable {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 1rem;
-  margin-top: 1.75rem;
-  padding: 1.25rem;
+  margin: 1.1rem 0 0;
+  padding: 1.15rem 1.35rem;
   border: 1px solid var(--rule-mid);
   border-left: 2px solid var(--accent-dim);
-  border-radius: 3px;
+  border-radius: 6px;
   background: var(--bg-raised);
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.phase.is-delivered .deliverable { background: var(--accent-soft); }
+.phase.is-delivered .deliverable {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
 
+/* The tick is the same circle as a chapter card's .card-check, because it
+   means the same thing — but it is a control rather than a state readout, so
+   it is a real button with a real hit area. */
 .deliverable-tick {
-  width: 1.6rem;
-  height: 1.6rem;
+  position: relative;
+  width: 2rem;
+  height: 2rem;
   flex: none;
-  border: 1px solid var(--rule-strong);
-  border-radius: 3px;
+  margin: -0.2rem 0 0 -0.2rem;
+  padding: 0;
   background: none;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  line-height: 1;
+  border: none;
+  border-radius: 50%;
   cursor: pointer;
 }
-.deliverable-tick[aria-pressed="true"] { border-color: var(--accent-dim); }
-.deliverable-tick:hover { border-color: var(--accent); }
+
+.deliverable-tick::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 17px;
+  height: 17px;
+  margin: -8.5px 0 0 -8.5px;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 50%;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.deliverable-tick:hover::before { border-color: var(--accent); }
+
+.deliverable-tick[aria-pressed="true"]::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* the checkmark, drawn the way .card-check draws it on a done chapter */
+.deliverable-tick[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 8px;
+  margin: -6px 0 0 -2px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
 
 .deliverable-label {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin: 0 0 0.25rem;
   color: var(--accent);
-  margin: 0 0 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 .deliverable-title {
-  font-family: var(--serif);
-  font-size: 1.05rem;
+  margin: 0 0 0.4rem;
   color: var(--ink);
-  margin: 0 0 0.5rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .deliverable-detail {
-  font-family: var(--serif);
-  font-size: 0.94rem;
-  line-height: 1.6;
-  color: var(--text-dim);
   margin: 0;
-}
-
-/* ---------- footer ---------- */
-
-.track-foot {
-  padding-top: 3rem;
-  border-top: 1px solid var(--rule);
-}
-
-.track-foot h2 {
-  font-family: var(--serif);
-  font-size: 1.2rem;
-  color: var(--ink);
-  margin: 0 0 1rem;
-}
-
-.track-foot p {
-  font-family: var(--serif);
-  line-height: 1.65;
   color: var(--text-dim);
-  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
 
-@media (max-width: 34rem) {
-  .track { padding: 1.25rem 1.1rem 4rem; }
-  .step { grid-template-columns: 1.2rem 1fr; }
-  .step-course { grid-column: 2; margin-top: 0.15rem; }
+/* ---------- a step ----------
+
+   Every card on this page leaves for another course, which the card's second
+   line names. On a course home that line is the chapter's description, so it
+   is set in italic prose; here it is a label, and reads better as one. */
+.chapter-grid .card-desc {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-style: normal;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The step number is a coordinate (phase.step), not a running count, so it
+   needs a little more room than the course home's two digits. */
+.chapter-grid .card-num { min-width: 1.9rem; }
+
+/* ---------- what the track leaves out ---------- */
+
+.track-omits { margin-top: 3rem; }
+.track-omits .module-index { color: var(--rule-strong); }
+
+@media (max-width: 600px) {
+  .deliverable {
+    gap: 0.7rem;
+    padding: 1rem 1.1rem;
+  }
+  .deliverable-detail { font-size: 0.88rem; }
 }
