@@ -14,11 +14,19 @@
      cost-calculator    → what does a token cost, and why?
 
    Every figure here is pinned to the reference table in
-   implementation-spec.md §6 and to the worked budgets in
-   Sizing a Deployment. Where the two differed, the chapter won:
-   the memory budget below uses 3 GB/GPU framework overhead,
-   1 GB/GPU activations and a ×0.90 headroom factor, which
-   reproduces that chapter's ladder table row for row.
+   implementation-spec.md §6 and to the running case
+   (inference/research/case.md v3). The memory budget follows
+   vLLM v0.34.0's own arithmetic (vllm/v1/worker/utils.py,
+   request_memory): `--gpu-memory-utilization f` is a fraction of
+   the device's *total* memory, so the engine may use f × HBM and
+   the KV pool is what is left of that after the weights, 3 GB/GPU
+   of framework overhead and 1 GB/GPU of activations:
+
+       pool = f × HBM − weights − overhead − activations
+
+   It is not (HBM − weights − …) × f. On the case's node that is
+   0.90 × 320 − 140 − 12 − 4 = 132 GB (BF16, TP=4), and
+   0.90 × 160 − 70 − 6 − 2 = 66 GB per FP8 TP=2 replica.
 
    Units, once, so nothing drifts: GB and KB are decimal (1e9,
    1e3), which is how the chapters quote both "140 GB of weights"
@@ -38,12 +46,21 @@
      numbers include 2:4 sparsity and are 2× these. Using the
      sparse figure makes every ridge on this page wrong by 2×. */
   var GPUS = [
-    { id: "h100", label: "H100 80GB (SXM)", hbm: 80,  bw: 3.35e12, flops: 990e12 },
-    { id: "h200", label: "H200 141GB",      hbm: 141, bw: 4.80e12, flops: 990e12 },
-    { id: "b200", label: "B200 192GB",      hbm: 192, bw: 8.00e12, flops: 2250e12 },
-    { id: "a100", label: "A100 80GB",       hbm: 80,  bw: 2.00e12, flops: 312e12 },
-    { id: "l40s", label: "L40S 48GB",       hbm: 48,  bw: 0.86e12, flops: 362e12 }
+    { id: "h100", label: "H100 80GB (SXM)", hbm: 80,  bw: 3.35e12, flops: 990e12,  fp8: true },
+    { id: "h200", label: "H200 141GB",      hbm: 141, bw: 4.80e12, flops: 990e12,  fp8: true },
+    { id: "b200", label: "B200 192GB",      hbm: 192, bw: 8.00e12, flops: 2250e12, fp8: true },
+    { id: "a100", label: "A100 80GB",       hbm: 80,  bw: 2.00e12, flops: 312e12,  fp8: false },
+    { id: "l40s", label: "L40S 48GB",       hbm: 48,  bw: 0.86e12, flops: 362e12,  fp8: true }
   ];
+
+  /* The arithmetic rate that goes with a weight format. 8-bit weights on
+     a chip with FP8 tensor cores run W8A8 at ~2× the BF16 rate, so the
+     ridge doubles and B_crit stays put (Quantization chapter). Anything
+     else — 4-bit weight-only, or FP8 on an A100 — is dequantized and
+     multiplied at the BF16 rate, so B_crit falls with the bytes. */
+  function peakFlops(g, bytesPerWeight) {
+    return (bytesPerWeight === 1 && g.fp8) ? 2 * g.flops : g.flops;
+  }
 
   /* P is total parameters in billions (memory always uses total,
      never active — the MoE trap). q is query heads, kept because
@@ -64,7 +81,15 @@
 
   var OVERHEAD_PER_GPU = 3;   /* CUDA context, allocator, NCCL buffers, CUDA graphs */
   var ACTIVATION_PER_GPU = 1; /* decode-time transients; prefill chunks cost more */
-  var HEADROOM = 0.90;        /* vLLM's gpu_memory_utilization default */
+  /* --gpu-memory-utilization as the case sets it, explicitly. It is not
+     vLLM's default any more: since v0.34.0 an unset value means 1.0 with
+     the extensible KV cache (the pool is sized from memory measured free
+     after warm-up), and 0.92 when that is disabled (vllm/config/cache.py). */
+  var MEM_UTIL = 0.90;
+  var BLOCK_TOKENS = 64;      /* vLLM's default --block-size since v0.34.0 (16 before) */
+  /* For the effective knee: the case's planning efficiencies — 40% MFU,
+     and a 14 ms weight read against a 10.4 ms floor (MBU ≈ 74%). */
+  var MFU = 0.40, MBU = 10.45 / 14;
 
   var ARITH = '<a href="#/inference-arithmetic">Inference Arithmetic</a>';
   var SIZING = '<a href="#/sizing-a-deployment">Sizing a Deployment</a>';
@@ -227,7 +252,7 @@
       options: GPUS.map(function (g) { return { value: g.id, label: g.label }; })
     });
     var countSel = W.select(controls, {
-      label: "GPUs", value: "2",
+      label: "GPUs", value: "4",
       options: [1, 2, 4, 8].map(function (n) { return { value: String(n), label: "×" + n }; })
     });
 
@@ -280,10 +305,13 @@
       var kvBpt = kvBytesPerToken(cur, kB);           /* bytes */
       var perSeq = kvBpt * ctx / 1e9;                 /* GB */
       var kvBatch = perSeq * conc;
-      var pool = Math.max(0, hbm - weights - fixed) * HEADROOM;
+      var budget = MEM_UTIL * hbm;                    /* what the engine may use at all */
+      var pool = Math.max(0, budget - weights - fixed);
       var needed = weights + fixed + kvBatch;
       var maxConc = perSeq > 0 ? Math.floor(pool / perSeq) : 0;
-      var bCrit = (g.flops / g.bw) * (wB / 2);        /* ridge scales with bytes/weight */
+      var poolTokens = kvBpt > 0 ? Math.floor(pool * 1e9 / kvBpt) : 0;
+      var bCrit = (peakFlops(g, wB) / g.bw) * (wB / 2); /* intensity ≈ 2B/bytes-per-weight */
+      var kneeEff = bCrit * MFU / MBU;
 
       var kvFormula = cur.mla
         ? esc(cur.layers + " layers × " + cur.dim + " latent × " + kB + " B") +
@@ -296,11 +324,13 @@
           esc(cur.dim) + "-wide latent per token per layer. This calculator uses that formula, not " +
           "<code>2 × layers × kv_heads × head_dim</code>, which would overstate the cache by about 8×. " +
           "Editing any field below drops back to the ordinary GQA formula."
-        : "Memory budget per " + SIZING + ": " + OVERHEAD_PER_GPU + " GB/GPU framework and CUDA overhead, " +
-          ACTIVATION_PER_GPU + " GB/GPU decode activations, and a ×" + HEADROOM +
-          " headroom factor — vLLM's <code>gpu_memory_utilization</code> default.";
+        : "Memory budget as vLLM v0.34 computes it (" + SIZING + "): <code>--gpu-memory-utilization " +
+          MEM_UTIL.toFixed(2) + "</code> is a fraction of <em>total</em> HBM, so the engine may use " +
+          MEM_UTIL.toFixed(2) + " × HBM; the KV pool is what remains after the weights, " + OVERHEAD_PER_GPU +
+          " GB/GPU framework and CUDA overhead and " + ACTIVATION_PER_GPU + " GB/GPU decode activations. " +
+          "0.90 is the case's explicit setting — left unset, v0.34 sizes the pool from memory it measures free.";
 
-      var fits = needed <= hbm;
+      var fits = needed <= budget;
       results.innerHTML = tiles([
         { label: "Weights",
           value: gb(weights),
@@ -311,21 +341,30 @@
         { label: "KV for the batch",
           value: gb(kvBatch),
           note: esc(gb(perSeq) + " × " + conc + " sequences at " + tokLabel(ctx) + " context") + ". " + SIZING },
-        { label: "HBM needed",
-          value: gb(needed) + " / " + gb(hbm),
+        { label: "Needed / budget",
+          value: gb(needed) + " / " + gb(budget),
           cls: fits ? "good" : "bad",
           note: fits
-            ? "Fits, with " + esc(gb(hbm - needed)) + " unspent. Pool after headroom: " + esc(gb(pool)) + "."
-            : "Over by " + esc(gb(needed - hbm)) + ". This deployment does not start, or starts and preempts forever." },
+            ? "Fits the " + esc(MEM_UTIL.toFixed(2) + " × " + gb(hbm)) + " budget, with " + esc(gb(budget - needed)) +
+              " of the pool unused by this batch."
+            : "Over the " + esc(MEM_UTIL.toFixed(2) + " × " + gb(hbm)) + " budget by " + esc(gb(needed - budget)) +
+              ". This deployment does not start, or starts and preempts forever." },
+        { label: "KV pool",
+          value: gb(pool),
+          cls: pool > 0 ? "" : "bad",
+          note: "<code>" + MEM_UTIL.toFixed(2) + " × HBM − weights − overhead − activations</code> = " +
+            esc(W.fmt(poolTokens, 0)) + " tokens, " + esc(W.fmt(Math.floor(poolTokens / BLOCK_TOKENS), 0)) +
+            " blocks of " + BLOCK_TOKENS + " (vLLM v0.34's default <code>--block-size</code>). Check it against the " +
+            "<code>GPU KV cache size: … tokens</code> line vLLM logs at startup." },
         { label: "Max concurrency",
           value: String(maxConc),
-          cls: maxConc >= bCrit * 0.5 ? "good" : "bad",
-          note: "<code>(HBM − weights − overhead − activations) × " + HEADROOM +
-            " ÷ (kv/token × context)</code>. Against B_crit ≈ " + esc(W.fmt(bCrit, 0)) +
-            " on this GPU. " + SIZING }
+          cls: maxConc >= kneeEff ? "good" : "bad",
+          note: "<code>pool ÷ (kv/token × context)</code>. Nameplate B_crit ≈ " + esc(W.fmt(bCrit, 0)) +
+            " on this GPU; at the case's planning efficiencies (40% MFU, ~74% MBU) the effective knee is ≈ " +
+            esc(W.fmt(kneeEff, 0)) + " tokens per step. " + SIZING }
       ]);
 
-      verdict.innerHTML = diagnose(g, n, hbm, weights, fixed, wB, kB, ctx, perSeq, pool, maxConc, bCrit);
+      verdict.innerHTML = diagnose(g, n, hbm, weights, fixed, wB, kB, ctx, perSeq, pool, maxConc, kneeEff);
     }
 
     /* The diagnosis. A concurrency number is not a verdict: the
@@ -335,13 +374,13 @@
        free lever and rank them, rather than asserting a favourite.
        Adding GPUs is deliberately not a candidate — it always
        wins and it is the one lever that costs money. */
-    function diagnose(g, n, hbm, weights, fixed, wB, kB, ctx, perSeq, pool, maxConc, bCrit) {
+    function diagnose(g, n, hbm, weights, fixed, wB, kB, ctx, perSeq, pool, maxConc, knee) {
       var wFrac = weights / hbm;
       var cand = [];
 
       function concUnder(nextW, nextKvBytes, nextCtx) {
         var w = cur.P * nextW;
-        var p = Math.max(0, hbm - w - fixed) * HEADROOM;
+        var p = Math.max(0, MEM_UTIL * hbm - w - fixed);
         var per = kvBytesPerToken(cur, nextKvBytes) * nextCtx / 1e9;
         return per > 0 ? Math.floor(p / per) : 0;
       }
@@ -365,9 +404,10 @@
           " concurrent sequence" + (maxConc === 1 ? "" : "s") + " to " + best.n + "."
         : " No single dtype or context change moves this much; the next lever is more GPUs, or a smaller model.";
 
-      if (weights + fixed >= hbm) {
+      if (weights + fixed >= MEM_UTIL * hbm) {
         return "<strong>It does not fit at all.</strong> The weights and fixed overhead alone want " +
-          esc(gb(weights + fixed)) + " against " + esc(gb(hbm)) + " of HBM, so there is no KV pool to speak of. " +
+          esc(gb(weights + fixed)) + " against a budget of " + esc(gb(MEM_UTIL * hbm)) + " (" + MEM_UTIL.toFixed(2) +
+          " × " + esc(gb(hbm)) + " of HBM), so there is no KV pool to speak of. " +
           "Quantize the weights or raise the GPU count before you look at anything else." +
           (cur.P > 100 ? " (A 671B MoE occupies like a 671B model even though it computes like a 37B one — memory uses total parameters.)" : "");
       }
@@ -377,17 +417,17 @@
           " per sequence. Symptoms in production: a tiny running batch, constant preemption, and throughput " +
           "that collapses the moment a second user arrives." + lever;
       }
-      if (maxConc < bCrit * 0.5) {
+      if (maxConc < knee) {
         return "<strong>KV-bound.</strong> Weights are only " + esc(W.fmt(wFrac * 100, 0)) +
           "% of HBM, so the pool is healthy — but one sequence costs " + esc(gb(perSeq)) +
-          " and the pool holds " + maxConc + " of them, well below B_crit ≈ " + esc(W.fmt(bCrit, 0)) +
-          ". You are memory-bound and cannot batch your way up to the ridge, so you are paying for FLOPs you " +
+          " and the pool holds " + maxConc + " of them, below the effective knee ≈ " + esc(W.fmt(knee, 0)) +
+          ". You are memory-bound and cannot batch your way up to the knee, so you are paying for FLOPs you " +
           "can never reach." + lever;
       }
-      return "<strong>Comfortable.</strong> " + maxConc + " concurrent sequences against a B_crit of ≈" +
-        esc(W.fmt(bCrit, 0)) + " — the concurrency your capacity allows is in the same neighbourhood as the " +
+      return "<strong>Comfortable.</strong> " + maxConc + " concurrent sequences against an effective knee of ≈" +
+        esc(W.fmt(knee, 0)) + " — the concurrency your capacity allows is in the same neighbourhood as the " +
         "concurrency your FLOPs want, which is what a well-shaped deployment looks like. Stop chasing KV " +
-        "capacity: cap the running batch near the ridge and spend surplus HBM on a larger prefix cache (" +
+        "capacity: cap the running batch near the knee and spend surplus HBM on a larger prefix cache (" +
         PAGED + ") rather than a larger batch.";
     }
 
@@ -491,11 +531,12 @@
       }
 
       var I = flops / bytes;
-      var attain = Math.min(g.flops, I * g.bw);
-      var ridge = g.flops / g.bw;
-      var t = Math.max(bytes / g.bw, flops / g.flops);
+      var peak = peakFlops(g, bpp);
+      var attain = Math.min(peak, I * g.bw);
+      var ridge = peak / g.bw;
+      var t = Math.max(bytes / g.bw, flops / peak);
       return {
-        g: g, I: I, ridge: ridge, attain: attain, bpp: bpp, B: B, T: T,
+        g: g, peak: peak, I: I, ridge: ridge, attain: attain, bpp: bpp, B: B, T: T,
         prefill: prefill, bytes: bytes, kvBytes: kvBytes, wBytes: wBytes,
         ms: t * 1000 / perTokenDivisor, bcrit: ridge * bpp / 2
       };
@@ -539,7 +580,7 @@
       ctx.strokeStyle = p.rule;
       ctx.lineWidth = 1;
       ctx.fillStyle = p.faint;
-      ctx.font = "11px 'SF Mono', Menlo, Consolas, monospace";
+      ctx.font = "11px " + p.mono;
       var xl = ["0.1", "1", "10", "100", "1K", "10K"];
       for (var e = X0; e <= X1; e++) {
         var x = Math.round(px(Math.pow(10, e))) + 0.5;
@@ -556,7 +597,7 @@
       }
       ctx.fillStyle = p.dim;
       ctx.textAlign = "center";
-      ctx.font = "11px 'SF Mono', Menlo, Consolas, monospace";
+      ctx.font = "500 12px " + p.sans;
       ctx.fillText("arithmetic intensity (FLOP/byte)", L + pw / 2, T + ph + 29);
       ctx.save();
       ctx.translate(12, T + ph / 2);
@@ -570,8 +611,8 @@
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(px(0.1), py(0.1 * s.g.bw));
-      ctx.lineTo(clampx(ridgeX), py(s.g.flops));
-      ctx.lineTo(L + pw, py(s.g.flops));
+      ctx.lineTo(clampx(ridgeX), py(s.peak));
+      ctx.lineTo(L + pw, py(s.peak));
       ctx.stroke();
 
       /* Ridge marker. */
@@ -580,13 +621,13 @@
       ctx.strokeStyle = p.dim;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(clampx(ridgeX), py(s.g.flops));
+      ctx.moveTo(clampx(ridgeX), py(s.peak));
       ctx.lineTo(clampx(ridgeX), T + ph);
       ctx.stroke();
       ctx.restore();
       ctx.fillStyle = p.dim;
       ctx.textAlign = "left";
-      ctx.font = "11px 'SF Mono', Menlo, Consolas, monospace";
+      ctx.font = "500 12px " + p.sans;
       ctx.fillText("ridge " + W.fmt(s.ridge, 0), Math.min(clampx(ridgeX) + 6, L + pw - 74), T + 14);
       ctx.textAlign = "left";
       ctx.fillStyle = p.warn;
@@ -616,9 +657,9 @@
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      var tag = (s.prefill ? "prefill" : "decode") + " · I=" + W.fmt(s.I, s.I < 10 ? 2 : 0);
+      var tag = (s.prefill ? "prefill" : "decode") + ", I = " + W.fmt(s.I, s.I < 10 ? 2 : 0);
       ctx.fillStyle = p.ink;
-      ctx.font = "12px 'SF Mono', Menlo, Consolas, monospace";
+      ctx.font = "600 12px " + p.sans;
       ctx.textAlign = dx > L + pw * 0.6 ? "right" : "left";
       ctx.fillText(tag, dx + (dx > L + pw * 0.6 ? -12 : 12), dy - 10);
     }
@@ -627,7 +668,7 @@
       var s = state();
       draw(s);
 
-      var pctPeak = s.attain / s.g.flops * 100;
+      var pctPeak = s.attain / s.peak * 100;
       var below = s.ridge / s.I;
       var line;
       if (s.I < s.ridge) {
@@ -661,8 +702,8 @@
             "critical batch size of ≈" + esc(W.fmt(s.bcrit, 0)) + ". " + ARITH },
         { label: "Attainable", value: flopsLabel(s.attain),
           cls: s.I >= s.ridge ? "good" : "bad",
-          note: "<code>min(peak, I × bandwidth)</code> — " + esc(W.fmt(s.attain / s.g.flops * 100, 1)) +
-            "% of this GPU's " + esc(flopsLabel(s.g.flops)) + " dense peak." },
+          note: "<code>min(peak, I × bandwidth)</code> — " + esc(W.fmt(s.attain / s.peak * 100, 1)) +
+            "% of this GPU's " + esc(flopsLabel(s.peak)) + " dense peak." },
         { label: s.prefill ? "Prefill ms/token" : "ms per token",
           value: W.fmt(s.ms, s.ms < 10 ? 2 : 1) + " ms",
           note: s.prefill
@@ -716,6 +757,19 @@
       label: "Input : output ratio", min: 0, max: RATIOS.length - 1, step: 1, value: 4,
       format: function (v) { return RATIOS[v] + ":1"; }
     });
+    /* What a cached input token costs relative to a fresh one. A planning
+       assumption, not a law: the API list prices it is borrowed from put
+       cached input 10× (Gemini, gpt-5.5) to 20–40× (current Anthropic and
+       OpenAI models) below fresh input in November 2026. 0.1× stays the
+       default because the chapters' worked exercises use it. */
+    var cachedSel = W.select(controls, {
+      label: "Cached input costs", value: "0.1",
+      options: [
+        { value: "0.1", label: "0.1× fresh (10× cheaper)" },
+        { value: "0.05", label: "0.05× fresh (20× cheaper)" },
+        { value: "0.025", label: "0.025× fresh (40× cheaper)" }
+      ]
+    });
 
     var why = document.createElement("p");
     why.className = "inf-result-note";
@@ -731,17 +785,19 @@
     var results = div(body, "inf-results");
     var verdict = div(body, "inf-verdict");
 
-    /* Relative GPU work per token, all from spec §6:
-       an output token is ~5× an input token (decode is serial and
-       memory-bound where prefill is parallel and compute-bound),
-       and a cached input token is ~10× cheaper than a fresh one
-       (its KV was computed once and is being re-read). */
+    /* Relative GPU work per token: an output token is ~5× an input
+       token (decode is serial and memory-bound where prefill is
+       parallel and compute-bound; list prices still keep that ~5×
+       ratio), and a cached input token costs the selected fraction
+       of a fresh one (its KV was computed once and is being re-read
+       — 0.1× by default, 0.05× and 0.025× are the deeper discounts
+       the November 2026 price lists carry). */
     var OUT_PREMIUM = 5;
-    var CACHED = 0.10;
+    function cachedFrac() { return Number(cachedSel.value) || 0.1; }
 
     function work(h, r) {
       var fin = r / (r + 1), fout = 1 / (r + 1);
-      return fin * ((1 - h) + h * CACHED) + fout * OUT_PREMIUM;
+      return fin * ((1 - h) + h * cachedFrac()) + fout * OUT_PREMIUM;
     }
 
     function state() {
@@ -778,7 +834,7 @@
       ctx.strokeStyle = p.rule;
       ctx.lineWidth = 1;
       ctx.fillStyle = p.faint;
-      ctx.font = "11px 'SF Mono', Menlo, Consolas, monospace";
+      ctx.font = "11px " + p.mono;
       ctx.textAlign = "center";
       for (var i = 0; i <= 95; i += 19) {
         var x = Math.round(px(i / 100)) + 0.5;
@@ -823,7 +879,7 @@
       ctx.stroke();
 
       ctx.fillStyle = p.dim;
-      ctx.font = "11px 'SF Mono', Menlo, Consolas, monospace";
+      ctx.font = "500 12px " + p.sans;
       ctx.textAlign = "left";
       ctx.fillText("monthly bill vs prefix-cache hit rate", L + 8, T + 14);
     }
@@ -839,7 +895,8 @@
           note: "<code>$/GPU-hr ÷ (tok/s × 3600 × utilisation)</code>, no cache. " + ARITH },
         { label: "Effective $ / 1M", value: money(s.eff),
           cls: "good",
-          note: "with " + esc(W.fmt(s.h * 100, 0)) + "% of input served from cache at 0.1× the fresh price. " + PAGED },
+          note: "with " + esc(W.fmt(s.h * 100, 0)) + "% of input served from cache at " + esc(String(cachedFrac())) +
+            "× the cost of fresh input — an assumption; list prices put cached input 10–40× below fresh in November 2026. " + PAGED },
         { label: "Bill at 0% hit rate", value: money(s.bill0),
           cls: "bad",
           note: esc(W.fmt(s.vol / 1e9, 2)) + "B tokens/month with every prefix recomputed from scratch." },
@@ -886,6 +943,7 @@
     }
 
     [priceS, tpsS, utilS, volS, hitS, ratioS].forEach(function (s) { s.addEventListener("input", render); });
+    cachedSel.addEventListener("change", render);
     bindWindow(el, "inf-theme", render);
     bindWindow(el, "resize", render);
     render();

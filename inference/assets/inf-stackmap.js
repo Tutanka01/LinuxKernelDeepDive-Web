@@ -94,14 +94,16 @@ function stageGroup(s, on) {
     `</g>`;
 }
 
+/* Inactive stages are drawn quietly but legibly — the faint ink clears
+   4.5:1 on the strip's ground in both themes — so the reader can still see
+   the whole path; the lit ones carry the accent edge, its tint and bold ink. */
 const STYLE = `<style>
   .inf-sm-stage rect { stroke-width: 1; }
-  .inf-sm-stage.dim { opacity: 0.35; }
-  .inf-sm-stage.dim rect { fill: var(--bg-raised); stroke: var(--rule); }
-  .inf-sm-stage.dim text { fill: var(--text-dim); font-weight: 400; }
-  .inf-sm-stage.hi rect { fill: var(--accent); fill-opacity: 0.16; stroke: var(--accent); stroke-width: 2; }
+  .inf-sm-stage.dim rect { fill: var(--bg); stroke: var(--rule-mid); }
+  .inf-sm-stage.dim text { fill: var(--text-faint); font-weight: 400; }
+  .inf-sm-stage.hi rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
   .inf-sm-stage.hi text { fill: var(--ink); font-weight: 700; }
-  .inf-sm-stage text { font-family: var(--serif); }
+  .inf-sm-stage text { font-family: var(--sans); }
 </style>`;
 
 function buildSVG(hi, capText) {
@@ -112,21 +114,21 @@ function buildSVG(hi, capText) {
   let arrows = "";
   for (let i = 0; i < top.length - 1; i++) {
     const gx = top[i].x + top[i].w + 7;
-    arrows += `<path d="M ${gx - 4} 28 L ${gx + 3} 34 L ${gx - 4} 40" fill="none" stroke="var(--text-faint)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    arrows += `<path d="M ${gx - 4} 28 L ${gx + 3} 34 L ${gx - 4} 40" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
 
   /* The two stems saying "the substrate below is what runner and
      kernels stand on" — fixed geometry, always drawn, regardless
      of which stage happens to be lit this chapter. */
   const stems =
-    `<line x1="684" y1="54" x2="684" y2="70" stroke="var(--rule)" stroke-width="1.5"/>` +
-    `<line x1="806" y1="54" x2="806" y2="70" stroke="var(--rule)" stroke-width="1.5"/>`;
+    `<line x1="684" y1="54" x2="684" y2="70" stroke="var(--rule-strong)" stroke-width="1.5"/>` +
+    `<line x1="806" y1="54" x2="806" y2="70" stroke="var(--rule-strong)" stroke-width="1.5"/>`;
 
   const stages = STAGES.map(s => stageGroup(s, hi.has(s.id))).join("");
 
   return `<svg viewBox="0 0 880 118" width="880" height="118" role="img" aria-label="${esc(capText)}">` +
     STYLE +
-    `<rect x="0.5" y="0.5" width="879" height="117" rx="10" fill="var(--bg-raised)" stroke="var(--rule)"/>` +
+    `<rect x="0.5" y="0.5" width="879" height="117" rx="8" fill="var(--bg-raised)" stroke="var(--rule-mid)"/>` +
     arrows + stems + stages +
     `</svg>`;
 }

@@ -269,10 +269,10 @@ const COURSES = [
     blurb: "What breaks once there is more than one machine: hostile " +
            "networks, clocks that lie, replication, consensus, Raft.",
     time: "4–5 hours", progress: () => countCompleted("ds-course-progress-v1") },
-  { id: "inference", name: "Inference Engineering", href: "inference/", total: 24,
+  { id: "inference", name: "Inference Engineering", href: "inference/", total: 36,
     blurb: "Serving large language models on GPUs: rooflines, the KV cache, " +
            "engines, kernels, quantization, rack-scale systems.",
-    time: "7–8 hours", progress: () => countCompleted("inf-course-progress-v1") },
+    time: "14–18 hours", progress: () => countCompleted("inf-course-progress-v1") },
 ];
 
 /* The guided courses store {completed: {slug: true}, last}. Read defensively:
@@ -286,9 +286,9 @@ function countCompleted(key) {
 }
 
 const LEVEL_LABEL = {
-  core:      "fundamentals",
-  mechanism: "mechanism",
-  internals: "internals",
+  core:      "Fundamentals",
+  mechanism: "Mechanism",
+  internals: "Internals",
 };
 
 const tocEl      = document.getElementById("toc");
@@ -315,8 +315,8 @@ const vendorUrl = window.ReaderUI
   : rel => new URL("vendor/" + rel, document.currentScript.src).href;
 
 const HLJS_THEME_HREF = {
-  dark:  vendorUrl("hljs/gruvbox-dark-medium.min.css"),
-  paper: vendorUrl("hljs/gruvbox-light-medium.min.css"),
+  dark:  vendorUrl("hljs/ldd-dark.css"),
+  paper: vendorUrl("hljs/ldd-paper.css"),
 };
 
 function currentTheme() {
@@ -426,7 +426,7 @@ function refreshReadButton(slug) {
   const btn = document.getElementById("mark-read-btn");
   if (!btn) return;
   const isRead = readSet().has(slug);
-  btn.textContent = isRead ? "✓ read" : "mark as read";
+  btn.textContent = isRead ? "✓ Read" : "Mark as read";
   btn.classList.toggle("is-read", isRead);
   btn.setAttribute("aria-pressed", String(isRead));
 }
@@ -551,7 +551,7 @@ function chapterIndex(slug) {
 
 function crumbHtml(slug) {
   const i = chapterIndex(slug);
-  const part = PART_OF[slug] || "";
+  const part = partName(PART_OF[slug] || "");
   return `<nav class="chapter-crumb" aria-label="Breadcrumb">` +
     `<a class="crumb" href="#/course">Course home</a>` +
     `<span class="crumb-sep" aria-hidden="true">/</span>` +
@@ -566,14 +566,14 @@ function metaBannerHtml(meta, slug) {
     bits.push(`<span class="meta-level level-${meta.level}">${LEVEL_LABEL[meta.level]}</span>`);
   }
   if (meta.minutes) bits.push(`<span class="meta-item">~${meta.minutes} min</span>`);
-  if (meta.kernel)  bits.push(`<span class="meta-item">verified on kernel ${meta.kernel}${meta.verified ? " · " + meta.verified : ""}</span>`);
+  if (meta.kernel)  bits.push(`<span class="meta-item">Verified on kernel ${meta.kernel}${meta.verified ? " (" + meta.verified + ")" : ""}</span>`);
   bits.push(`<button id="mark-read-btn" class="meta-read-btn" type="button"></button>`);
 
   let prereqs = "";
   const reqs = (meta.requires || "").split(",").map(s => s.trim()).filter(s => TITLE_OF[s]);
   if (reqs.length) {
     prereqs = `<p class="meta-prereqs">Before this chapter: ` +
-      reqs.map(s => `<a href="#/${s}">${TITLE_OF[s]}</a>`).join(" · ") + `</p>`;
+      reqs.map(s => `<a href="#/${s}">${TITLE_OF[s]}</a>`).join(", ") + `</p>`;
   }
   return `${crumbHtml(slug)}<div class="chapter-meta">${bits.join("")}</div>${prereqs}`;
 }
@@ -637,6 +637,23 @@ function decorateHeadings(slug) {
   });
 }
 
+/* Every chapter opens with "> **Goal:** …" under its title (and the meta
+   line). Tag it so the stylesheet can make the goal the page's one loud
+   element; every other blockquote stays quiet. Markdown stays untouched. */
+function decorateGoalBox() {
+  for (const el of articleEl.children) {
+    if (el.tagName === "H2") return;
+    if (el.tagName !== "BLOCKQUOTE") continue;
+    const first = el.firstElementChild;
+    if (first && first.tagName === "P" && first.firstChild === first.firstElementChild &&
+        first.firstElementChild && first.firstElementChild.tagName === "STRONG") {
+      el.classList.add("goal-box");
+      first.classList.add("goal-question");
+    }
+    return;
+  }
+}
+
 /* wrap wide tables so they scroll on their own instead of blowing out the
    page width on phones and tablets */
 function wrapTables() {
@@ -684,6 +701,19 @@ function updatePageTocSpy() {
 
 /* ---------------- navigation & routing ---------------- */
 
+/* "Part IV — Containers, From Scratch" is how the book names a part, and the
+   README and tests quote it that way. The rail shows the name, with the part
+   number as a quieter coordinate in front of it rather than a dash. */
+function partName(name) {
+  return name.replace(/^(?:Part|Module)\s+[\w.]+\s+—\s+/, "");
+}
+
+function partLabelHtml(name) {
+  const m = /^((?:Part|Module)\s+[\w.]+)\s+—\s+(.+)$/.exec(name);
+  return m ? `<span class="toc-part-num">${m[1]}</span><span class="toc-part-name">${m[2]}</span>`
+           : `<span class="toc-part-name">${name}</span>`;
+}
+
 function buildToc() {
   let n = 0;
   tocEl.innerHTML = BOOK.map(part => {
@@ -693,7 +723,7 @@ function buildToc() {
              `<span class="toc-num">${n}</span><span class="toc-title">${ch.title}</span>` +
              `<span class="toc-check" aria-hidden="true">✓</span></a></li>`;
     }).join("");
-    return `<p class="toc-part">${part.part}</p><ul class="toc-list">${items}</ul>`;
+    return `<p class="toc-part">${partLabelHtml(part.part)}</p><ul class="toc-list">${items}</ul>`;
   }).join("");
   refreshReadMarks();
 }
@@ -782,16 +812,16 @@ function renderPager(slug) {
   const next = FLAT[i + 1];
   pagerEl.innerHTML =
     (prev ? `<a class="prev" href="#/${prev.slug}">` +
-            `<span class="pager-label">&larr; previous</span>` +
+            `<span class="pager-label">Previous</span>` +
             `<span class="pager-title">${prev.title}</span></a>`
           : `<a class="prev" href="#/course">` +
-            `<span class="pager-label">&larr; back</span>` +
+            `<span class="pager-label">Back</span>` +
             `<span class="pager-title">Course home</span></a>`) +
     (next ? `<a class="next" href="#/${next.slug}">` +
-            `<span class="pager-label">next &rarr;</span>` +
+            `<span class="pager-label">Next</span>` +
             `<span class="pager-title">${next.title}</span></a>`
           : `<a class="next" href="#/course">` +
-            `<span class="pager-label">finish &rarr;</span>` +
+            `<span class="pager-label">Finished</span>` +
             `<span class="pager-title">Back to the course map</span></a>`);
 }
 
@@ -839,7 +869,7 @@ async function loadChapter(slug, anchor) {
       const btn = document.getElementById("mark-read-btn");
       btn.addEventListener("click", () => {
         if (markRead(slug, !readSet().has(slug))) return;
-        btn.textContent = "couldn't save — storage blocked";
+        btn.textContent = "Couldn't save: storage is blocked";
         btn.classList.add("save-failed");
       });
       refreshReadButton(slug);
@@ -850,6 +880,7 @@ async function loadChapter(slug, anchor) {
     articleEl.querySelectorAll("pre code").forEach(el => {
       if (!el.classList.contains("language-mermaid")) hljs.highlightElement(el);
     });
+    decorateGoalBox();
     decorateHeadings(slug);
     wrapTables();
     buildPageToc();
@@ -971,10 +1002,9 @@ function renderPlatform() {
             /* the ring shows the share, so the meta line keeps the size of the
                course: "2 of 56 read" left a started card unable to say how big
                it is, which is the one thing an unstarted card does say */
-            ? `${done} of ${c.total} chapters read &middot; continue`
+            ? `${done} of ${c.total} chapters read`
             : `~${c.time} of reading`}</span>
         </span>
-        <span class="card-arrow" aria-hidden="true">&rarr;</span>
       </a>`;
   }).join("");
 
@@ -985,7 +1015,7 @@ function renderPlatform() {
   articleEl.innerHTML = `
       <header class="hero platform-hero">
         <div class="hero-text">
-          <p class="hero-kicker">Three self-paced courses &middot; ${totalAll} chapters</p>
+          <p class="hero-kicker">Three self-paced courses, ${totalAll} chapters</p>
           <h1>How systems really work</h1>
           <p class="hero-lede">
             Three courses on the machinery you are allowed to look at, each one
@@ -1010,7 +1040,6 @@ function renderPlatform() {
           ambition: knowing exactly what happens between a GPU and the Linux
           kernel. It holds no chapters of its own — it sequences these three, and
           closes every phase on a deliverable rather than a page count.</span>
-        <span class="card-arrow" aria-hidden="true">&rarr;</span>
       </a>
 
       <p class="path-legend">Each course stands on its own and can be read
@@ -1073,7 +1102,6 @@ function renderHome() {
             <span class="card-title">${ch.title}</span>
             <span class="card-desc">${ch.desc}</span>
           </span>
-          <span class="card-arrow" aria-hidden="true">&rarr;</span>
         </a>`;
     }).join("");
     const count = part.chapters.length;
@@ -1095,7 +1123,7 @@ function renderHome() {
   articleEl.innerHTML = `
       <header class="hero">
         <div class="hero-text">
-          <p class="hero-kicker">A field guide · ${FLAT.length} chapters · Linux 6.12</p>
+          <p class="hero-kicker">A field guide in ${FLAT.length} chapters, for Linux 6.12</p>
           <h1>The Linux Deep Dive</h1>
           <p class="hero-lede">
             Everything above the command line is built on machinery you are
@@ -1108,7 +1136,7 @@ function renderHome() {
           </p>
           <div class="hero-actions">
             <a class="btn-primary" href="#/${next.slug}">
-              ${started ? "Continue — " + next.title : "Start reading"}
+              ${started ? "Continue with " + next.title : "Start reading"}
             </a>
             <span class="hero-hint">${started
               ? `${done} of ${FLAT.length} chapters read`
@@ -1359,7 +1387,7 @@ function renderSearchResults(q) {
     `<li id="sr-${i}" class="search-result${i === 0 ? " selected" : ""}"
          role="option" aria-selected="${i === 0}" data-slug="${r.doc.slug}">
        <span class="sr-title">${r.doc.title}</span>
-       ${r.doc.part ? `<span class="sr-part">${r.doc.part}</span>` : ""}
+       ${r.doc.part ? `<span class="sr-part">${partName(r.doc.part)}</span>` : ""}
        <span class="sr-snippet">${snippet(r.doc, r.firstHit, terms)}</span>
      </li>`).join("");
   searchList.querySelectorAll(".search-result").forEach(li => {

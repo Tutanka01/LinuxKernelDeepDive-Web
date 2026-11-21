@@ -26,13 +26,13 @@
       var link = document.createElement("link");
       link.id = "hljs-theme";
       link.rel = "stylesheet";
-      link.href = "../assets/vendor/hljs/gruvbox-" +
-                  (theme === "paper" ? "light" : "dark") + "-medium.min.css";
+      link.href = "../assets/vendor/hljs/ldd-" +
+                  (theme === "paper" ? "paper" : "dark") + ".css";
       document.head.appendChild(link);
     })();
   </script>
-  <link rel="stylesheet" href="../assets/style.css?v=20260729">
-  <link rel="stylesheet" href="../assets/course.css?v=20260727">
+  <link rel="stylesheet" href="../assets/style.css?v=20261123">
+  <link rel="stylesheet" href="../assets/course.css?v=20261123">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -68,27 +68,12 @@
       </div>
 
       <nav class="course-switch" aria-label="Courses on this site">
-        <p class="course-switch-title">Courses</p>
-        <a class="course-chip chip-all" href="../">
-          <span class="chip-title">All three courses</span>
-        </a>
-        <a class="course-chip" href="../#/course">
-          <span class="chip-title">The Linux Deep Dive</span>
-          <span class="chip-desc">67 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
-        </a>
-        <span class="course-chip current" aria-current="page">
-          <span class="chip-title">Distributed Systems</span>
-          <span class="chip-desc">13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span>
-        </span>
-        <a class="course-chip" href="../inference/">
-          <span class="chip-title">Inference Engineering</span>
-          <span class="chip-desc">24 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
-        </a>
-        <a class="course-chip chip-track" href="../path/">
-          <span class="chip-title">The GPU–Kernel Track</span>
-          <span class="chip-desc">A guided route through all three, in six phases.</span>
-        </a>
-</nav>
+        <a class="course-chip chip-all" data-course="all" href="../" title="All three courses"><span class="chip-title">All courses</span><span class="chip-desc">All three courses</span></a>
+        <a class="course-chip" data-course="linux" href="../#/course" title="The Linux Deep Dive"><span class="chip-title">Linux</span><span class="chip-desc">The Linux Deep Dive, 67 chapters — kernel, processes, containers &amp; checkpoint/restore.</span></a>
+        <span class="course-chip current" data-course="distributed" aria-current="page" title="Distributed Systems"><span class="chip-title">Distributed</span><span class="chip-desc">Distributed Systems, 13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span></span>
+        <a class="course-chip" data-course="inference" href="../inference/" title="Inference Engineering"><span class="chip-title">Inference</span><span class="chip-desc">Inference Engineering, 36 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span></a>
+        <a class="course-chip chip-track" data-course="track" href="../path/" title="The GPU–Kernel Track"><span class="chip-title">GPU track</span><span class="chip-desc">The GPU–Kernel Track, a guided route through all three, in six phases.</span></a>
+      </nav>
 
       <div id="toc"><!-- course outline injected by course.js --></div>
 
@@ -120,7 +105,7 @@
              role="combobox" aria-expanded="true" aria-autocomplete="list"
              aria-controls="search-results">
       <ul id="search-results" role="listbox" aria-label="Search results"></ul>
-      <p class="search-footer">↑↓ navigate · Enter open · Esc close</p>
+      <p class="search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></p>
     </div>
   </div>
 
@@ -129,8 +114,8 @@
        reader-ui.js, and only for a chapter that actually has a diagram. -->
   <script src="../assets/vendor/marked.min.js"></script>
   <script src="../assets/vendor/highlight.min.js"></script>
-  <script src="../assets/reader-ui.js?v=20260727"></script>
-  <script src="assets/ds.js?v=20260727"></script>
-  <script src="../assets/course.js?v=20260727"></script>
+  <script src="../assets/reader-ui.js?v=20261123"></script>
+  <script src="assets/ds.js?v=20261123"></script>
+  <script src="../assets/course.js?v=20261123"></script>
 </body>
 </html>

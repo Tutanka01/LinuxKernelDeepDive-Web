@@ -117,8 +117,8 @@ test("the course home hero counts are computed, not hardcoded", () => {
      before the number goes stale. */
   const problems = [];
   const checks = [
-    ["assets/app.js", /hero-kicker">A field guide · ([^<]+) chapters/],
-    ["assets/course.js", /hero-kicker">A self-paced course · ([^<]+) chapters/],
+    ["assets/app.js", /hero-kicker">A field guide in ([^<]+) chapters/],
+    ["assets/course.js", /hero-kicker">A self-paced course in ([^<]+) chapters/],
   ];
   for (const [file, re] of checks) {
     const m = re.exec(read(file));

@@ -1,0 +1,261 @@
+/* ============================================================
+   Inference Engineering — the review deck (inf-review.js).
+
+   Additive to style.css, course.css and inf.css, and built from
+   their vocabulary: the deck is an .inf-widget shell, the box
+   counts are .inf-results tiles, the buttons are .inf-btn, and the
+   verdict borrows the quiz's good/bad colours plus a glyph and a
+   word, so right and wrong never rest on colour alone. Every rule
+   is scoped to .inf-review*, so nothing here reaches another tool.
+   ============================================================ */
+
+/* ---------------- deck: box counts ---------------- */
+
+.article-body .inf-review-boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.2rem, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.article-body .inf-review-boxes > li {
+  margin: 0;
+  padding: 0.55rem 0.65rem 0.5rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.inf-review-boxes .inf-result-value { font-size: 1.15rem; }
+
+.article-body .inf-review-summary {
+  margin: 0.9rem 0 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+}
+.inf-review-summary strong { color: var(--ink); }
+
+.inf-review-include { margin-top: 0.2rem; }
+
+.inf-review-stage { margin-top: 0.9rem; }
+
+.article-body .inf-review-empty {
+  padding: 0.9rem 1rem;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 6px;
+}
+.article-body .inf-review-empty p { margin: 0 0 0.7rem; font-size: 0.92rem; }
+.article-body .inf-review-empty p:last-child { margin-bottom: 0; }
+
+/* ---------------- one card ---------------- */
+
+.article-body .inf-review-card {
+  padding: 1rem 1.1rem 1.05rem;
+  border: 1px solid var(--rule-mid);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--bg);
+}
+.article-body .inf-review-card.is-right { border-left-color: var(--quiz-good); }
+.article-body .inf-review-card.is-close,
+.article-body .inf-review-card.is-wrong { border-left-color: var(--quiz-bad); }
+
+.article-body .inf-review-meta {
+  margin: 0 0 0.4rem;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+
+.article-body .inf-review-prompt {
+  margin: 0 0 0.9rem;
+  color: var(--ink);
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+.inf-review-form { margin: 0; }
+
+.inf-review-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+.inf-review-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+
+.inf-review-input {
+  flex: 1 1 9rem;
+  min-width: 0;
+  max-width: 16rem;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1rem;              /* 16px+: iOS does not zoom the page on focus */
+  font-variant-numeric: tabular-nums;
+}
+.inf-review-input:focus-visible { border-color: var(--accent); outline-offset: 1px; }
+.inf-review-input[aria-invalid="true"] { border-color: var(--quiz-bad); }
+.inf-review-input[readonly] { color: var(--text-dim); }
+
+.inf-review-unit {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.article-body .inf-review-hint {
+  margin: 0.35rem 0 0;
+  color: var(--text-faint);
+  font-size: 0.82rem;
+}
+
+.inf-review-buttons,
+.inf-review-next-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+  margin-top: 0.8rem;
+}
+.inf-review-next-row[hidden] { display: none; }
+
+/* the primary action reads as one, without leaving the .inf-btn family */
+.inf-review .inf-review-check,
+.inf-review .inf-review-next {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+}
+.inf-review .inf-review-check:hover,
+.inf-review .inf-review-next:hover,
+.inf-review .inf-review-check:focus-visible,
+.inf-review .inf-review-next:focus-visible { color: var(--on-accent); filter: brightness(1.08); }
+.inf-review .inf-btn:disabled { opacity: 0.45; cursor: default; }
+.inf-review .inf-btn:disabled:hover { border-color: var(--rule-strong); color: var(--text-dim); filter: none; }
+
+/* ---------------- verdict + worked solution ---------------- */
+
+.article-body .inf-review-verdict:empty { display: none; }
+.article-body .inf-review-verdict {
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.85rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+.article-body .inf-review-verdict.right {
+  border-left-color: var(--quiz-good);
+  background: var(--c-green-soft);
+}
+.article-body .inf-review-verdict.close,
+.article-body .inf-review-verdict.wrong {
+  border-left-color: var(--quiz-bad);
+  background: var(--c-red-soft);
+}
+.article-body .inf-review-verdict.right strong { color: var(--quiz-good); }
+.article-body .inf-review-verdict.close strong,
+.article-body .inf-review-verdict.wrong strong { color: var(--quiz-bad); }
+.article-body .inf-review-verdict.invalid { border-left-style: dashed; background: none; }
+
+.article-body .inf-review-solution {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+.article-body .inf-review-solution[hidden] { display: none; }
+.article-body .inf-review-solution-title {
+  margin: 0 0 0.35rem;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-weight: 650;
+}
+.article-body .inf-review-step {
+  margin: 0 0 0.25rem;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.article-body .inf-review-source {
+  margin: 0.55rem 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+}
+.article-body .inf-review-saved:empty { display: none; }
+.article-body .inf-review-saved {
+  color: var(--c-red);
+  font-size: var(--fs-small);
+}
+
+/* ---------------- warm-up: a disclosure, not a panel ----------------
+   The placeholder carries .inf-widget (that is how the host finds it),
+   so undo the panel look: in a chapter's opening it should read as one
+   quiet line the reader may open, not a tool competing with the text. */
+
+.article-body .inf-widget.inf-review-warmup-host,
+.article-body .inf-widget.inf-review-warmup-slot {
+  margin: 0 0 1.6rem;
+  border: none;
+  background: none;
+  overflow: visible;
+}
+
+.article .article-body details.inf-review-warmup {
+  margin: 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.article .article-body details.inf-review-warmup > summary {
+  color: var(--accent);
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+.article .article-body details.inf-review-warmup > summary:hover { color: var(--ink); }
+.article .article-body details.inf-review-warmup > .inf-review-warmup-body {
+  margin-left: 0;
+  padding: 0.2rem 0 1rem;
+}
+.article-body .inf-review-done {
+  margin: 0.4rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+.article-body .inf-review-done:focus { outline: none; }
+
+/* ---------------- motion ---------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .article-body .inf-review-card { animation: inf-review-in 0.18s ease-out; }
+  @keyframes inf-review-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: none; }
+  }
+}
+
+/* ---------------- narrow screens ---------------- */
+
+@media (max-width: 600px) {
+  .article-body .inf-review-card { padding: 0.85rem 0.8rem 0.9rem; }
+  .article-body .inf-review-boxes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem; }
+  .article-body .inf-review-boxes > li { padding: 0.45rem 0.5rem; }
+  .inf-review-input { max-width: none; }
+}

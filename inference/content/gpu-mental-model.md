@@ -1,330 +1,497 @@
 # The GPU Mental Model
 
-> **Goal of this chapter:** understand a GPU the way you already understand a
-> CPU — cores, a memory hierarchy, and the gap between them. You will learn
-> why an LLM runs on a GPU at all, what an H100 is made of, what a FLOP is,
-> and the one model that governs everything: the **roofline**, a race between
-> how fast the chip can compute and how fast it can move bytes. After this
-> chapter, "989 TFLOP/s" and "3.35 TB/s" stop being spec-sheet noise and
-> become the two numbers that predict performance.
+> **The question:** why does a chip rated at nearly a quadrillion operations
+> per second spend most of an LLM's decode time waiting — and how can you tell,
+> before running anything, whether a given operation will?
+>
+> **You'll be able to:** compute an operation's arithmetic intensity and place
+> it on the roofline; predict whether faster memory or more compute would speed
+> it up, or neither; read a GPU spec sheet — precision, sparsity, variant — and
+> compute the ridge of a chip this chapter never worked.
 
 <div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="runner,kernels"></div>
 
-In [the previous chapter](#/what-is-inference) you watched the autoregressive
-loop: the model consumes your prompt, then emits tokens one at a time, each
-one a full pass through the network. Here is the question that decides
-everything about how that runs: **what is the network actually *doing* during
-one pass?**
+[Inside a Forward Pass](#/inside-a-forward-pass) showed that a pass over the
+model is, almost entirely, a chain of large matrix multiplications: the attention
+projections and the MLP, 80 times over, with cheap glue in between. So the
+question of what hardware to run inference on reduces to a narrower one: what
+kind of machine multiplies large matrices fastest, and what stops it from going
+faster?
 
-The answer is almost embarrassingly simple. It is multiplying matrices. Not
-mostly — overwhelmingly. Strip away the vocabulary of "attention" and
-"transformers" (chapter 3) and a forward pass is a long chain of large
-matrix multiplications with some cheap glue between them. So the real
-question becomes: what kind of machine multiplies enormous matrices fastest?
-It is not the CPU you know from the Linux course. Understanding *why* is the
-whole chapter.
+## Why matrix multiplication wants a GPU
 
-## Two philosophies of a chip: latency vs throughput
+Every entry of a matrix product is an independent dot product. A 4,096 × 4,096
+output has 16 million of them, none depending on another: no branches, no pointer
+chasing, the same multiply-and-add in any order. The CPU you know from the Linux
+course spends most of each core's silicon making *one* unpredictable instruction
+stream fast — branch prediction, out-of-order execution, prefetching — and a matrix
+multiply gives that machinery nothing to do.
 
-A matrix multiply has a property worth naming precisely: it is
-**embarrassingly parallel**. Every entry of the output is an independent dot
-product — a pile of multiply-then-add operations that depends on nothing
-another entry is computing. A 4096×4096 output has 16 million such entries,
-all computable at once, in any order. There are no branches, no pointer
-chasing, no "it depends." Just the same tiny operation, multiply-accumulate,
-repeated billions of times.
-
-The CPU you already understand is built for the *opposite* workload. It is a
-**latency machine**: a handful of very complex cores (8, 32, 64) each
-engineered to finish *one* sequential thread of unpredictable, branchy code
-as fast as possible. That is why so much of a CPU core's silicon goes to
-things that have nothing to do with arithmetic — branch predictors,
-out-of-order execution, deep cache hierarchies, speculative prefetch. All of
-it exists to keep a single instruction stream from stalling. A CPU is a few
-brilliant chefs, each improvising a whole dish end to end.
-
-A GPU makes the opposite bet. It is a **throughput machine**: thousands of
-simple arithmetic lanes, individually unremarkable and slow, that win by
-sheer number when the work is uniform and parallel. It spends its transistors
-on ALUs, not on cleverness. It is a kitchen with ten thousand line cooks,
-each able to do exactly one chop — useless for improvising a dish, unbeatable
-for chopping a mountain of onions. An LLM forward pass is a mountain of
-onions.
-
-That is the entire reason neural networks live on GPUs. The math is parallel;
-the GPU is parallel; the match is near-perfect.
-
-> [!bridge] You already know this — from the Linux course
-> Everything you learned about why a CPU core is *shaped* the way it is —
-> branch prediction, out-of-order issue, deep caches, speculative prefetch —
-> was silicon spent making one unpredictable instruction stream go fast. None
-> of that machinery earns its transistors on a matmul, because there is
-> nothing to predict and nothing to reorder. The GPU is what you build when
-> you delete all of it and spend the area on arithmetic instead.
-> [→ Linux: The Machine Underneath](../#/prereq-hardware)
+A GPU (graphics processing unit — the name is historical) spends its
+transistors the other way: thousands of simple arithmetic lanes and very little
+control logic. Individually the lanes are unremarkable; together they win
+whenever the work is uniform and parallel.
 
 ## Anatomy of an H100
 
-Let us make it concrete with the workhorse of mid-2026 inference, NVIDIA's
-**H100**. (GPU = graphics processing unit, though "graphics" is now
-vestigial; these chips exist for matrix math.)
+This course's reference chip is NVIDIA's H100 in its SXM form (the version
+that plugs into a multi-GPU server board rather than a PCIe slot), still a common
+inference GPU in late 2026.
 
-The compute is organized into **SMs — streaming multiprocessors**, the GPU's
-rough equivalent of a CPU core. An H100 has **132 of them**. But an SM is not
-one lane; it contains many arithmetic lanes that execute together. The
-hardware groups threads into **warps of 32** that march in lockstep — every
-thread in a warp runs the same instruction on different data at the same
-instant. (This is called SIMT, single-instruction-multiple-thread; think of a
-warp as one instruction with 32 data slots, the natural shape for "do this
-same multiply to 32 numbers.") You will rarely reason at the thread level in
-this course — the unit that matters is the SM and the whole chip — but keep
-the picture: parallelism is baked in three levels deep (chip → SM → warp).
+Its compute is divided into 132 **streaming multiprocessors (SMs)**, the rough
+counterpart of CPU cores. Within an SM, threads are scheduled in warps of 32
+that execute the same instruction at the same time on different data, on ordinary
+arithmetic lanes NVIDIA markets as **CUDA cores**. Each SM also holds **tensor
+cores**: dedicated units that multiply two small matrices and accumulate the
+result as a single hardware operation. Essentially all of an LLM's FLOPs run on
+tensor cores; the norms, softmax and sampling run on the CUDA cores and are cheap
+in FLOPs, though not always in time.
 
 ![Nested boxes showing the H100's levels: the whole chip with its 132 SMs and one shared 80 GB HBM pool, an SM holding shared memory, a warp scheduler and tensor cores, a warp of 32 threads issued one instruction in lockstep, and a single thread owning only its registers.](assets/diagrams/gpu-hierarchy.svg)
 
-### The memory hierarchy, and why it will look familiar
+You will rarely reason about individual SMs or warps in this course. For capacity
+planning, a GPU is one unit with two headline numbers — and you need to know where
+they come from.
 
-From the Linux course you carry a mental pyramid: registers, then L1/L2/L3
-cache, then DRAM across the NUMA bus — each level bigger, slower, and farther
-from the ALU than the last. **A GPU has the exact same shape, with different
-labels and very different numbers:**
+### The memory hierarchy
+
+The GPU's memory has the same shape as the CPU's: small and fast close to the
+arithmetic, large and slow far from it.
 
 ```text
-        CPU (the one you know)              GPU (H100)
-        ────────────────────────            ──────────────────────────────
-  fast  registers      ~KB/core        registers    256 KB/SM   \
-   ▲    L1  ~48 KB/core                 SRAM (L1 +    ~256 KB/SM   } on-chip
-   │    L2  ~1–2 MB/core                shared mem)               /  SRAM,
-   │    L3  ~30–100 MB shared           L2 cache     ~50 MB       }  tens of
-   │                                                              /   MB total
-  slow  DRAM  ~100s GB               →  HBM          80 GB
-        @ ~0.1–0.4 TB/s                 @ 3.35 TB/s
+        CPU (one socket, 2026 server)       GPU (H100 SXM)
+        ─────────────────────────────       ──────────────────────────────
+  fast  registers     ~KB per core          registers      256 KB per SM
+   ▲    L1            ~48 KB per core       L1 + shared    256 KB per SM
+   │    L2            ~1–2 MB per core      L2             50 MB, shared
+   │    L3            ~30–100s MB shared
+  slow  DRAM          TBs                   HBM            80 GB
+                      @ ~0.6 TB/s                          @ 3.35 TB/s
 ```
 
 ![Two side-by-side memory pyramids, CPU and GPU, with matching tiers — registers, on-chip cache, then DRAM or HBM — each labelled with capacity, bandwidth and latency. Every GPU tier is wider, yet the annotation notes the compute-to-bandwidth ratio is worse on the GPU, not better.](assets/diagrams/memory-hierarchy.svg)
 
-Two things to read off this. First, the *structure* is identical: a tiny,
-blazing-fast on-chip tier (registers and SRAM — static RAM, the same
-technology as your CPU's cache) backed by a large, comparatively slow
-off-chip tier. On the GPU the off-chip tier is **HBM — high-bandwidth
-memory**, stacks of DRAM sitting right next to the compute die: **80 GB at
-3.35 TB/s** on the H100. The on-chip SRAM is measured in *tens of megabytes
-total* across the whole chip and delivers on-chip bandwidth far above HBM's —
-tens of TB/s — but there is almost none of it.
+Two tiers need a word. **Shared memory** is an on-chip scratchpad that the
+program manages explicitly — a cache with no replacement policy, where the kernel
+decides what to load and when; on the H100 up to 228 KB of each SM's 256 KB of
+L1 can be used this way (NVIDIA's Hopper tuning guide). It is the SRAM that
+fast kernels stage data in. **HBM** (high-bandwidth memory) is stacks of DRAM
+packaged next to the compute die: 80 GB at 3.35 TB/s. For comparison, a
+current AMD EPYC 9005 socket has 12 DDR5-6400 channels, a theoretical 614 GB/s,
+so a two-socket server reaches ~1.2 TB/s: HBM is roughly 2.7× that, on one card.
+The weights and the KV cache live in HBM, because nothing on-chip is within a
+factor of a thousand of large enough.
 
-Second, the numbers are shifted, not reinvented. HBM's 3.35 TB/s is close to
-an order of magnitude more bandwidth than a well-provisioned server's DRAM —
-but the *ratio* that hurt you on the CPU, fast compute starving on slow far
-memory, is if anything worse here. Hold that thought; it is the roofline.
-
-> [!bridge] You already know this — from the Linux course
-> The reason you cared about cache blocking, page locality and which NUMA node
-> a buffer was allocated on is the same reason you will care about SRAM tiling
-> here: the compute unit is never the thing you are waiting for, the trip to
-> far memory is. What differs is how brutal the ratio has become. A CPU core
-> stalling on remote DRAM wastes a few ALUs; an H100 stalling on HBM idles
-> almost a quadrillion FLOP/s of tensor core, which is why "keep the working
-> set on-chip" stops being a tuning tip and becomes the design.
+> [!bridge] From the Linux course
+> You cared about cache blocking and NUMA placement because the arithmetic units
+> were never what you waited for — the trip to far memory was. The same is true
+> here, with a harsher ratio: a CPU core stalled on remote DRAM idles a few
+> arithmetic units, while an H100 stalled on HBM idles nearly a quadrillion
+> operations per second of tensor core. Keeping data on-chip stops being a
+> tuning trick and becomes the design principle of every kernel in
+> [Under the Hood](#/flashattention).
 > [→ Linux: NUMA Deep Dive](../#/numa-deep-dive)
 
-## Tensor cores, and what a FLOP actually is
+## Two ceilings
 
-First, the unit. A **FLOP** is one *floating-point operation* — a single
-multiply, or a single add, on real numbers. **FLOP/s** (often written FLOPS)
-is FLOPs per second, the rate. A multiply-accumulate — multiply two numbers,
-add the result to a running total, the atom of every dot product — is
-therefore **2 FLOPs**. That is all "TFLOP/s" (tera = 10¹²) is counting: how
-many multiplies-and-adds per second.
+A **FLOP** is one floating-point operation: one multiply or one add. A
+multiply-accumulate — the atom of a dot product — is therefore two FLOPs.
+FLOP/s is the rate.
 
-Ordinary GPU lanes (called CUDA cores) do general scalar arithmetic. But
-NVIDIA noticed that inference is *almost entirely* small matrix multiplies
-and built dedicated silicon for exactly that: **tensor cores**. A tensor core
-does not multiply two numbers; it multiplies two small *matrices* and
-accumulates the result in a single hardware operation. By hard-wiring the
-matmul pattern instead of issuing thousands of separate instructions, it
-delivers an order of magnitude more throughput — and it is where essentially
-all of an LLM's arithmetic happens.
+In **BF16** (bfloat16, a 2-byte floating-point format with float32's exponent
+range and less precision, which neural networks tolerate well), the H100's tensor
+cores peak at about 990 TFLOP/s (990 × 10¹²). That is the first ceiling.
 
-Tensor cores hit their peak in **reduced precision**. This course's default
-is **BF16** (bfloat16, a 16-bit floating-point number — 2 bytes — that
-trades mantissa precision for the same exponent range as 32-bit float, which
-neural nets tolerate well). In BF16, the H100's tensor cores are rated at
-**989 TFLOP/s** — nearly a *quadrillion* multiply-adds per second. That is
-the first of our two headline numbers.
+The second ceiling is how fast data reaches the tensor cores. Every number they
+multiply has to come from somewhere, and unless it already sits in registers or
+on-chip memory, it comes from HBM at 3.35 TB/s. Arithmetic you cannot feed is
+arithmetic you do not get.
 
-## The second ceiling: bandwidth
-
-989 TFLOP/s is a promise the chip can rarely keep, because those tensor cores
-have to be *fed*. Every number a tensor core multiplies came from somewhere,
-and unless it was already sitting in registers or SRAM, it had to travel from
-HBM at 3.35 TB/s. Compute you cannot feed is compute you do not get.
-
-So a GPU has **two independent ceilings**, and any operation is limited by
-whichever it hits first:
-
-- **compute:** peak arithmetic rate, 989 TFLOP/s (BF16, H100).
-- **bandwidth:** peak byte-movement rate from HBM, 3.35 TB/s.
-
-The whole game is knowing which one binds. That is the roofline.
-
-## The roofline model
-
-Any operation moves some bytes and does some FLOPs. Model its time as the
-larger of two independent costs — the chip does both at once, so you wait for
-the slower:
+So any operation's time is set by whichever ceiling it hits first:
 
 ```text
-   T = max( FLOPs / peak_FLOP_per_s ,  bytes_moved / peak_byte_per_s )
-             └──── T_math ────┘          └──────── T_mem ────────┘
+   T  =  max(  FLOPs ÷ peak FLOP/s ,   bytes moved ÷ peak bytes/s  )
 ```
 
-Which term wins depends on a single ratio — the most important number in this
-course:
+Three assumptions hide in that line: compute and data movement overlap
+perfectly, the peaks are reachable, and nothing else costs time. Each is
+optimistic, and the next chapter measures by how much.
 
-> **Arithmetic intensity** = FLOPs performed ÷ bytes moved. How much math you
-> extract from each byte you drag off HBM.
+## The roofline
 
-The chef analogy makes it physical. A tensor core is a chef who chops
-infinitely fast; HBM is a slow conveyor belt delivering ingredients.
-Arithmetic intensity is **how many chops each ingredient gets before the next
-one arrives**. If every onion gets a single chop, the chef stands idle
-waiting on the belt — you are **memory-bound**, limited by the conveyor. If
-every onion gets ten thousand chops, the belt is idle and the chef is
-saturated — you are **compute-bound**.
-
-The break-even point is where the two costs are equal. Set `T_math = T_mem`
-and the FLOPs/bytes cancel into a pure property of the hardware:
+Which term wins depends on one ratio, the operation's **arithmetic intensity**:
 
 ```text
-   I_ridge = peak_FLOP_per_s / peak_byte_per_s        (the "ridge point")
-
-   H100:  9.9e14 FLOP/s / 3.35e12 byte/s  ≈  295 FLOP/byte
+   intensity  =  FLOPs performed ÷ bytes moved to or from HBM
 ```
 
-That is the rule you carry out of this chapter. An operation whose arithmetic
-intensity is **below ~295 is memory-bound** on an H100 — it will run below
-peak FLOPs no matter how fast the tensor cores are, because it is starved for
-bytes. **Above ~295 it is compute-bound**, finally limited by the 989
-TFLOP/s. The ridge is fixed by the chip, not by your workload.
+It measures how much arithmetic each byte fetched from memory pays for. Set the
+two costs equal and you get the break-even intensity, a property of the chip
+alone, called the **ridge point**:
 
 ```text
-  attained
-  FLOP/s
-    989T ┤              ╭───────────────────  ← compute ceiling
-         │            ╱ :
-         │          ╱   :
-         │        ╱     :
-         │      ╱       :
-         │    ╱  ← bandwidth-limited slope
-         │  ╱           :
-         └────────────────────────────────▶  arithmetic intensity
-                    I_ridge ≈ 295            (FLOP/byte, log scale)
-         └ memory-bound ─┘└─ compute-bound ─┘
+   I_ridge  =  peak FLOP/s ÷ peak bytes/s
+   H100:       990e12 ÷ 3.35e12  ≈  295 FLOP/byte
 ```
+
+Below the ridge an operation is **memory-bound**: it finishes when the bytes
+arrive, and the tensor cores idle part of the time. Above it, the operation is
+**compute-bound**: the bytes arrive faster than they can be used. Plot attainable
+FLOP/s against intensity, both axes logarithmic so that a slope of "intensity ×
+bandwidth" is a straight line, and you get the shape that names the model.
 
 ![The H100 roofline on log-log axes: a sloping bandwidth roof of attainable = intensity × 3.35 TB/s meeting a flat compute roof at 990 TFLOP/s dense BF16, the two crossing at the ridge point of 295 FLOP/byte.](assets/diagrams/roofline-h100.svg)
 
-### A worked intensity, start to finish
+> [!predict] Before you read on
+> Element-wise addition of two BF16 vectors, `c = a + b`. Is it memory-bound or
+> compute-bound on an H100, and by roughly how much — 2×, 50×, or over 1,000×?
 
-Take the simplest operation there is: add two BF16 vectors, element by
-element, `c = a + b`. For each element the GPU **reads** two numbers (2 bytes
-+ 2 bytes) and **writes** one (2 bytes) — 6 bytes moved — to perform exactly
-**1 FLOP** (the add). Intensity:
+Memory-bound, by well over a thousand. Each element reads two 2-byte numbers and
+writes one: 6 bytes moved for 1 FLOP, an intensity of 0.17 FLOP/byte — about
+1,700× below the ridge. The tensor cores are irrelevant to it; it runs at memory
+speed.
+
+Matrix multiplication is different because each fetched number is reused. For a
+product of an `M × K` matrix by a `K × N` matrix in BF16:
 
 ```text
-   1 FLOP / 6 bytes  ≈  0.17 FLOP/byte
+   FLOPs  =  2 · M · K · N
+   bytes  =  2 · (M·K + K·N + M·N)       read both inputs, write the output
 ```
 
-That is roughly **1,700× below** the H100's ridge of 295. An element-wise add
-is so byte-hungry that the mighty tensor cores are irrelevant; it runs at
-memory speed and leaves 99.9% of the FLOPs on the table. Now contrast a large
-square matmul, `[N,N]×[N,N]`: each value loaded from HBM gets reused across an
-entire row or column of the output — roughly `N` multiply-adds per byte. For
-`N` in the thousands, intensity lands in the hundreds to thousands: **well
-past the ridge, compute-bound**, exactly the regime tensor cores were built
-for. Same chip, same two ceilings; a factor of ten thousand in intensity
-decides which one you hit.
+When the weight matrix (`K × N`) is large and `M` is small, the bytes are
+dominated by the weights and the intensity comes out close to `M`. **The intensity
+of multiplying a batch of `M` rows by a weight matrix is roughly `M`.** One row — a
+single decode token — gives about 1. A few thousand rows — a prompt in prefill —
+give thousands.
 
-Move the intensity yourself and watch which ceiling catches you:
+Here is what the two numbers predict for one of the case model's MLP weights,
+`[M × 8,192] · [8,192 × 28,672]`, as `M` grows. Look at the time column before the
+last one:
+
+```python
+# Roofline prediction for one MLP weight multiply of the case model:
+# [M x 8192] @ [8192 x 28672] in BF16 on an H100 SXM, from two numbers.
+PEAK_FLOPS = 989e12      # dense BF16 (the spec sheet's 1,979 is "with sparsity")
+PEAK_BW = 3.35e12        # HBM bytes/s
+K, N, B = 8192, 28672, 2 # inner dim, output dim, bytes per BF16 number
+
+print(f"ridge = {PEAK_FLOPS / PEAK_BW:.0f} FLOP/byte")
+print(f"{'M':>5} {'GFLOP':>8} {'MB moved':>9} {'FLOP/B':>7} "
+      f"{'t_math us':>9} {'t_mem us':>9} {'predicted':>9}  bound by")
+for M in (1, 8, 32, 64, 128, 256, 512, 1024, 4096):
+    flops = 2 * M * K * N
+    nbytes = B * (M * K + K * N + M * N)   # read X and W, write Y
+    t_math, t_mem = flops / PEAK_FLOPS, nbytes / PEAK_BW
+    t = max(t_math, t_mem)                  # perfect overlap, no overhead
+    roof = "memory" if t_mem > t_math else "compute"
+    print(f"{M:>5} {flops/1e9:>8.1f} {nbytes/1e6:>9.0f} {flops/nbytes:>7.0f} "
+          f"{t_math*1e6:>9.1f} {t_mem*1e6:>9.1f} {t*1e6:>8.1f}us  {roof}")
+
+# --- output of an actual run ---
+# ridge = 295 FLOP/byte
+#     M    GFLOP  MB moved  FLOP/B t_math us  t_mem us predicted  bound by
+#     1      0.5       470       1       0.5     140.2    140.2us  memory
+#     8      3.8       470       8       3.8     140.4    140.4us  memory
+#    32     15.0       472      32      15.2     140.9    140.9us  memory
+#    64     30.1       474      63      30.4     141.6    141.6us  memory
+#   128     60.1       479     125      60.8     143.0    143.0us  memory
+#   256    120.3       489     246     121.6     145.9    145.9us  memory
+#   512    240.5       508     474     243.2     151.5    243.2us  compute
+#  1024    481.0       545     882     486.4     162.8    486.4us  compute
+#  4096   1924.1       772    2493    1945.5     230.4   1945.5us  compute
+```
+
+*Runnable — Python 3 standard library only; output shown is from an actual run. It is a prediction from two spec-sheet numbers, not a measurement.*
+
+From `M` = 1 to `M` = 256 the work grows 256× and the predicted time grows 4%:
+the 470 MB of weights cost 140 µs whether one row or 256 ride on them. Past the
+ridge, at 512 rows, the time starts to double with `M`. A real kernel will not
+draw this sharp corner. It reaches roughly 85–90% of the bandwidth roof and a
+smaller fraction of the compute roof, so measured times sit above the prediction
+and the knee moves left, below 295. [Inference
+Arithmetic](#/inference-arithmetic) puts a number on that effective knee for the
+case's node, and [Lab: Your First Tokens](#/lab-first-tokens) has you measure your own.
+
+Move the intensity yourself and see which ceiling catches you:
 
 <div class="inf-widget" data-widget="roofline-explorer">
 <p class="inf-widget-fallback">Interactive roofline explorer — needs JavaScript enabled.</p>
 </div>
 
-## The generational table — and why the wall stands
+### Where the roofline is silent
 
-Newer chips, same story. Here are the three flagships you will meet in
-mid-2026, with dense BF16 figures:
+Two cases matter for serving.
 
-| GPU | Dense BF16 | HBM bandwidth | Capacity | I_ridge |
+**Decode attention does not climb the roofline with batch.** The weight
+multiplies get `M` = batch size, because every sequence uses the same weights.
+Attention does not: each sequence reads its *own* cached keys and values. A
+128-number key in BF16 is 256 bytes, and the 8 query heads that share it under
+GQA each do a 128-long dot product with it, 2,048 FLOPs: an intensity of about 8,
+the group size, whatever the batch. Batching makes the weight reads cheaper per
+token; it does nothing for the KV reads.
+
+**Small kernels are overhead-bound.** A decode step of the case model is on the
+order of a thousand kernel launches (80 layers × about a dozen operations). Each
+launch costs the CPU and driver time that is neither FLOPs nor bytes: in NVIDIA's
+own CUDA Graphs example, a kernel that executes in 2.9 µs cost 9.6 µs when launched
+and synchronised one by one, and 3.4 µs when replayed from a captured graph. When
+kernels are this short, the GPU idles between them and neither roof binds: you see
+low FLOP/s *and* low bandwidth. That third regime is why [Kernels and
+Compilation](#/kernels-and-compilation) exists.
+
+## Newer chips, same ridge
+
+> [!predict] Before you read on
+> NVIDIA's Rubin GPU has about four times the H100's dense BF16 compute. Will an
+> operation that is memory-bound on an H100 become compute-bound on a Rubin?
+
+No, because bandwidth grew by a larger factor still:
+
+| GPU | Dense BF16 | HBM bandwidth | Capacity | Ridge |
 |---|---|---|---|---|
-| **H100** SXM5 | 989 TFLOP/s | 3.35 TB/s | 80 GB | **~295** |
-| **H200** | 989 TFLOP/s | 4.8 TB/s | 141 GB | **~206** |
-| **B200** | 2,250 TFLOP/s | 8.0 TB/s | 192 GB | **~281** |
+| H100 SXM | 990 TFLOP/s | 3.35 TB/s | 80 GB | ~295 |
+| H200 | 990 TFLOP/s | 4.8 TB/s | 141 GB | ~206 |
+| B200 | 2,250 TFLOP/s | 8.0 TB/s | 180 GB | ~281 |
+| Rubin | 4,000 TFLOP/s | 19.2 TB/s | 288 GB | ~208 |
 
-Read the last column. From H100 to B200, compute grew ~2.3× and bandwidth
-grew ~2.4× — so the ridge barely stirred, ~295 → ~281. (The H200 is the same
-compute die as the H100 with faster, larger HBM bolted on; it *lowers* the
-ridge to ~206 by adding bandwidth without adding FLOPs — a pure feed
-upgrade.) The lesson is blunt: **the ridge point is not receding.** Each
-generation adds compute and bandwidth in near-lockstep, so the balance point
-between the two ceilings stays put. Any workload that was memory-bound on an
-H100 is, to a first approximation, still memory-bound on a B200. **The memory
-wall is not a problem you can buy your way out of by waiting for next year's
-GPU** — which is precisely why the rest of this course exists.
+The B200 row is NVIDIA's 8-GPU systems divided by eight: the DGX B200 lists
+"1,440 GB total, 64 TB/s HBM3e bandwidth", and the HGX B200 lists 36 PFLOPS of
+FP16/BF16 under a footnote that says the figure is sparse and dense is half.
+The Rubin row is NVIDIA's Vera Rubin NVL72 page, which lists the GPU at "288 GB
+HBM4 | 19.2 TB/s" and "FP16/BF16 4 PFLOPS" under a footnote reading "Dense
+specification": 4,000 ÷ 19.2 ≈ 208.
 
-> **Common trap — two numbers that will mislead you.** (1) Vendor decks quote
-> the *sparse* peak: H100 as "1,979 TFLOPS," B200 as "~4.5 PFLOPS." Those
-> include a 2× bonus from **2:4 structured sparsity** that standard dense
-> inference does not get — always **halve them** to the dense figures above.
-> Using the sparse number puts your ridge point off by 2×. (2) **Capacity
-> (GB) and bandwidth (TB/s) are different limits that bind differently.**
-> Capacity decides whether the model and its data *fit*; bandwidth decides
-> how *fast* they stream. A model can sit comfortably in 80 GB and still be
-> throttled by the 3.35 TB/s it takes to read those bytes every step. Do not
-> conflate "it fits" with "it is fast."
+Across three generations the ridge stays between ~200 and ~300. Each one adds
+compute and bandwidth roughly in step, so a workload that is memory-bound today
+stays memory-bound on the next chip — it just runs at the new chip's bandwidth.
+The H200 is the instructive case: the same compute die with faster, larger HBM.
+It lowers the ridge and speeds up memory-bound work by the bandwidth ratio,
+4.8 / 3.35 ≈ 1.4×, while leaving compute-bound work exactly as fast as before.
+
+## Reading a spec sheet
+
+Here is the H100's own specification table, as NVIDIA publishes it:
+
+```plaintext
+                          H100 SXM                  H100 NVL
+TF32 Tensor Core*         989 teraFLOPS             835 teraFLOPs
+BFLOAT16 Tensor Core*     1,979 teraFLOPS           1,671 teraFLOPS
+FP16 Tensor Core*         1,979 teraFLOPS           1,671 teraFLOPS
+FP8 Tensor Core*          3,958 teraFLOPS           3,341 teraFLOPS
+GPU Memory                80GB                      94GB
+GPU Memory Bandwidth      3.35TB/s                  3.9TB/s
+Interconnect              NVIDIA NVLink™: 900GB/s   NVIDIA NVLink: 600GB/s
+                          PCIe Gen5: 128GB/s        PCIe Gen5: 128GB/s
+…
+* With sparsity
+```
+
+*Verbatim — trimmed and re-aligned as text; cell text copied from the specification table at nvidia.com/en-us/data-center/h100/ (fetched 2026-11-21).*
+
+The line to read is the last one. Every tensor-core figure above carries the
+asterisk, so "1,979 teraFLOPS" for BF16 is the rate *with* **2:4 structured
+sparsity**: a mode in which two of every four consecutive weights are zero and the
+hardware skips them. A dense model — what you are almost certainly serving —
+gets half: ~990. Blackwell's sheets say the same thing in other words:
+"Specification in Sparse. Dense is ½ sparse spec shown." Use the sparse figure and
+every ridge and every utilisation you compute is off by 2×.
+
+A headline FLOP figure has two flags, and you must read both: sparse or
+dense, and which precision. The H100's 1,979 is BF16 with sparsity, and it is
+also exactly its *dense FP8* rate (3,958 ÷ 2). Same number, two meanings.
+
+Two more things the table shows. The variant matters: the H100 NVL is a PCIe
+card with a different column, more memory and bandwidth but less compute. And the
+interconnect: **NVLink** is NVIDIA's GPU-to-GPU link, 900 GB/s per H100 SXM
+against 128 GB/s for PCIe Gen5 — both counted in both directions, so 450 and
+64 GB/s each way. When one model is split across GPUs, they exchange
+partial results every layer over that link, so it is a third ceiling, the one
+[Parallelism for Inference](#/parallelism-for-inference) prices.
+
+Finally, capacity versus bandwidth. Gigabytes decide whether the model *fits*;
+terabytes per second decide how *fast* it can be read. A model that fits easily
+can still be slow, because the bytes that fit must also be read.
+
+## Seeing it on a running GPU
+
+The usual exporter for GPU metrics is NVIDIA's DCGM exporter. These lines from
+its default metric list are the ones that tell the two ceilings apart; read the
+help text, not the names:
+
+```plaintext
+# Utilization (the sample period varies depending on the product)
+DCGM_FI_DEV_GPU_UTIL_RATIO, gauge, GPU utilization as a ratio.
+…
+DCGM_FI_PROF_TENSOR_UTIL_RATIO, gauge, Ratio of cycles the tensor (HMMA) pipe is active.
+DCGM_FI_PROF_DRAM_UTIL_RATIO, gauge, Ratio of cycles the device memory interface is active sending or receiving data.
+```
+
+*Verbatim — trimmed; `etc/default-counters.csv` in NVIDIA dcgm-exporter 4.9.0 (released 2026-11-06).*
+
+The first line is the trap. Its definition lives in NVIDIA's management library:
+
+```c
+    unsigned int gpu;                //!< Percent of time over the past sample period during which one or more kernels was executing on the GPU
+```
+
+*Verbatim — the `gpu` field of `nvmlUtilization_t` in `nvml.h`, as vendored by NVIDIA's go-nvml repository (checked 2026-11-21).*
+
+"One or more kernels was executing" — any kernel, on any number of SMs. A
+memory-bound decode loop keeps a kernel running nearly all the time, so GPU
+utilisation reads close to 100% while the tensor pipes are busy a few percent of
+cycles. The ceiling a decode step presses on is the memory interface, and
+`DCGM_FI_PROF_DRAM_UTIL_RATIO` is the field that sees it. These names are new:
+dcgm-exporter 4.9.0 adopted DCGM 4.7's names, and until 4.8.4 the same three
+fields were `DCGM_FI_DEV_GPU_UTIL` (in percent), `DCGM_FI_PROF_PIPE_TENSOR_ACTIVE`
+and `DCGM_FI_PROF_DRAM_ACTIVE`. Dashboards and blog posts written before November
+2026 use the old ones.
+
+> [!dashboard] The GPU itself
+> **Utilisation:** `DCGM_FI_PROF_DRAM_UTIL_RATIO` for decode-heavy load,
+> `DCGM_FI_PROF_TENSOR_UTIL_RATIO` for prefill-heavy load — never
+> `DCGM_FI_DEV_GPU_UTIL_RATIO`, which reads ~1 whenever any kernel runs.
+> **Saturation:** none as a metric — a memory-bound GPU has no queue of its own;
+> derive it by comparing DRAM utilisation with the ~0.85–0.9 that streaming kernels
+> reach. **Errors:** `DCGM_FI_DEV_XID_ERROR` (value of the last XID, the driver's
+> error code; [When It Breaks](#/when-it-breaks) reads them).
+
+> [!case] The case: what the four H100s give you
+> The Ask Halden node is four H100 SXMs joined by NVLink (900 GB/s each, both
+> directions). Taken
+> together:
+>
+> - Capacity: 4 × 80 = 320 GB of HBM. The 140 GB of BF16 weights do not
+>   fit on one GPU, and two would leave too little once the engine's budget and
+>   overhead are counted ([Inside a Forward Pass](#/inside-a-forward-pass): −4 GB).
+> - Bandwidth: 4 × 3.35 = 13.4 TB/s. Each GPU reads its 35 GB quarter of
+>   the weights every decode step, so no step can be shorter than
+>   35 GB ÷ 3.35 TB/s ≈ 10.4 ms, whatever the tensor cores can do — the
+>   *physics floor*, first rung of the ladder [Inference
+>   Arithmetic](#/inference-arithmetic) climbs.
+> - Compute: 4 × 990 = 3,960 TFLOP/s. The ridge is unchanged at ~295.
+>
+> **What could go wrong:** Halden pays for 3,960 TFLOP/s and its decode steps use a
+> few percent of it, by design. The first time someone opens the GPU dashboard
+> during the morning peak, `DCGM_FI_DEV_GPU_UTIL_RATIO` will read close to 1 on all
+> four cards, and the obvious conclusion — "the node is saturated, buy a second
+> one" — would double the bill for a node whose memory interface still has
+> headroom. **Decision recorded:** Halden's capacity panel plots
+> `DCGM_FI_PROF_DRAM_UTIL_RATIO` and tokens per step, not GPU utilisation.
+
+## Exercises
+
+<div class="exercise">
+
+**Exercise 1.** Redo the script's multiply with FP8 weights and FP8 activations (one
+byte per number) on the H100, whose dense FP8 peak is 1,979 TFLOP/s. Compute the
+intensity at `M` = 1, 64 and 4,096 and the FP8 ridge. At what `M` does the multiply
+turn compute-bound — earlier or later than in BF16?
+
+<details>
+<summary>Reveal answer</summary>
+
+```text
+  bytes = 1 · (M·8,192 + 8,192·28,672 + M·28,672)     FLOPs unchanged
+  M = 1:     4.70e8 FLOPs / 2.35e8 bytes   ≈ 2
+  M = 64:    3.01e10      / 2.37e8         ≈ 127
+  M = 4,096: 1.92e12      / 3.86e8         ≈ 4,990
+  FP8 ridge: 1,979e12 ÷ 3.35e12            ≈ 591 FLOP/byte
+```
+
+Half the bytes double the intensity (≈ 2M instead of M), and the doubled peak
+doubles the ridge, so the crossing stays near `M` ≈ 295. FP8 halves the time of
+every memory-bound multiply — 70 µs instead of 140 µs at small `M` — without moving
+the batch size at which compute takes over.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 2 — diagnosis.** During a decode-heavy benchmark, a colleague pastes one
+GPU's scrape and asks for an upgrade, H200 or B200, "since the GPU is pegged":
+
+```plaintext
+DCGM_FI_DEV_GPU_UTIL_RATIO{gpu="0",…} 1
+DCGM_FI_PROF_DRAM_UTIL_RATIO{gpu="0",…} 0.89
+DCGM_FI_PROF_TENSOR_UTIL_RATIO{gpu="0",…} 0.06
+```
+
+*Real format, illustrative values — field names from dcgm-exporter 4.9.0 `etc/default-counters.csv`, labels trimmed; values invented for the exercise.*
+
+Which ceiling is the workload against? Estimate the speedup each upgrade would give
+this decode.
+
+<details>
+<summary>Reveal answer</summary>
+
+GPU utilisation of 1 only says a kernel was always running. The memory interface
+is busy 89% of cycles — about as high as streaming kernels get — while the tensor
+pipe is active 6%: the bandwidth ceiling. The low tensor figure is the
+signature of a memory-bound step, not a fault.
+
+Speedup follows bandwidth, not compute. H200: 4.8 / 3.35 ≈ 1.4×, despite
+identical FLOPs. B200: 8.0 / 3.35 ≈ 2.4× — its 2.3× compute contributes nothing
+here. (If the scrape had shown DRAM at 0.3 and tensor at 0.05, neither roof would
+bind: suspect the overhead regime, and a bigger GPU would not help at all.)
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 3 — transfer.** A cloud offers "H100" instances below the SXM price. The
+fine print says H100 NVL. Using the NVL column of the spec table above: (a) what is
+its dense BF16 ridge? (b) Against an H100 SXM, how fast would Ask Halden's batch-1
+decode be, and its 3,000-token prefill? (c) Does the model fit on four of them?
+
+<details>
+<summary>Reveal answer</summary>
+
+(a) 1,671 is "with sparsity": dense BF16 is ~835 TFLOP/s. Ridge 835 ÷ 3.9 ≈ 214.
+
+(b) Decode is memory-bound, so it scales with bandwidth: 3.9 / 3.35 ≈ 1.16×
+faster. Prefill is compute-bound, so it scales with compute: 835 / 990 ≈ 0.84,
+~19% slower (0.27 s becomes ~0.32 s). Same name, opposite effects on the two
+phases.
+
+(c) 4 × 94 = 376 GB against 320 GB: the 140 GB fits with more room for KV cache.
+But the NVL's NVLink is a 600 GB/s bridge between cards, not the switch that
+joins all four SXM GPUs: whether all four are bridged decides whether tensor
+parallelism runs over NVLink or over 128 GB/s PCIe — the third ceiling, which the
+spec sheet also prints.
+
+</details>
+
+</div>
 
 ## Frequently asked
 
 <div class="faq">
 
 <details>
-<summary>Does the roofline account for the SRAM, or only for HBM?</summary>
+<summary>Does the roofline account for on-chip memory, or only HBM?</summary>
 
-Only for HBM, and that is deliberate. The `bytes_moved` term counts traffic
-across the slow off-chip boundary, because that is the ceiling that binds;
-on-chip SRAM traffic is fast enough to ignore in a first-order estimate.
-Keeping data in SRAM does not raise the roof — it *raises your arithmetic
-intensity*, by letting one HBM read serve many more FLOPs before the value is
-evicted. That is precisely what tiling does, and it is the whole idea behind
-[FlashAttention & Decode Kernels](#/flashattention).
+Only HBM, deliberately: `bytes moved` counts traffic across the slow off-chip
+boundary, because that is the ceiling that binds. Keeping data on-chip does not
+raise the roof; it raises your *intensity*, by letting one HBM read serve more
+arithmetic. That is what tiling in shared memory does, and it is the idea behind
+[FlashAttention](#/flashattention).
 
 </details>
 
 <details>
-<summary>If the ridge point is fixed by the hardware, can I ever move it?</summary>
+<summary>Can I move the ridge point for my workload?</summary>
 
-You cannot move the chip's ridge, but you can move it *for your workload* by
-changing how many bytes a number costs. Quantizing weights from BF16 to FP8
-halves the bytes without changing the FLOPs, which doubles your effective
-intensity — the same operation lands twice as far to the right on the same
-roofline. Buying a chip with more bandwidth per FLOP does the other thing: the
-H200 lowers the ridge to ~206 by adding HBM speed to an unchanged compute die.
-Those are the only two moves, and [Quantization](#/quantization) is the one
-you control.
-
-</details>
-
-<details>
-<summary>An H100 has 132 SMs. Should I be reasoning about SM counts the way I reason about CPU cores?</summary>
-
-Rarely. On a CPU you size work to cores because a core is the unit that runs
-one thread. On a GPU the unit that matters for capacity planning is the whole
-chip — its aggregate 989 TFLOP/s and 3.35 TB/s — because a well-written kernel
-already spreads across every SM and every warp. SM counts start to matter only
-when you are writing or tuning kernels, where occupancy, shared-memory budget
-per SM and tail effects on the last wave of blocks decide throughput. Until
-then, treat the GPU as one very fast, very hungry unit.
+Not the chip's, but you can move your operation along the axis. Storing weights in
+8 bits instead of 16 halves the bytes for the same FLOPs and doubles the
+intensity. Batching more rows into each weight multiply raises `M` — though not
+attention's intensity, which stays at the GQA group size. Those are the two
+levers, and [Quantization](#/quantization) and
+[Continuous Batching](#/continuous-batching) are about them.
 
 </details>
 
@@ -332,88 +499,74 @@ then, treat the GPU as one very fast, very hungry unit.
 
 ## What to remember
 
-- An LLM forward pass is overwhelmingly **matrix multiplication**, which is
-  **embarrassingly parallel** — the ideal workload for a GPU's **throughput**
-  design (thousands of simple lanes) and the worst case for a CPU's
-  **latency** design (few complex cores).
-- An H100 is **132 SMs** of tensor cores, backed by the same *shape* of
-  memory hierarchy you know: tiny fast on-chip **SRAM** (tens of MB total)
-  over large, slower off-chip **HBM** (80 GB @ 3.35 TB/s).
-- A **FLOP** is one multiply or add; a multiply-accumulate is 2. **Tensor
-  cores** do matmul in hardware and are where the H100's **989 TFLOP/s**
-  (dense BF16) lives.
-- Every operation is capped by whichever ceiling it hits first — **989
-  TFLOP/s compute** or **3.35 TB/s bandwidth**. **Arithmetic intensity**
-  (FLOPs per byte) decides which. Below the **ridge point I_ridge ≈ 295**
-  you are memory-bound; above it, compute-bound.
-- Across GPU generations the ridge barely moves (~295 → ~281): **the memory
-  wall is not receding.** And always halve marketing "sparse" FLOPs for dense
-  inference.
-
-We now have the machine and the one law that governs it. The obvious next
-question — which side of the ridge does an actual LLM live on? — is where the
-next chapter, [Inference Arithmetic](#/inference-arithmetic), begins. The
-answer turns out to be *both*, on different steps of the very same loop you
-saw in chapter 1: prefill lands on one side, decode on the other. That split
-is not a footnote. It is the fact the entire field of inference engineering
-is built to exploit.
+- An H100 SXM is 132 SMs of tensor cores over 80 GB of HBM at 3.35 TB/s, with
+  well under 100 MB of on-chip memory, shared memory included.
+- Every operation is limited by compute (990 TFLOP/s dense BF16), by bandwidth
+  (3.35 TB/s) or, for short kernels, by launch overhead. Arithmetic intensity
+  decides between the first two; the H100's ridge is ~295.
+- Multiplying `M` rows by a large weight matrix has an intensity of roughly `M`;
+  decode attention's intensity is the GQA group size, whatever the batch.
+- The ridge stays at 200–300 from H100 to Rubin, so memory-bound work stays
+  memory-bound and speeds up with bandwidth.
+- A FLOP figure has a precision and a sparsity flag; read both, and the variant.
+- "GPU utilisation" means a kernel was running. Read DRAM and tensor activity.
 
 ```quiz
 [
   {
-    "q": "Why is a GPU, not a CPU, the right machine for an LLM forward pass?",
+    "q": "A Llama-style model with GQA (8 query heads per KV head) decodes at batch 64 with 4K-token contexts. What is the arithmetic intensity of its attention step, and what would raising the batch to 256 do to it?",
     "choices": [
-      "GPUs run at much higher clock speeds than CPUs",
-      "The forward pass is overwhelmingly matrix multiplication, which is embarrassingly parallel — a throughput machine with thousands of simple lanes beats a latency machine with a few complex cores",
-      "CPUs cannot perform floating-point math",
-      "GPUs have far more total memory than CPUs"
+      "About 64, because attention inherits the batch size from the weight multiplies",
+      "About 8, set by the GQA group size, and unchanged by the larger batch",
+      "About 256, since the four times larger batch shares each cached key",
+      "About 1, as in single-token decode, and it falls further as batch grows"
     ],
     "answer": 1,
-    "explain": "Matmul is a mountain of independent multiply-accumulates with no branches or dependencies. That uniform parallelism is exactly what a GPU's thousands of simple ALUs devour, and exactly what a CPU's branch-predicting, out-of-order cores are wasted on. It is a match of workload shape to hardware shape, not clock speed or memory size."
+    "explain": "Each sequence reads its own keys and values, so batching shares nothing. Per 256-byte BF16 key, 8 query heads do 8 × 256 FLOPs: ~8 FLOP/byte at any batch. The tempting answer, 64, applies to the weight multiplies, where every sequence reuses the same weights."
   },
   {
-    "q": "An operation on an H100 has an arithmetic intensity of 12 FLOP/byte. Is it compute-bound or memory-bound, and why?",
+    "q": "A profile of a small model's decode step on an H100 shows 1.1 TB/s of HBM traffic and 6% of peak FLOP/s, with gaps between kernels on the timeline. What would speed it up most?",
     "choices": [
-      "Compute-bound, because any operation using tensor cores is compute-bound",
-      "Memory-bound, because 12 is far below the ridge point of ~295, so it is starved for bytes long before it saturates the 989 TFLOP/s",
-      "Compute-bound, because 12 FLOP/byte is a high intensity",
-      "It depends on how many GB the data occupies in HBM"
+      "An H200, because the step is memory-bound and the H200 has more bandwidth",
+      "A B200, because its extra compute lifts a step that sits far below the ridge",
+      "Capturing the step as a CUDA graph, because neither roof is binding here",
+      "Quantizing the weights to FP8, because that halves the bytes of every read"
     ],
-    "answer": 1,
-    "explain": "The ridge point I_ridge = 989 TFLOP/s ÷ 3.35 TB/s ≈ 295 FLOP/byte. Intensity below the ridge means the chip runs out of bandwidth before it runs out of compute, so it is memory-bound and will sit far below peak FLOPs. Capacity (GB) is a separate limit and does not decide this."
+    "answer": 2,
+    "explain": "1.1 TB/s is a third of the bandwidth roof and 6% is far from the compute roof: neither ceiling binds. Gaps between kernels point to launch overhead, the regime CUDA graphs remove. More bandwidth or fewer bytes would help only if the memory interface were busy, and here it mostly waits for the next launch."
   },
   {
-    "q": "A spec sheet lists the H100 at 1,979 TFLOP/s BF16. What number should you use for dense inference math, and why?",
+    "q": "A vendor slide lists a GPU at '4.5 PFLOPS' and 8 TB/s, with no footnote. You will serve an FP8 model with FP8 arithmetic. What should you do before computing a ridge?",
     "choices": [
-      "1,979 TFLOP/s — it is the official rating",
-      "989 TFLOP/s — the quoted figure includes a 2× bonus from 2:4 structured sparsity that dense inference does not receive",
-      "3,958 TFLOP/s — you should double it for two tensor-core pipelines",
-      "It does not matter; the FLOP number never affects inference performance"
+      "Halve it to 2.25 PFLOPS, since slide figures always include the sparsity bonus",
+      "Use 4.5 PFLOPS as given, since a figure with no footnote is a dense figure",
+      "Double it to 9 PFLOPS, since FP8 runs twice as fast as the figure's precision",
+      "Ask its precision and sparsity: a B200's 4.5 is BF16 sparse and FP8 dense"
     ],
-    "answer": 1,
-    "explain": "Marketing peaks fold in 2:4 structured sparsity, a 2× multiplier that standard dense inference cannot use. Halve to the dense 989 TFLOP/s. Using the sparse number would push your ridge point (and any compute-bound estimate) off by a factor of 2."
+    "answer": 3,
+    "explain": "On a B200, 4.5 PFLOPS is the per-GPU BF16 rate with sparsity and also the dense FP8 rate. For FP8 the dense ridge is 4.5e15 ÷ 8e12 ≈ 562; for BF16 it is 2.25e15 ÷ 8e12 ≈ 281. Halving by reflex is right for one reading and wrong by 2× for the other."
   },
   {
-    "q": "Why does the ridge point stay near 295 FLOP/byte from the H100 to the B200, even though the B200 is far more powerful?",
+    "q": "What is the H100's ridge point, and what does it mean?",
     "choices": [
-      "Because NVIDIA caps the ridge point in firmware",
-      "Because compute and HBM bandwidth grew in near-lockstep (~2.3× and ~2.4×), so their ratio — which is exactly the ridge point — barely changed",
-      "Because the B200 uses the same HBM as the H100",
-      "Because arithmetic intensity is a property of the model, not the chip"
+      "About 80 GB: the most data an operation can touch before spilling",
+      "About 132: one unit of work per SM before the chip saturates",
+      "About 295 FLOP/byte: below it, an operation waits on memory",
+      "About 3.35 TB/s: the bandwidth above which compute limits speed"
     ],
-    "answer": 1,
-    "explain": "The ridge is peak_FLOP/s ÷ peak_byte/s. When both numerator and denominator scale by roughly the same factor across a generation, the quotient is nearly unchanged. That is why the memory wall is not receding: buying a newer GPU does not move a memory-bound workload to the compute-bound side."
+    "answer": 2,
+    "explain": "The ridge is peak FLOP/s divided by peak bytes/s — 990e12 / 3.35e12 ≈ 295 FLOP/byte. Operations with lower arithmetic intensity are memory-bound; higher, compute-bound. 80 GB is capacity, 3.35 TB/s is the bandwidth ceiling itself, and the SM count does not enter the ridge."
   },
   {
-    "q": "A model fits comfortably in an H100's 80 GB of HBM but still runs slowly, well below peak FLOPs. What is the most likely explanation?",
+    "q": "On an A100 80 GB SXM (312 TFLOP/s dense BF16, 2,039 GB/s), a weight multiply with M = 200 rows is compute-bound. You move it unchanged to an H100 SXM. Which ceiling binds now?",
     "choices": [
-      "The model is too small to use the tensor cores",
-      "It is bandwidth-bound: capacity (80 GB) only decides whether data fits, while bandwidth (3.35 TB/s) decides how fast those bytes can be streamed each step",
-      "The GPU has run out of SMs",
-      "80 GB is not enough memory, so it is swapping to the CPU"
+      "Memory: 200 is above the A100's ridge of ~153 but below the H100's ~295",
+      "Compute: an operation that is compute-bound on one chip stays so on any newer one",
+      "Compute: the H100's 3× FLOP/s raises the ridge to roughly 460 for it",
+      "Neither: at M = 200 both GPUs sit exactly on their ridge points"
     ],
-    "answer": 1,
-    "explain": "Capacity and bandwidth are independent ceilings. Fitting in 80 GB says nothing about speed; if the operation's arithmetic intensity is below the ridge, the chip spends its time waiting on the 3.35 TB/s pipe from HBM and leaves most of the 989 TFLOP/s idle. 'It fits' and 'it is fast' are different claims."
+    "answer": 0,
+    "explain": "Intensity ≈ M = 200. A100 ridge: 312e12 ÷ 2.039e12 ≈ 153, so compute-bound there. H100 ridge: ≈ 295, so memory-bound. The H100 added more compute than bandwidth relative to the A100, which moved the ridge right; 'stays compute-bound' assumes ridges never move."
   }
 ]
 ```

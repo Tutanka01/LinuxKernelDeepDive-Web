@@ -1,468 +1,540 @@
 # The KV Fabric
 
-> **Goal of this chapter:** see the moment the KV cache stopped being a per-GPU
-> buffer and became the field's central *distributed object*. By the end you will
-> know how a fleet-wide KV pool is built and out of what, what a transfer layer
-> has to do, the arithmetic that decides at every tier whether to restore a block
-> or rebuild it, why routing became cache management, and why every autoscaling
-> instinct you brought from ordinary services is wrong here. "The KV cache is the
-> center of gravity of modern serving" should stop being a slogan and become an
-> architecture you can draw.
+> **The question:** once KV caches can leave the GPU, where should they live, how
+> are they found and moved, and which machine should serve a request whose cache
+> is already somewhere?
+>
+> **You'll be able to:** decide with one inequality whether restoring a cache from
+> a slower tier beats recomputing it, and size that tier; configure a host-memory
+> KV tier in vLLM and tell its hits from local ones in the metrics; predict how a
+> cache-aware router behaves when its picture of the replicas is stale or the
+> traffic shares one prefix; choose the signals a fleet scales and sheds load on.
 
 <div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="router,kv,fabric"></div>
 
-[Disaggregated Serving](#/disaggregation) ended with a decision: split prefill
-from decode, and accept that the KV cache must cross a network. This chapter is
-everything that follows from having said yes.
+An Ask Halden agent files a ticket in four model calls. Between the second and
+the third it waits about twenty seconds for the ticketing system; the third call's
+first 9,000 tokens are the second call's prompt. If their keys and values are still
+in HBM, the engine prefills only the new tool result. If they were evicted, a 70B on
+two GPUs spends ~0.5 s recomputing the 6,000 that are not the shared preamble. If
+they were copied to host memory first, PCIe brings them back in 10–20 ms. This chapter is about those three
+outcomes, on one node and across a fleet.
 
-The consequence is larger than it sounds. A local buffer has no interesting
-questions attached to it — it is allocated, used, freed. A piece of state that
-*travels* has all of them at once. Where does it live? Who else has a copy? How
-do you find it? What happens when memory pressure evicts it? And, the question
-that reorganizes the whole datacenter: given that this request's bytes are
-already somewhere, **which machine should serve it?** Your distributed-systems
-instincts should be lighting up. They should be; that is exactly what happened to
-the field.
+## What a "parked session" really is
 
-## Mooncake: the KV cache as fleet-wide storage
+An engine has no notion of a session. When an agent's model call ends with a tool
+call, that request is *finished*. Its blocks go back to the free queue, still
+carrying their prefix hashes; they are reusable until something needs the space,
+and [PagedAttention](#/paged-kv-cache) evicts them least-recently-released first.
+The agent's next call is a new request. It hits the prefix cache for as many
+blocks as survived from the start of the chain, and since a request's blocks are
+freed tail-first, eviction eats a session's history from its newest end.
 
-Once KV is a movable object, a bigger idea appears. Look across your whole
-serving fleet: every node has **spare CPU DRAM and idle SSD** sitting next to
-its GPUs. Individually trivial; summed over hundreds of nodes, it is an
-*enormous* pool of memory that could hold KV — far more than all your HBM
-combined. **Mooncake** (Moonshot AI, the system behind the Kimi assistant)
-took that literally and built a **KVCache-centric** architecture:
+So "keeping a session warm" is a statement about eviction pressure. Under
+pressure, a session parked in a 20 s tool wait holds some of the oldest released
+blocks, and they go first.
 
-```text
-   ┌─────────────┐     ┌──────────────────────────────┐     ┌─────────────┐
-   │  PREFILL    │ ──► │   DISAGGREGATED KVCACHE POOL  │ ──► │   DECODE    │
-   │  cluster    │     │  (spare CPU DRAM + SSD, fleet │     │  cluster    │
-   └─────────────┘     │   wide, RDMA-addressable)     │     └─────────────┘
-                       └──────────────────────────────┘
-                       a KVCache-centric scheduler places,
-                       reuses, and locates every block
-```
-
-The scheduler's job is no longer "which GPU is free" but "**where is the KV
-this request needs, and where should its new KV live**." Prefill writes blocks
-into the pool; decode reads them; a hot prefix computed for one user is a cache
-hit for the next, served from pooled DRAM instead of recomputed. Under overload
-Mooncake adds a distinctly systems-flavored move: **prediction-based early
-rejection** — estimate whether an incoming request can still hit its SLO given
-current queue and cache state, and shed it *early* rather than admit it, thrash,
-and miss everyone's latency. Mooncake reported large gains (a simulated 525%
-ceiling; ~75% more real requests served) and won the **FAST 2025 Best Paper**.
-Its **Transfer Engine** and **Mooncake Store** were open-sourced in March 2025
-and now ship as a KV connector inside vLLM and TensorRT-LLM — the fleet-wide KV
-pool is in the standard stack.
-
-Take the general form of the idea seriously, because it is where the field is
-heading. A **global KV store** is a fleet-scoped, content-addressed cache: blocks
-keyed by the hash of the token prefix that produced them, so any replica can ask
-"does anyone hold the KV for this prefix?" and get an answer that does not depend
-on which machine originally computed it. That single change decouples three
-things that used to be welded together — *who computed a prefix*, *who stores
-it*, and *who serves the request that needs it*. Prefix reuse stops being a
-per-replica accident and becomes a fleet-wide property, which for workloads with
-shared system prompts or shared documents is worth more than any other
-optimization in this module.
-
-It is not free, and the costs are the ordinary costs of a distributed cache:
-metadata for hundreds of millions of blocks, an eviction policy across tiers that
-does not thrash, and a lookup that has to complete inside your TTFT budget — a
-cache index you must cross the network to consult has bought you a network round
-trip whether or not you hit. The systems above all make the same bet: at frontier
-scale, a fleet-wide hit rate is worth those costs.
-
-> [!bridge] You already know this — from the distributed systems course
-> A pool where any node may hold a copy of a block raises the replication
-> questions verbatim: how many copies, who owns them, how a reader finds one,
-> and what happens when the copy it wanted is gone. What differs is the stakes.
-> A missing or stale KV block is never a correctness bug, because the fallback
-> is always to recompute it — so this cache is tuned entirely for latency and
-> hit rate, and every consistency argument you would normally have simply does
-> not arise.
-> [→ Distributed: Replication](../distributed/#/replication)
-
-## The transfer layer
-
-A pooled cache is only as good as the thing that moves bytes into and out of it,
-and "move bytes" is doing a lot of work in that sentence. The transfer layer for
-KV has an awkward job specification:
-
-- **Source and destination are usually GPU memory**, so a naive path stages
-  through host RAM twice and doubles the cost. You want VRAM→VRAM.
-- **It must not block the compute stream.** A GPU that stalls its matmuls to
-  service a network transfer has converted a bandwidth problem into a latency
-  problem for every other request in its batch.
-- **It must span several transports** — RDMA over InfiniBand or RoCE between
-  nodes, NVLink inside one, NVMe-oF down to storage, plain TCP where nothing
-  better exists — behind one API, because the placement decision above it should
-  not have to know which.
-- **It moves scattered blocks, not contiguous buffers.** After
-  [PagedAttention](#/paged-kv-cache), a sequence's KV is a list of blocks
-  anywhere in a pool, so a transfer is a gather/scatter over many small regions,
-  and small-message efficiency matters as much as peak bandwidth.
-
-**NIXL** (NVIDIA Inference Xfer Library) is the current standard answer to that
-specification, and **Mooncake's Transfer Engine** is the other. Both present a
-uniform API over the transports, do non-blocking zero-copy VRAM→VRAM movement,
-and handle the scatter/gather. The reason to name them at all is that this is the
-component whose absence made KV transfer a research project rather than a
-configuration flag — and its presence is why "ship the KV" is now a line in a
-config file.
-
-## NVIDIA Dynamo: an "inference OS" above the engines
-
-vLLM and SGLang ([Anatomy of a Serving Engine](#/anatomy-of-an-engine)) each
-run *one* replica well; nobody was orchestrating a *fleet* of them with KV in
-mind. **NVIDIA Dynamo** (1.0 GA, March 2026) is that missing layer — an
-orchestrator *above* vLLM/SGLang/TensorRT-LLM, treating each as a worker. Three
-pillars matter here:
-
-- **Smart Router — KV-aware routing.** Instead of round-robin, it scores every
-  candidate replica by roughly `cache_overlap(prefix) − load`, and sends your
-  request to the worker that **already holds your prefix**. Routing *is* cache
-  management now (more below).
-- **KV Block Manager (KVBM).** Fleet-wide tracking of KV blocks — who holds
-  what, what can be reused — plus **tiered offload** of cold blocks down the
-  memory hierarchy. It is the paged block table of
-  [PagedAttention](#/paged-kv-cache), lifted from one GPU to the datacenter.
-- **NIXL** — the plumbing described above, doing **non-blocking VRAM→VRAM**
-  moves so a GPU ships KV without stalling its compute stream.
-
-> **State of play (mid-2026):** Dynamo 1.0 went GA in March 2026 (NVIDIA quotes
-> up to 7× on Blackwell for disaggregated MoE — a vendor figure, treat as a
-> ceiling). Named adopters include Cursor, Perplexity, Baseten, Deep Infra,
-> Fireworks, ByteDance, and Meituan, with the major clouds and neoclouds
-> (CoreWeave, Together, Nebius) offering it. **llm-d** is the Kubernetes-native
-> counterpart (Red Hat–led, Google/NVIDIA/IBM/CoreWeave): vLLM workers behind
-> the official K8s **Inference Gateway** — model-aware, KV-cache-aware routing
-> and PD disaggregation expressed as Gateway-API extensions rather than a
-> bespoke control plane. Same ideas, two front doors.
-
-## KV tiering, and the crossover rule
-
-You have internalized memory hierarchies since the kernel course — each tier
-slower and larger than the last. The KV fabric is that hierarchy rebuilt for
-cache blocks:
-
-```text
-   HBM        hot   — active KV, last ~30 s of a live request   (fastest, tiny)
-   CPU DRAM   warm  — reusable prefixes, ~30 s to minutes        (PCIe hop away)
-   NVMe SSD   cold  — long-tail prefixes, minutes+               (big, cheap)
-   recompute  gone  — not stored; pay prefill FLOPs to rebuild   (last resort)
-```
-
-> [!bridge] You already know this — from the Linux course
-> This is the page cache with different nouns: a small fast tier, a large slow
-> one, and a reclaim policy deciding what gets demoted as pressure rises. What
-> differs is the bottom of the stack. A reclaimed page can always be read back
-> from the file it came from, so eviction is cheap by construction; an evicted
-> KV block has no backing file, and the only way to get it back is a prefill you
-> pay for again. That is why the tier below the last real tier is labelled
-> "recompute" rather than "disk".
+> [!bridge] From the Linux course
+> Finished-but-cached KV blocks are clean pages on the inactive list: reclaimable,
+> reusable until reclaimed. What differs is the cost of reclaim. A clean page is read
+> back from its file; a KV block has no backing file unless you add a tier, and
+> without one the way back is recomputation, which has no analogue for a page. The
+> tiers below HBM are an optional swap; "recompute" is the floor under all of them.
 > [→ Linux: Virtual Memory](../#/memory)
 
-**LMCache** is the standard open layer that implements this for vLLM
-(HBM → CPU DRAM → SSD → remote, with cross-node P2P sharing). The key question
-at every boundary: **is restoring a block cheaper than recomputing it?** Do the
-arithmetic. Our 70B/128K KV is ≈ 43 GB; PCIe Gen5 moves ~64 GB/s, so restoring
-it from CPU DRAM to HBM costs:
+## Tiering, and the crossover rule
 
 ```text
-  43 GB ÷ 64 GB/s ≈ 670 ms  (restore)
+   HBM        hot    running sequences, fresh prefixes        fastest, smallest
+   CPU DRAM   warm   evicted prefixes, parked sessions        one PCIe hop
+   NVMe SSD   cold   long-tail prefixes                       large, cheap
+   recompute  gone   not stored: pay prefill again            last resort
 ```
 
-Recomputing that same 128K prefill from scratch is a **compute-bound pass over
-128K tokens** — `2 × 70e9 × 131,072 ≈ 1.8 × 10^16` FLOPs, or ~18,400 TFLOP,
-which at a realistic 400 TFLOP/s of achieved prefill throughput is tens of
-seconds of GPU time on one device, and it burns a prefill slot you could have
-given a new request. Hundreds of milliseconds of PCIe traffic to skip that is a
-trade you take. That is the whole case for tiering: **KV is expensive to make and
-cheap to move**, so keep it and haul it rather than rebuild it.
+> [!predict] Before you read on
+> A 128K-token Llama-3.3-70B context (43 GB of BF16 KV) sits in host memory on the
+> case's four-GPU node. Each GPU pulls its quarter over its own PCIe Gen5 link at
+> ~50 GB/s achieved; prefill runs at the case's 1.58 × 10¹⁵ FLOP/s. Restore or
+> recompute — which wins, and by roughly how much: 2×, 10× or 100×?
 
-Now generalize it, because the general form is more useful than the example.
-Both sides of the comparison scale linearly with the number of tokens, so the
-context length **cancels**, and the crossover is a property of the model and the
-tier alone:
+Restore, by about a hundred. Each GPU moves 10.7 GB at ~50 GB/s: **~0.2 s**
+(x16 Gen5 is ~63 GB/s per direction on paper; check for shared uplinks with
+`nvidia-smi topo -m` and measure with `nvbandwidth`).
+Recompute pays the linear work, `2 × 70e9 × 131,072 ≈ 1.8 × 10¹⁶` FLOPs, *and*
+attention's quadratic work, which at 128K is larger: `2 × T² × d × layers =
+2 × 131,072² × 8,192 × 80 ≈ 2.3 × 10¹⁶`. Together ≈ 4.1 × 10¹⁶ FLOPs ≈ **26 s** —
+during which the node prefills nothing else.
+
+Drop attention's term and both costs grow linearly with tokens, so **context length
+cancels** and a rule falls out, per token and for the same set of GPUs:
 
 ```text
-  restore wins  ⟺   kv_bytes_per_token / tier_bandwidth  <  2·P / achieved_FLOP/s
+   restore wins  ⟺  kv_bytes_per_token ÷ tier_bandwidth  <  2·P ÷ achieved FLOP/s
 ```
 
-Put the 70B in: `2·P / achieved` is `140 GFLOP ÷ 400 TFLOP/s ≈ 0.35 ms` of
-recompute per token, against `320 KiB ÷ tier_bandwidth` of restore per token.
-Solve for the bandwidth at which they tie:
+A 70B token costs 140 GFLOP, which the four GPUs share at 396 TFLOP/s each (the
+case's 40% MFU): 88 µs. In that time each GPU must restore its quarter of the
+token's 328 KB, 82 KB: the tie is **~0.93 GB/s per GPU**. Host memory over PCIe
+beats recomputing by ~50×; a Gen4 NVMe drive (~7 GB/s sequential on its spec sheet)
+by ~7× if each GPU has its own, ~2× if four share one; a 10 Gb/s network link
+shared by four GPUs (0.3 GB/s each) loses. For Llama-3-8B on one H100 —
+`2 × 32 × 8 × 128 × 2 = 131 KB` per token against `2 × 8.03e9 ÷ 396e12 ≈ 41 µs` —
+the tie is **~3.2 GB/s**: NVMe wins by ~2×, a network tier loses. Small models are
+cheap to recompute; tiers pay most for large ones. The rule is conservative:
+attention's extra work only favours restoring, and vLLM's connector copies by DMA
+alongside computation, so part of a transfer hides. What works against restore is
+a shared link — offload writes, other restores and NIC traffic on the same PCIe.
 
-```text
-  crossover bandwidth  =  0.328 MB ÷ 0.35 ms  ≈  0.94 GB/s
-```
+> [!trap] A prefix the router believes is cached may be gone
+> A router can report that 99% of requests had a reusable prefix somewhere while
+> delivering little: it believed the prefixes were cached, but the replica had
+> evicted the blocks and recomputed them. A lower tier keeps some of them. Count
+> prefill tokens actually skipped, per token; the metrics below count them by source.
 
-**Any tier faster than about 1 GB/s beats recomputing a 70B's KV.** CPU DRAM over
-PCIe (~64 GB/s) wins by ~68×. NVMe (~7 GB/s) wins by ~7×. Even a remote object
-store over a 10 Gb/s link (~1.2 GB/s) barely wins. That is why the tiering stack
-goes as deep as it does: there is almost no storage medium slow enough to lose to
-recompute for a large model.
-
-Two consequences worth holding. First, **small models flip the sign much more
-easily.** An 8B model recomputes at `16 GFLOP ÷ ~300 TFLOP/s ≈ 0.053 ms/token`
-against 131 KB/token of KV, giving a crossover near **2.5 GB/s** — NVMe still
-wins, but the margin has collapsed, and anything remote loses. Tiering is a
-large-model technique for the same reason disaggregation is. Second, the
-comparison above ignores what else the recompute would have displaced: rebuilding
-a prefix does not merely cost its own FLOPs, it occupies a prefill slot and delays
-somebody's TTFT. Include that and restore wins by more than the arithmetic says.
-
-> **Common trap: the physical-vs-logical hit-rate gap.** A router can report a
-> "99% logical hit rate" — 99% of requests *had* a reusable prefix somewhere —
-> while delivering nothing, because HBM was full and the block had already been
-> **evicted**, forcing a recompute. A logical hit that isn't physically
-> resident is a miss with extra steps. Tiering exists precisely to turn logical
-> hits into physical ones: catch the evicted block in DRAM or NVMe instead of
-> recomputing it. Measure the hit rate that ends in *restored bytes*, not the
-> one that ends in *found a match*.
-
-That gap is easier to believe once you have caused it. Pick the RAG or agent
-workload below, leave prefix caching on, and then drag the KV pool down: the
-prefix is exactly as shared as it was a moment ago, but once blocks start
-getting evicted to make room for live sequences, TTFT climbs back toward its
-uncached value. Nothing about the *logical* hit rate changed.
+In the simulator, choose the agent workload with prefix caching on and drag the KV
+pool down: the prefix is as shared as before, but once blocks are evicted, TTFT
+climbs back toward its uncached value.
 
 <div class="inf-widget" data-widget="engine-simulator">
 <p class="inf-widget-fallback">Interactive serving-engine simulator — needs JavaScript enabled.</p>
 </div>
 
-## Routing and autoscaling: why the old playbook breaks
+## A host-memory tier in vLLM
 
-A classic HTTP load balancer treats replicas as interchangeable and spreads
-requests evenly. For LLM serving that is actively harmful: **round-robin throws
-away prefix caches.** Send a request whose 800-token system prompt is cached on
-replica A over to replica B, and B re-runs the entire prefill — you paid for the
-cache and routed around it. So the modern router is **cache-aware** (SGLang's
-`sgl-router`, Dynamo's Smart Router, the Inference Gateway): it tracks which
-replica holds which prefix and sends matches home. **Routing has become cache
-management.**
+In vLLM v0.34 the second tier is two flags. `--kv-offloading-size` is the host
+buffer in GiB, **summed across the tensor-parallel ranks**; `--kv-offloading-backend`
+is `native` (vLLM's own CPU offloading, the default) or `lmcache`:
 
-That creates a tension you must name: **affinity vs balance.** Pure affinity —
-always route to the best-cached replica — overloads whichever one owns the
-popular system prompt; pure balance kills the cache. Production routers split
-the difference with that `overlap − load` score and **spill** to a colder
-replica when the hot one saturates.
+```bash
+vllm serve RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic \
+  --tensor-parallel-size 2  --kv-cache-dtype fp8 \
+  --gpu-memory-utilization 0.90  --max-num-batched-tokens 512 \
+  --kv-offloading-size 128  --kv-offloading-backend native \
+  --kv-cache-metrics
+```
 
-Sit with what the tension actually is, because it is not a tuning detail. Cache
-affinity makes replicas **non-interchangeable**, and load balancing is an
-algorithm that assumes they are interchangeable. Every load-balancing result you
-know — least-connections, power-of-two-choices, consistent hashing — was derived
-under an assumption this workload violates. The popular prefix is popular *for
-everyone*, so affinity concentrates load exactly where load is already highest,
-and a naive affinity router produces a hotspot as reliably as a hash collision.
-The `overlap − load` score is the field's practical answer: a soft affinity that
-degrades to balance under pressure. And a pooled KV store weakens the tension
-from the other side — if any replica can *fetch* a prefix from the pool cheaply,
-then routing away from the cached replica costs a restore rather than a
-recompute, which by the crossover rule above is a much smaller penalty.
+*Real format, illustrative values — flags from vLLM v0.34.0 `vllm/engine/arg_utils.py`
+and `vllm/config/cache.py`; the size is the case's choice (below), not a tested
+configuration.*
 
-> [!bridge] You already know this — from the distributed systems course
-> Consistent hashing exists for exactly this reason: keep a key on the node that
-> already caches it, and bound the reshuffle when membership changes. The
-> `overlap − load` score is a softened version of the same instinct. What
-> differs is the key. A prefix is variable-length and matches *partially* — two
-> requests can share 800 tokens and diverge after — so there is no single node a
-> request hashes to, only a ranking of replicas by how much of it they already
-> hold.
-> [→ Distributed: Partitioning & Sharding](../distributed/#/partitioning)
+The flags are shorthand. With `native`, vLLM writes `--kv-transfer-config` for
+you: the `OffloadingConnector`, role `kv_both`, `cpu_bytes_to_use = size × 2³⁰`
+(`vllm/config/vllm.py`). With `lmcache` it selects the LMCache connector and does
+*not* pass the size on; the LMCache server sets capacity. The connector copies each
+completed block to pinned host memory as soon as it exists and promotes host hits
+back to the GPU on demand.
 
-Autoscaling is where LLM serving diverges hardest from ordinary services, for
-three reasons that are each a trap:
+Hence the sizing rule vLLM's offloading guide states outright: make the host tier
+**larger than the GPU pool**. Copies are immediate, so a smaller host tier holds
+only blocks HBM still has and adds no hits. Halden's FP8 replica has a 66 GB pool;
+128 GiB (~137 GB) is about twice it.
 
-- **GPU utilization is a useless scaling signal.** Continuous batching pins it
-  near 100% whenever *anything* is running, busy or starving. Scale on **queue
-  depth, TTFT, and achieved throughput** instead — signals that reflect whether
-  you are meeting SLOs, not whether the silicon is warm.
-- **Scaling *down* is dangerous.** Retiring a replica does not just drop
-  capacity; it **destroys that replica's warm KV cache** and kills its
-  in-flight sequences — a cache flush plus a batch of dropped requests,
-  reversible only by expensive recompute elsewhere. A pooled KV store softens
-  this considerably: if the replica's blocks were also written to the fleet pool,
-  retiring it loses a copy rather than the only copy.
-- **Cold starts are measured in minutes.** A new replica must load tens to
-  hundreds of GB of weights before it serves a single token. You cannot meet a
-  traffic spike by booting GPUs; you keep **pre-warmed pools**, because
-  scale-to-zero is a fantasy when zero-to-one is a multi-minute weight load.
+Below host memory, v0.26–v0.28 added secondary tiers: `"spec_name":
+"TieringOffloadingSpec"` with a `secondary_tiers` list of `fs` (local NVMe or a
+shared mount), `obj` (an S3-compatible store, through NIXL) or `p2p` (other vLLM
+instances' host tiers over RDMA). Everything below the CPU tier is staged through
+it, and each tier is one more row of the inequality.
 
-A fourth trap belongs with them, and it is specific to disaggregation: **the two
-pools scale independently, and a change in traffic shape moves the ratio without
-moving the volume.** A product change that lengthens outputs adds decode load and
-no prefill load at all. An autoscaler watching aggregate request rate sees a flat
-line while your decode pool saturates and your prefill pool idles. Scale the
-pools on their own signals — prefill on queue depth and TTFT, decode on batch
-occupancy and ITL — or you will scale the wrong half.
+The metrics separate the tiers. One replica, restarted at 09:00 and scraped at
+09:05 at the phase-2 peak, so each counter covers five minutes; the three
+`prompt_tokens_by_source` lines sum to every prompt token it received:
 
-## Closing the module's arc
+```plaintext
+vllm:prefix_cache_queries_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0"} 3.975e+06
+vllm:prefix_cache_hits_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0"} 2.25e+06
+vllm:external_prefix_cache_queries_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0"} 1.725e+06
+vllm:external_prefix_cache_hits_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0"} 120000.0
+vllm:prompt_tokens_by_source_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0",source="local_compute"} 1.605e+06
+vllm:prompt_tokens_by_source_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0",source="local_cache_hit"} 2.25e+06
+vllm:prompt_tokens_by_source_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0",source="external_kv_transfer"} 120000.0
+vllm:prompt_tokens_cached_by_source_total{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",engine="0",source="host"} 120000.0
+```
 
-Step back and look at what just happened, because it is the same story you
-already know — told one level up.
+*Real format, illustrative values — names and labels from vLLM v0.34.0
+`vllm/v1/metrics/loggers.py`, `stats.py` and `cache_hit_source.py`; values computed
+from the case's phase-2 peak (13,250 prompt tokens/s per replica, 5,350 prefilled,
+over 300 s), with an assumed device/host split; not measured.*
 
-In [PagedAttention](#/paged-kv-cache), the problem was **fragmentation inside a
-single GPU**: contiguous KV reservations wasted 60–80% of HBM, and the fix was
-the operating system's own move — paging, a block table, a shared pool. Kernel
-memory management, rediscovered in one GPU.
+Prefill skipped: `(2.25M + 0.12M) ÷ 3.975M` ≈ 60%, the case's cached regime. The
+line you would misread is the external hit rate, `120,000 ÷ 1.725M` ≈ 7%. External
+queries ask only for tokens HBM lacked, mostly new tool results no tier has seen;
+at 46% occupancy little is evicted, so the host tier supplies 3%. It earns its keep
+under pressure, and `vllm:kv_block_idle_before_evict_seconds` (with
+`--kv-cache-metrics`) shows when: blocks evicted after less idle time than your
+tool waits mean sessions are losing their history.
 
-This chapter is that identical story at **datacenter scale**. The block table
-became fleet-wide block tracking (KVBM, Mooncake's scheduler). The free-page
-pool became a tiered hierarchy across HBM, DRAM, and NVMe (LMCache). Demand
-paging between tiers became KV *transfer* over RDMA (NIXL, Transfer Engine).
-Cache-affine process scheduling became cache-aware *request* routing. The
-kernel virtualized memory over scattered frames; the KV fabric virtualizes KV
-over scattered *machines*. Fragmentation → paging → tiering → transfer →
-routing is one continuous idea, and the object it all orbits is the KV cache.
+## A fleet-wide KV pool
 
-That is the payoff of the whole course's central asymmetry. Because prefill and
-decode want different things, the KV cache had to leave the GPU — and once it
-left, it became the distributed object the entire serving stack is built
-around. Everything the [next chapter](#/agentic-serving) says about agent
-economics is downstream of this: when the cache is the center of gravity, cache
-hit rate is the metric that turns architecture into dollars.
+Across a fleet, the spare DRAM and SSD next to every GPU add up to far more than
+all the HBM. **Mooncake**, behind Moonshot AI's Kimi, is built around that pool: a
+KV store over the fleet's DRAM and SSD, reachable by RDMA, and a scheduler that
+rejects a request early when it predicts a missed latency target. Its FAST 2025
+paper (best paper award) reports 59–498% more request capacity than baselines on
+real traces within SLOs.
 
-## What to remember
+The general form is a **global KV store** keyed by chained prefix hash: any replica
+can ask "does anyone hold this prefix?", decoupling who computes, stores and serves
+it. A *missing* block is never a correctness problem; a *wrong* one is, so the key
+must cover everything that shapes the KV — vLLM's block hash includes the LoRA
+adapter and `cache_salt`; stores namespace by model, dtype and layout. KV is
+layout-specific: an FP8 block is useless to a BF16 replica, and a TP=2 block is laid
+out differently from a TP=4 one (vLLM's opt-in `canonical_layout` lets different TP
+sizes share).
 
-- **Mooncake** builds a fleet-wide KV pool out of the spare CPU DRAM and idle SSD
-  next to every node's GPUs — RDMA-addressable, KVCache-centric scheduling,
-  prediction-based early rejection under overload. Generalized, that is a
-  **global KV store**: content-addressed by prefix hash, decoupling who computed
-  a prefix from who stores it and who serves it.
-- **The transfer layer** (NIXL, Mooncake's Transfer Engine) must be VRAM→VRAM,
-  non-blocking, multi-transport (RDMA/RoCE, NVLink, NVMe-oF, TCP), and good at
-  scatter/gather over paged blocks. Its existence is why KV transfer is a config
-  flag rather than a research project.
-- **Dynamo** is an inference OS above the engines: **Smart Router**
-  (`overlap − load`), **KV Block Manager** (fleet-wide tracking + tiered offload),
-  **NIXL** (the plumbing). **llm-d** is the K8s-native equivalent via the
-  Inference Gateway.
-- **KV tiering** is the memory hierarchy one level up: HBM → DRAM → NVMe →
-  recompute, with **LMCache** the standard open layer. The **crossover rule** —
-  restore wins when `kv_bytes_per_token / tier_bandwidth < 2·P / achieved_FLOP/s`
-  — has the context length cancel out, so it is a property of the model and tier.
-  For a 70B that threshold is ~1 GB/s, so essentially every tier beats recompute;
-  for an 8B it is ~2.5 GB/s and remote tiers lose.
-- Beware the **physical-vs-logical hit-rate gap**: an evicted "hit" is a miss with
-  extra steps. Measure restored bytes, not matches found.
-- **Routing is cache management.** Round-robin destroys prefix caches; affinity
-  creates hotspots, because the popular prefix is popular for everyone. Every
-  load-balancing result you know assumes replicas are interchangeable, and cache
-  affinity makes them not. `overlap − load` with spill is the practical answer,
-  and a pooled store softens the tension by making a routing miss a restore
-  rather than a recompute.
-- **Autoscaling traps:** GPU utilization is pinned near 100% by continuous
-  batching and signals nothing; scaling down flushes warm cache and kills
-  in-flight sequences; cold starts are minutes of weight loading, so pre-warmed
-  pools are mandatory; and the two disaggregated pools must be scaled on separate
-  signals, because traffic shape can shift the ratio without changing the volume.
-- The module's arc: **fragmentation → paging** was kernel memory inside one GPU;
-  **tiering → transfer → routing** is the same story at datacenter scale. The KV
-  cache is the center of gravity of modern serving.
+Moving blocks is its own problem: GPU to GPU without staging through host RAM,
+without stalling compute, as a gather/scatter of many small blocks, over RDMA,
+NVLink, NVMe-oF (NVMe commands over a network fabric) or TCP. **NIXL** (NVIDIA's
+inference transfer library) and Mooncake's open-source Transfer Engine give one
+non-blocking, zero-copy API over all of them — the NIC reads and writes GPU memory
+directly.
 
-## Frequently asked
+## Routing is cache management
 
-<div class="faq">
+A classic load balancer treats replicas as interchangeable. For LLM serving that
+throws caches away: send a request whose prefix is cached on replica A to replica
+B, and B recomputes it.
+
+> [!predict] Before you read on
+> A router always sends each request to the replica holding the longest matching
+> prefix. Every request starts with the same 2,000-token system prompt. What happens
+> to load across replicas?
+
+It concentrates on whichever replica first cached the shared prompt — the popular
+prefix is popular for everyone. Least-connections, power-of-two choices and
+consistent hashing all assume interchangeable replicas; affinity breaks that. Real
+routers blend the two, as SGLang's model gateway does:
+
+```text
+select_worker(request_text):
+    loads = in-flight requests per healthy worker
+    if max(loads) - min(loads) > balance_abs_threshold        # default 32
+       and max(loads) > min(loads) * balance_rel_threshold:   # default 1.1
+        w = random choice among least-loaded workers          # imbalanced
+    else:
+        m = tree.prefix_match(request_text)   # approximate radix tree, characters
+        if m.matched_chars / len(request_text) > cache_threshold:   # default 0.5
+            w = m.worker                                       # cache hit path
+        else:
+            w = random choice among least-loaded workers
+    tree.insert(request_text, w)          # assume w now caches this text
+    return w
+```
+
+*Pseudocode condensed from SGLang v0.5.23, `sgl-model-gateway/src/policies/cache_aware.rs`
+(`select_worker`; defaults in `policies/mod.rs`). The file's header comment says a low
+match goes to the smallest tree; the code picks the least loaded.*
+
+Affinity holds only while the fleet is balanced: the prediction's hotspot is capped
+at about 32 requests of imbalance, after which requests spill to idle replicas,
+which then cache the prompt themselves. And the tree is **the router's guess**,
+built from its own decisions, never told what engines evicted, trimmed by its own
+LRU (every 30 s, 10,000 nodes per tree). After a replica evicts a prefix or
+restarts empty, the router keeps sending that prefix there, believing it cached,
+and the replica recomputes it.
+
+The alternative is to be told. vLLM publishes `BlockStored` and `BlockRemoved`
+events over ZeroMQ (`--kv-events-config`); an indexer subscribed to every replica
+knows what each holds — llm-d's *precise* prefix-cache routing, and Dynamo's
+router. Exact is not instantaneous: until the first request's events arrive, an
+identical second one sees nothing (llm-d adds a speculative index entry at routing
+time), and a publisher past its high-water mark (100,000 events) drops events.
+Either way a stale view costs a recompute, never a wrong answer.
+
+## The gateway: one queue for the fleet
+
+On Kubernetes the routing layer has a standard shape. The **Gateway API
+Inference Extension** (GAIE) defines an `InferencePool` — the model-server pods of
+one model — and an **Endpoint Picker** (EPP) that the gateway's Envoy proxy
+consults for every request through its external-processing hook. The EPP scores
+pods on what it scrapes from them (queue, KV usage, prefix affinity) and returns
+one. Since GAIE v1.6.0 (August 2026) the project keeps the CRDs and conformance
+tests; the full EPP lives in llm-d.
+
+The gateway is also where multi-tenancy belongs. An engine sees one replica, and its
+`priority` knows nothing about tenants ([Continuous Batching](#/continuous-batching)).
+A request dispatched to an engine is committed to that replica; a request held at
+the gateway costs nothing and can still go anywhere. llm-d v1.0.0 (October 2026)
+builds on that: when its saturation detector (queue depth, KV use across the pool)
+says the pool is full, the EPP stops dispatching and queues by priority band, then
+by tenant within a band, then by an ordering policy such as earliest deadline.
+Negative priorities are sheddable: their bands are capped and overflow gets HTTP 429
+instead of slowing everyone. Dynamo v1.6's deadline-ordered policy queue is the same
+idea. The tenant header must come from your auth layer, never from the client.
+
+A prefix cache shared across tenants is also a timing side channel: a hit is
+measurably faster, so one tenant can probe what another sent. The mitigation is
+per-tenant `cache_salt` ([PagedAttention & Prefix Caching](#/paged-kv-cache));
+salted prefixes never match, so cache-aware routing does not undo it.
+
+## Autoscaling a stateful fleet
+
+Four instincts from stateless services fail here.
+
+- **GPU utilisation is not a signal.** Continuous batching keeps kernels launching
+  whenever anything runs, so a comfortable replica and a drowning one both read near
+  100%. Scale on demand: requests running and waiting, TTFT.
+- **Scaling down destroys state:** a retired replica takes its warm cache with it.
+- **Cold starts take minutes** ([Operating It](#/operating-it)); keep headroom.
+- **Disaggregated pools scale separately:** longer outputs add decode load only.
+
+A queue-demand rule, as a KEDA object over replicas of one model:
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: llama70b-replicas
+spec:
+  scaleTargetRef:
+    name: llama70b-vllm               # a Deployment, one replica per pod
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  cooldownPeriod: 600
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 900
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.monitoring:9090
+      query: >-
+        sum(vllm:num_requests_running{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"})
+        + sum(vllm:num_requests_waiting{model_name="RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"})
+      threshold: '20'
+```
+
+*Real format, illustrative values — fields from the KEDA 2.21 ScaledObject
+specification and Prometheus scaler docs (KEDA v2.21.1); metric names from vLLM
+v0.34.0 `loggers.py`; thresholds from the case, not tuned.*
+
+The default metric type, `AverageValue`, divides the query by the threshold: 70
+requests running or waiting → `ceil(70 ÷ 20)` = 4 replicas. The threshold is what
+one replica serves within its SLOs — the case's plan of 20, until a load test
+replaces it. Scaling on `num_requests_waiting` alone flaps: the queue is zero
+whenever replicas keep up, so the desired count collapses to the minimum the moment
+it drains. The long scale-down window is the stateful part: every pod removed is a
+cache thrown away.
+
+> **State of play (November 2026):** NVIDIA Dynamo is at v1.6.2 (1.0 shipped in
+> March 2026); v1.5 deprecated its KV block manager (removal targeted for v1.7) in
+> favour of the engines' own offloading, with KV indexing moving into Dynamo Router.
+> llm-d reached v1.0.0 on 20 October 2026, on vLLM v0.31; GAIE is at v1.6.2. Vendor
+> speedups for these stacks are ceilings; the inequality tells you what your
+> hardware can do.
+
+> [!dashboard] The KV tiers
+> **Utilisation:** `vllm:kv_cache_usage_perc` (HBM); host tier size in the labels of
+> `vllm:kv_offload_config_info`. **Saturation:** `vllm:kv_block_idle_before_evict_seconds`
+> (with `--kv-cache-metrics`) below your tool-wait times;
+> `vllm:prompt_tokens_by_source_total{source="local_compute"}` rising as a share.
+> **Errors:** none — a lost block is silently recomputed; derive it from
+> `vllm:prompt_tokens_cached_by_source_total` by `source` against the share you expect.
+
+> [!case] The case: phase 2 gets a second tier
+> Phase 2 ([The Agentic Era](#/agentic-serving) counts its tokens) adds 0.5 agent requests/s at the peak, each a
+> session of four calls and three tool waits, ~80 s end to end: by Little's law
+> **~40 sessions** open at once, contexts averaging ~11K tokens of which 3K is the
+> shared preamble, stored once per replica. A session's ~8K unique tokens are 1.3 GB
+> in FP8 KV; with the Q&A traffic, the node holds **~61 GB of its 132 GB** (46%).
+> Between calls, those 1.3 GB are evictable prefix-cache blocks, nothing more.
+>
+> - **Steady state:** at 46% little is evicted, so a host tier would supply almost
+>   nothing. On this evidence alone, offload is not needed.
+> - **One replica down:** the survivor holds ~61 GB against its 66 GB pool. The
+>   oldest released blocks — sessions in a tool wait — go first, and each resumed
+>   call recomputes ~8K tokens (`8,000 × 0.089 ms` ≈ **0.7 s**) instead of
+>   restoring 1.3 GB over PCIe (**~13–26 ms**, two links or one). The survivor
+>   prefills ~11K tokens/s (`1.58e15 ÷ 1.4e11`); if every parked session is
+>   evicted, demand is `0.5 × (47K − 4 × 3K) + 2.2K` ≈ 20K.
+>
+> **What this settles:** each replica runs with `--kv-offloading-size 128`: 256 GiB
+> of pinned host memory on the node, each tier larger than its 66 GB pool. Check
+> the RAM first (`free -g`; GCP's 4-GPU a3-highgpu-4g has 936 GB) and leave room for
+> the OS and the weights' page cache. It is insurance bought with memory the node
+> already pays for. Session routing, already in place, keeps restores local; a
+> fleet-wide pool and a gateway solve problems two replicas do not have.
+
+## Exercises
+
+<div class="exercise">
+
+**Exercise 1.** A 30B dense model has 196 KB of KV per token in BF16 and achieves
+~500 TFLOP/s in prefill on one GPU. At what tier bandwidth do restore and recompute
+tie? Should a remote object store at ~1 GB/s be used as a tier? And if the same
+model ran with an FP8 KV cache, how would the answer move?
 
 <details>
-<summary>If a fleet-wide KV pool is so much larger than HBM, why not keep everything forever?</summary>
+<summary>Reveal answer</summary>
 
-Two limits. The first is metadata and lookup: hundreds of millions of blocks need
-an index, and that index has to answer inside your TTFT budget — a cache you must
-cross the network to consult has cost you a round trip whether you hit or miss.
-The second is that value decays. A prefix nobody has touched in an hour is
-occupying space a live prefix wants, and the hit rate of the long tail is low
-enough that eviction costs almost nothing. Tiering is the compromise: demote
-rather than delete, until the tier is slow enough that recompute wins.
-
-</details>
-
-<details>
-<summary>Is a KV block from one replica usable on another?</summary>
-
-Only if the two agree on everything that produced it: the same model weights, the
-same quantization and KV dtype, the same tensor-parallel rank layout, and the same
-block size. KV is a function of the model and the tokens, so identical tokens on
-an identical deployment give identical blocks — which is exactly what makes
-content-addressing by prefix hash work. It also means a rolling upgrade
-invalidates the entire pool, and that a heterogeneous fleet has as many disjoint
-cache namespaces as it has configurations.
-
-</details>
-
-<details>
-<summary>Do I need any of this if I run one replica?</summary>
-
-No, and that is the honest scope of this chapter. One replica has no routing
-problem, no placement problem, and no fabric. What does carry down is the tiering
-arithmetic: offloading cold prefix blocks from HBM to host DRAM is worth it on a
-single machine for the same reason it is worth it across a fleet, and LMCache
-will do it for you. Everything else here is a frontier-scale answer to a
-frontier-scale problem.
+Recompute per token: `2 × 30e9 ÷ 5 × 10¹⁴ = 0.12 ms`. Tie: `196 KB ÷ 0.12 ms ≈
+1.6 GB/s`. A 1 GB/s store loses to recomputing — skip it. With FP8 KV the bytes per
+token halve (98 KB) and so does the tie (~0.8 GB/s): the same store now wins,
+narrowly. Smaller KV makes every tier more useful.
 
 </details>
 
 </div>
 
+<div class="exercise">
+
+**Exercise 2 — diagnosis.** A team enables offloading on a 70B replica whose
+startup log reported a 130 GB KV pool (BF16, TP=4) and launches with
+`--kv-offloading-size 64`. A week later, during a peak with heavy eviction, they
+compare two scrapes ten minutes apart:
+
+```plaintext
+# 14:00
+vllm:prompt_tokens_by_source_total{model_name="m",engine="0",source="local_compute"} 9.12e+08
+vllm:prompt_tokens_by_source_total{model_name="m",engine="0",source="local_cache_hit"} 1.371e+09
+vllm:prompt_tokens_by_source_total{model_name="m",engine="0",source="external_kv_transfer"} 2.1e+06
+# 14:10
+vllm:prompt_tokens_by_source_total{model_name="m",engine="0",source="local_compute"} 9.33e+08
+vllm:prompt_tokens_by_source_total{model_name="m",engine="0",source="local_cache_hit"} 1.3814e+09
+vllm:prompt_tokens_by_source_total{model_name="m",engine="0",source="external_kv_transfer"} 2.1e+06
+```
+
+*Real format, illustrative values — metric name and `source` labels from vLLM v0.34.0
+`loggers.py` and `stats.py`; model label shortened; values invented for the exercise.*
+
+What fraction of prompt tokens did the host tier supply in those ten minutes, why,
+and what do you change?
+
+<details>
+<summary>Reveal answer</summary>
+
+Deltas: computed 21M, local hits 10.4M, external 0. The host tier supplied nothing
+during the peak it was bought for, while 67% of prompt tokens were recomputed.
+64 GiB is about half the 130 GB pool, and since the connector copies blocks as soon
+as they complete, a host tier smaller than HBM holds only blocks the GPU still has.
+Set it well above the pool (256–384 GiB if the host has the RAM), then check that
+`external_kv_transfer` grows when `local_compute` does.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 3 — diagnosis.** A team autoscales LLM replicas on average GPU utilisation
+with a target of 70%. During a traffic surge the autoscaler never adds replicas,
+while TTFT p95 climbs from 0.6 s to 9 s and `vllm:num_requests_waiting` goes from 0
+to 140 summed over six replicas. Explain, and say what the trigger should be and
+how many replicas it would ask for at the peak if one replica serves 20 requests in
+flight.
+
+<details>
+<summary>Reveal answer</summary>
+
+Continuous batching keeps utilisation near 100% whether the server is comfortable
+or drowning; the metric saturated before the surge and says nothing about it.
+Demand does: running plus waiting. Six replicas at 20 running (120) plus 140
+waiting is 260 → `ceil(260 ÷ 20)` = 13 replicas. Start earlier than for a
+stateless service; a new replica takes minutes.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 4 — transfer: find the flaws.** A memo for a service on single-GPU H100
+replicas of an 8B model (131 KB of KV per token, a 40 GB KV pool each):
+
+> "Restore beats recompute above ~1 GB/s, so we will put the KV tier on the shared
+> NFS mount (~1 GB/s per client). Each replica gets a 20 GiB host tier for parked
+> sessions. Routing uses the SGLang gateway in cache-aware mode, so a replica restart
+> costs nothing: the router knows where every prefix is."
+
+Find three errors.
+
+<details>
+<summary>Reveal answer</summary>
+
+1. The ~1 GB/s tie is the 70B's. For an 8B on one H100 it is
+   `131 KB ÷ (2 × 8e9 ÷ 396e12)` ≈ 3.2 GB/s: the NFS tier is three times too slow
+   and loses to recomputing.
+2. A 20 GiB host tier is smaller than the 40 GB pool; vLLM's offload copies blocks
+   as they complete, so such a tier mirrors what HBM already has and adds no hits.
+3. The gateway's tree is approximate, built from its own decisions and never told
+   about evictions or restarts. After a restart it keeps sending prefixes to a
+   replica that holds none of them until the tree ages out. Exact KV events fix it.
+
+</details>
+
+</div>
+
+## What to remember
+
+- Between calls, a "session" is evictable prefix-cache blocks, the oldest released
+  going first under pressure.
+- Restore beats recompute when `kv_bytes_per_token ÷ bandwidth < 2·P ÷ achieved
+  FLOP/s` on the same GPUs: ~0.9 GB/s per GPU for a 70B, ~3.2 GB/s for an 8B.
+- In vLLM v0.34, `--kv-offloading-size` (GiB, summed over TP ranks) adds a host
+  tier that must exceed the GPU pool; `prompt_tokens_by_source` shows what each
+  tier supplied.
+- Cache-aware routers trade affinity against load; an approximate tree goes stale
+  on eviction and restart, exact KV events lag by one decision.
+- Fairness and shedding belong at the gateway, before a request is committed to a
+  replica. Scale on demand, never on GPU utilisation.
+
 ```quiz
 [
   {
-    "q": "Mooncake's KVCache-centric architecture builds a fleet-wide KV pool. Out of what?",
+    "q": "A 405B dense model has 258 KB of KV per token (FP8, summed over its node) and prefills at 3.2 × 10¹⁵ FLOP/s achieved on that 8-GPU node. Using restore wins ⟺ kv_bytes_per_token ÷ bandwidth < 2·P ÷ achieved FLOP/s, what aggregate tier bandwidth is the tie?",
     "choices": [
-      "Extra HBM added to every decode GPU",
-      "The spare CPU DRAM and idle SSD sitting next to GPUs across the whole fleet, made RDMA-addressable as one pooled KV store",
-      "A single dedicated storage server with terabytes of RAM",
-      "Compressed KV blocks kept only in each GPU's local HBM"
+      "About 1.0 GB/s: 258 KB in the 0.25 ms one token takes to recompute",
+      "About 2.0 GB/s: 258 KB against 0.13 ms, one FLOP per parameter per token",
+      "About 0.13 GB/s: one GPU's 32 KB share against the whole node's 0.25 ms",
+      "About 3.2 GB/s: the tie equals the node's achieved PFLOP/s, read in GB/s"
     ],
-    "answer": 1,
-    "explain": "Mooncake's insight is that summed across hundreds of nodes, spare DRAM and SSD dwarf total HBM. Pooling it into an RDMA-addressable KVCache store lets a prefix computed for one request be reused by another, with a KVCache-centric scheduler placing and locating blocks and rejecting requests early under overload."
+    "answer": 0,
+    "explain": "Recompute per token: 2 × 405e9 ÷ 3.2e15 ≈ 0.25 ms. Tie: 258 KB ÷ 0.25 ms ≈ 1.0 GB/s for the node (~0.13 GB/s per GPU, if each has its own link). The 2.0 GB/s choice forgets the factor 2 in 2·P; the 0.13 GB/s one compares one GPU's bytes with the whole node's time without saying it is per GPU."
   },
   {
-    "q": "Why is round-robin load balancing actively harmful for LLM serving, and why is GPU utilization a bad autoscaling signal?",
+    "q": "Over an hour, a replica's /metrics give external_prefix_cache_hits ÷ external_prefix_cache_queries = 6%, while prompt_tokens_by_source splits 58% local_cache_hit, 2.5% external_kv_transfer, 39.5% local_compute. KV usage stays near 50%. What do you conclude about its host tier?",
     "choices": [
-      "Round-robin is too slow; GPU utilization updates too infrequently",
-      "Round-robin ignores which replica already holds a request's prefix (re-running prefills it could have reused), and continuous batching pins GPU utilization near 100% whenever anything runs, so it never signals SLO pressure",
-      "Round-robin overloads the network; GPU utilization double-counts KV transfers",
-      "Both are fine; the real problem is only cold starts"
+      "It is failing: a 6% external hit rate means most offloaded blocks were lost",
+      "It is quiet by design: little is evicted, and most misses are new tokens",
+      "It is too small: the 39.5% computed share shows blocks dropped from host",
+      "It is miswired: external queries should match local hits, not local misses"
     ],
     "answer": 1,
-    "explain": "Prefix caches make replicas non-interchangeable, so routing must be cache-aware (score cache overlap minus load) — round-robin throws the cache away. And because batching keeps the GPU busy whether it is meeting SLOs or starving, you must scale on queue depth, TTFT, and throughput, not utilization."
+    "explain": "External queries are asked only for tokens HBM lacked, and most of those are tokens no tier ever saw (new tool results, new questions), so the external hit rate is low on a healthy day. At 50% KV usage little is evicted; the tier earns its keep under pressure. 'Too small' would need evidence of eviction (falling idle-before-evict times) and a size below the GPU pool."
   },
   {
-    "q": "The crossover rule for KV tiering is: restore wins when kv_bytes_per_token / tier_bandwidth < 2·P / achieved_FLOP/s. Why does the request's context length not appear in it?",
+    "q": "A gateway routes on exact KV events from its vLLM replicas, with no speculative indexing. Two identical 30,000-token requests arrive 5 ms apart at an idle, balanced fleet. What most likely happens?",
     "choices": [
-      "Because restore time is constant regardless of how much KV there is",
-      "Because both restore time and recompute time scale linearly with the number of tokens, so the length cancels — the crossover is a property of the model and the tier alone",
-      "Because prefill FLOPs scale quadratically with length while restore scales linearly",
-      "Because only the last block of a sequence is ever restored"
+      "Both go to the same replica, since KV events arrive within a microsecond",
+      "The second is held at the gateway until the first one's prefill completes",
+      "The second is rejected as a duplicate by the engine's prefix-hash check",
+      "They may land on two replicas, and both prefill all 30,000 tokens"
     ],
-    "answer": 1,
-    "explain": "Restoring T tokens costs T × kv_bytes_per_token / bandwidth; recomputing them costs T × 2·P / achieved FLOP/s. T divides out. For a 70B at ~400 TFLOP/s achieved, the tie-point bandwidth is ~0.94 GB/s, so essentially every tier — DRAM at ~64 GB/s, NVMe at ~7 GB/s — beats recompute. For an 8B the threshold is ~2.5 GB/s and remote tiers stop winning, which is why tiering is a large-model technique."
+    "answer": 3,
+    "explain": "Exact events report blocks only once they are stored. 5 ms after the first decision, its 30,000-token prefill is far from done, the index shows nothing, and the second request is scored on load alone. That gap is why llm-d inserts a speculative index entry at routing time. Nothing in the stack holds or rejects identical prompts."
   },
   {
-    "q": "A router reports a 99% prefix cache hit rate, yet TTFT is no better than with round-robin. What is the most likely explanation?",
+    "q": "Two tenants share a fleet. Tenant B runs a nightly batch at priority −1 while tenant A's interactive traffic peaks. With llm-d v1.0 flow control on and the pool saturated, what happens to B's requests?",
     "choices": [
-      "The router is measuring hit rate on the wrong model",
-      "It is reporting the logical hit rate — a reusable prefix existed somewhere — while the blocks had been evicted from HBM and were never physically restored, so each 'hit' ended in a recompute",
-      "Prefix caching only helps decode, not TTFT",
-      "The RDMA fabric is saturated by weight loading"
+      "They are dispatched first, because the batch arrived before A's peak",
+      "They wait in a capped band at the gateway; overflow gets an HTTP 429",
+      "They are preempted inside the engines, which reorder work by tenant",
+      "They interleave evenly with A's, because the fairness policy is per tenant"
     ],
     "answer": 1,
-    "explain": "The physical-vs-logical hit-rate gap. A logical hit means a match was found; a physical hit means bytes were actually restored into HBM in time to skip the prefill. Under memory pressure the block pool evicts, and a logical hit becomes a miss with an extra lookup. Tiering exists to convert logical hits into physical ones by catching evicted blocks in DRAM or NVMe. Measure restored bytes."
+    "explain": "Flow control holds requests at the gateway while the saturation detector says the pool is full, serves the highest priority band first, and treats negative priorities as sheddable: their band is bounded and overflow is rejected with 429. Fairness applies between flows within one band, not across bands, and the engines know nothing about tenants."
   },
   {
-    "q": "What problem does a transfer library like NIXL or Mooncake's Transfer Engine actually solve?",
+    "q": "A KEDA ScaledObject scales on sum(vllm:num_requests_waiting) with threshold 5 and minReplicaCount 2. Traffic is steady; every replica runs a full batch and the queue stays empty. What does the autoscaler do?",
     "choices": [
-      "It compresses KV blocks so fewer bytes cross the network",
-      "It provides non-blocking, zero-copy VRAM→VRAM movement over a single API spanning RDMA/RoCE, NVLink, NVMe-oF and TCP, with scatter/gather over paged blocks — so shipping KV neither stages through host RAM nor stalls the compute stream",
-      "It decides which replica should serve each request",
-      "It replaces the block table with a flat contiguous allocation"
+      "Holds the current count, since the replicas are exactly at capacity",
+      "Adds one replica, since a full batch is reported as one waiting request",
+      "Scales down toward 2, since zero waiting asks for zero replicas",
+      "Pauses scaling, since KEDA skips a query whose result is exactly zero"
     ],
-    "answer": 1,
-    "explain": "The job specification is awkward: source and destination are GPU memory (so staging through host RAM doubles the cost), the compute stream must not stall, several transports must hide behind one API, and after PagedAttention a sequence's KV is scattered across many small blocks rather than one buffer. NIXL and the Transfer Engine handle exactly that, which is why 'ship the KV' became a config flag. Placement and routing are separate layers above it."
+    "answer": 2,
+    "explain": "With the default AverageValue metric type, desired = ceil(metric ÷ threshold) = ceil(0 ÷ 5) = 0, clamped to the minimum. Replicas that are fully busy but keeping up get scaled away, the queue then grows, and the fleet flaps. Scale on running + waiting against what one replica serves."
   }
 ]
 ```

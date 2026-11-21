@@ -1,392 +1,490 @@
 # The Agentic Era
 
-> **Goal of this chapter:** understand how the *workload* changed in 2025–26
-> — from humans chatting to agents looping and reasoning models thinking —
-> and why that reshuffled the value of every optimization in this course.
-> After this chapter you can say precisely why cache hit rate, not model
-> choice, is the number that sets an agent's bill; why reasoning models push
-> fleets the opposite way; and why RL now runs a serving engine *inside*
-> training. It closes Module 5 by naming the one thing everything orbits.
+> **The question:** what do agent loops and reasoning models do to a fleet's
+> prefill load, KV occupancy and cache economics — and why does Halden's phase 2
+> fit on its node only if the prefix cache keeps hitting?
+>
+> **You'll be able to:** count the prefill, decode and KV an agent loop costs with
+> and without prefix caching, and check it in the `usage` of each call; keep an
+> agent's prompt cache-stable and test it in CI; price agent traffic under a
+> provider's caching rules (read discount, write surcharge, lifetime); predict what
+> a thinking budget does to decode load and to latency promises.
 
 <div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="client,router,kv"></div>
 
-Rewind to 2023. A person opens a chat box, types a sentence, waits, reads a
-paragraph, types again. From the engine's side this is a gift: input is
-short, output is short, and there is a human-shaped pause between turns long
-enough to schedule anything you like. Every optimization in Modules 1–4 was
-tuned, implicitly, for that shape.
+An Ask Halden question reads 3,000 tokens and writes 250. The ticket agent of phase 2,
+to finish one user request, reads **47,000** tokens and writes about 850 — and it
+has already read most of the 47,000 before, one call earlier.
 
-Now look at 2026 traffic. Two new workloads dominate, and they pull in
-**opposite directions**.
+An **agent** is a model in a loop: read the task, call a tool — search, query, API —
+read the result, call another, and answer when done. Every call sends the whole
+conversation so far again: system prompt, tool definitions, every earlier step. A
+**reasoning model** ([Reading a Model Card](#/reading-a-model-card)) writes a private
+chain of "thinking" tokens before its answer, often thousands of them. The first
+workload multiplies prefill; the second multiplies decode. This chapter counts both.
 
-An **agent** is a model in a loop. It reads a task, calls a tool (search a
-codebase, run a query, hit an API), reads the result, calls another tool,
-and repeats — ten, thirty, a hundred times — before it answers. There is no
-human in the loop and no human-shaped pause. Critically, each iteration
-re-sends the *entire growing context*: the system prompt, the tool
-definitions, and every prior step's output. Agent traffic is
-**prefill-heavy** to a degree chat never was — input-to-output ratios
-reported as high as **267:1**, with prefill making up **85–95%** of the
-compute.
+## An agent loop, in tokens
 
-A **reasoning model** goes the other way. Given a hard problem it emits a
-long private chain of "thinking" tokens before its visible answer —
-**10–100× more output tokens per request** than a 2023 chat reply. That is
-brutally **decode-heavy**.
+Take a coding agent that starts with 20,000 tokens of context — system prompt, tool
+schemas, the files it has read — and runs 30 iterations. Each iteration appends a
+~200-token tool call and ~1,000 tokens of tool output, so the context grows by 1,200
+tokens a step.
 
-One fleet now has to serve both. This chapter is about what that costs and
-what engineering it forces.
+> [!predict] Before you read on
+> If every iteration is prefilled from scratch, how many prompt tokens does the task
+> process? With perfect prefix caching, how many — about 2×, 10× or 20× fewer?
 
-## The agent loop, in tokens
+Without caching, iteration *i* prefills `20,000 + 1,200 × i` tokens:
+`30 × 20,000 + 1,200 × (0 + 1 + … + 29) = 600,000 + 522,000 ≈` **1.12 million**,
+against 6,000 output tokens — 190 to 1. With [prefix
+caching](#/paged-kv-cache), each iteration reuses everything up to the previous one's
+end and prefills only what is new: `20,000 + 29 × 1,200 ≈` **55,000**. That is
+**20× less**, and the gap widens with every iteration: uncached work grows with the
+square of the loop's length, cached work linearly. One small leak: only full blocks
+hit (64 tokens in vLLM v0.34), so each call also recomputes up to 63 tokens of the
+previous prompt's partial last block.
 
-Make the prefill-heaviness concrete. Take an agent whose working context
-sits around **20,000 tokens** (a system prompt, a pile of tool schemas, a
-few files it pulled in) and let it run **30 tool-call iterations** to finish
-a task.
+## Halden's phase 2, in tokens
 
-Naively, each iteration is a fresh request: the engine re-reads the whole
-context to rebuild the KV cache — the per-token key/value vectors you met in
-[Inference Arithmetic](#/inference-arithmetic) — then generates one tool
-call. Thirty iterations over a ~20K context is
+Phase 2 (the case's fixed inputs): at the peak, 0.5 agent requests/s alongside 1.0
+Q&A request/s. Each agent request is four model calls with tool waits between them,
+contexts of 3.5K → 9K → 14.5K → 20K tokens, the first 3,000 — system prompt and tool
+definitions — identical for every session. The case does not fix the output, so this
+chapter assumes ~200-token tool calls and a ~250-token final answer (the phase-1
+median): **~850 output tokens per agent request**.
 
-```text
-  30 iterations × 20,000 tokens ≈ 600,000 token-reads of prefill
+**Prefill.** Uncached, a request prefills `3.5K + 9K + 14.5K + 20K = 47K` tokens.
+Cached, call 1 finds the 3K preamble and prefills ~0.5K; each later call finds the
+previous call's prompt and prefills its 5.5K delta: `0.5K + 3 × 5.5K ≈` **17K**.
+vLLM reports the split per call when launched with `--enable-prompt-tokens-details`.
+Here are the final usage chunks of one session's four streamed calls; predict the
+four `cached_tokens` values before reading them.
+
+```plaintext
+call 1  data: {"id":"chatcmpl-7a1e…","object":"chat.completion.chunk",…,"choices":[],"usage":{"prompt_tokens":3500,"total_tokens":3700,"completion_tokens":200,"prompt_tokens_details":{"cached_tokens":2944}}}
+call 2  data: {"id":"chatcmpl-91c4…",…,"choices":[],"usage":{"prompt_tokens":9000,"total_tokens":9200,"completion_tokens":200,"prompt_tokens_details":{"cached_tokens":3456}}}
+call 3  data: {"id":"chatcmpl-c03b…",…,"choices":[],"usage":{"prompt_tokens":14500,"total_tokens":14700,"completion_tokens":200,"prompt_tokens_details":{"cached_tokens":8960}}}
+call 4  data: {"id":"chatcmpl-e58d…",…,"choices":[],"usage":{"prompt_tokens":20000,"total_tokens":20250,"completion_tokens":250,"prompt_tokens_details":{"cached_tokens":14464}}}
 ```
 
-for an agent that emitted maybe a few thousand tokens of actual tool calls.
-Almost all of that prefill is **identical** to the previous iteration's —
-the same system prompt, the same tools, the same history, plus one new tool
-result appended at the end. You are paying to recompute the same KV cache
-thirty times.
+*Real format, illustrative values — `usage` fields from vLLM v0.34.0
+`vllm/entrypoints/serve/engine/protocol.py` and `openai/chat_completion/serving.py`
+(`prompt_tokens_details` only with `--enable-prompt-tokens-details`; `None` fields
+dropped from the usage chunk); token counts computed from the case with 64-token
+blocks, not measured.*
 
-You already know the fix. [PagedAttention & Prefix
-Caching](#/paged-kv-cache) showed that a shared prefix's KV blocks can be
-computed once and reused. Turn prefix caching on and iteration *N* keeps the
-KV for tokens 1..(previous end) and prefills **only the newly appended
-tokens** — the last tool's output, a few hundred to a couple thousand
-tokens. The 600K collapses to roughly one full pass to build the context up
-(~20K) plus thirty small deltas. That is the 10–30× reduction that turns an
-agent from unaffordable into routine.
+Every `cached_tokens` is a multiple of 64. Call 1's 2,944 is the preamble's 46 full
+blocks; its 47th block mixes the preamble's tail with this user's request. Call 2
+reuses 3,456 tokens — call 1's prompt, rounded down — and not the 200 tokens the
+model wrote: the template re-renders the tool call as an assistant message, and
+unless those tokens match what the model generated, the hit ends there. Summing
+`prompt_tokens − cached_tokens` over the four calls gives 17,176: the 17K, from the
+wire. Log both fields per call; they are the cheapest hit-rate monitor you have.
 
-Which makes **cache hit rate the single biggest economic lever in the
-system — ahead of which model you picked.**
+**Prefill load at the peak.** Cached: `0.5 × 17K + 1.0 × 2.2K ≈ 10.7K` tokens/s
+(each Q&A request prefills ~2.2K beyond the shared 800-token prompt). At 1.4 × 10¹¹
+FLOPs per token that is 1.5 × 10¹⁵ FLOP/s, **~47%** of the two FP8 replicas'
+3.2 × 10¹⁵. Uncached: `0.5 × 47K + 1.0 × 3K ≈ 26.5K` tokens/s, 3.7 × 10¹⁵ FLOP/s —
+**more than the node can do**. The hit rate is not an optimisation here; it is the
+difference between fitting and not.
 
-> **State of play (mid-2026):** one widely-cited cost breakdown puts it
-> starkly: moving an agent workload's prefix-cache hit rate from **0% to
-> 90%** takes a ~**$20k monthly GPU bill down to ~$2k**. Reported
-> achievable hit rates are **60–85%** on agent loops and repo-QA, **81–91%**
-> on deep multi-turn — a 5–12× cut in per-call cost. These specific
-> percentages come from vendor/practitioner blogs, not peer review; treat
-> the *direction* as solid and the exact figures as illustrative.
+**Decode.** `0.5 × 850 + 1.0 × 250 = 675` output tokens/s, ~340 per replica. On the
+case's step model ([Inference Arithmetic](#/inference-arithmetic)), each replica
+prefills 5,350 tokens/s in 512-token chunks: ~10 hybrid steps a second at ~48 ms
+(`520 × 0.089 ms` plus KV reads), about half of every second. The rest are
+decode-only steps at ~16 ms (rung 4: ~8 sequences decoding, ~70K context tokens of
+KV reads ≈ 2 ms). Mean step ≈ 24 ms, so TPOT averages ~25 ms, and a token that
+rides a hybrid step waits ~48 ms — inside the 60 ms promise, with ~12 ms to spare.
+Phase 2's decode is light; what it pays in TPOT is its *prefill*.
 
-Notice this is the same physics you saw priced two ways already. When a
-provider's API charges roughly **10× less for "cached input" than for fresh
-input** (Anthropic reads at 0.1× the write price; OpenAI and Gemini have
-their own cached tiers), that discount *is* the prefix cache from
-[PagedAttention](#/paged-kv-cache), passed through to your invoice. The
-"cached tokens, 10× cheaper" line that looked like a pricing gimmick two
-chapters ago is now the dominant term in an agent's cost. The loop opened in
-[Inference Arithmetic](#/inference-arithmetic) closes here: the KV cache is
-the bill.
+**KV occupancy.** By Little's law, `0.5/s × ~80 s ≈ 40` sessions are open at the
+peak. Each spends ~23 s in the engine (850 tokens at ~25 ms, plus ~2 s of chunked
+prefill) and ~57 s in three tool waits of ~19 s. So at any moment ~12 sessions are
+running and ~28 are parked — and a parked session, to the engine, is just evictable
+prefix-cache blocks. With the preamble stored once, the whole working set is
+~61 GB of the node's 132 GB of FP8 pool; [The KV Fabric](#/the-kv-fabric) worked out
+what happens to the parked 70% when a replica fails.
 
-## What the agent era forces on the fleet
+**Per session.** A session's latency is the sum over its calls,
+`Σ (TTFT + output × TPOT) + tool time` ≈ 23 s of model time plus 57 s of tools. A
+per-session promise ("ticket filed in under 2 minutes") is the one users feel, and
+it does not decompose into per-call p95s — the slow tail of four calls compounds.
+Set per-call targets from the session budget, and measure the session.
 
-Three consequences follow directly.
+## What agents demand of the fleet
 
-**Routing must become cache-aware.** A cache hit only happens if iteration
-*N+1* lands on the *same worker* where iterations 1..*N* left their KV. A
-plain round-robin load balancer treats replicas as interchangeable and
-scatters the iterations across the fleet, throwing away every prefix cache
-and re-running every prefill. So the router grows a memory of KV topology:
-**prefix-aware / session-affinity routing** sends a request to the worker
-most likely to already hold its prefix. This is the same KV-aware router you
-met in [Disaggregated Serving](#/disaggregation) (SGLang's `sgl-router`
-maintaining a prefix tree, Dynamo's Smart Router scoring cache-overlap minus
-load) — the agent era is simply what made it non-optional.
+**Routing that remembers.** A hit happens only if call `N + 1` reaches the replica
+holding calls `1 … N`. Round-robin scatters them; agent traffic is what made
+session- and prefix-aware routing non-optional ([The KV Fabric](#/the-kv-fabric)).
 
-> [!bridge] You already know this — from the Linux course
-> The CPU scheduler already refuses to treat cores as interchangeable: it
-> prefers to wake a task on the CPU whose cache is still warm, and prices a
-> migration against the misses it will cause. Prefix-affinity routing is that
-> same policy at datacenter scale. What differs is the exchange rate — a cold
-> CPU costs a task microseconds of refill, while a cold replica costs a request
-> a full prefill of its entire context, which is why the router is willing to
-> queue for the right worker rather than run now on the wrong one.
-> [→ Linux: CPU Scheduling](../#/scheduling)
+**Room for parked sessions.** Halden parks ~28 sessions at the peak, each holding
+~1.3 GB of unique history; an engine evicts the oldest released blocks first, which
+are exactly those. A host-memory tier catches them.
 
-**Caches must tier, because agent sessions outlive HBM.** A tool call can
-take seconds to minutes — a database query, a web fetch, another model's
-reply. For that whole stretch the session's KV cache is idle but must
-survive, and HBM (the GPU's scarce on-package memory) is far too precious to
-hold thousands of parked sessions. So the KV cache spills down a hierarchy —
-HBM for the active few seconds, CPU DRAM for minutes, NVMe beyond — exactly
-the [LMCache](#/disaggregation) / Mooncake tiering from the last chapter. A
-"logical" 90% hit rate is worthless if HBM eviction forced a recompute;
-tiering is what makes a logical hit a *physical* one.
+**Prompts built for caching.** A cache only hits if the prefix is identical, token
+for token, from position zero. Reorder tool definitions between calls, put a
+timestamp near the top, or edit the middle of the history, and every block after
+the change misses. **Context engineering** on the application side — a byte-stable
+head, an append-only body, volatile content last — exists largely to keep the
+server's cache warm.
 
-**The client must engineer its context.** Caches are only hittable if the
-prefix is *stable* and *append-only*. Reorder your tool definitions between
-turns, or edit something in the middle of the history, and every KV block
-after the edit is invalidated — its hash no longer matches. So a discipline
-called **context engineering** emerged on the app side: keep the system
-prompt and tool schemas byte-stable, only ever append to the running
-context, never mutate the middle. It is prompt engineering's unglamorous
-cousin, and it exists entirely to keep the server's cache warm. (Agent
-*frameworks* and prompt design are out of scope here — we care only that
-their output has to be cache-friendly.)
+**Tool calls that parse.** A malformed call costs a retry: one more prefill and
+decode round in the session. In vLLM v0.34, `tool_choice="required"` or a named
+function decodes the call under the tool's JSON schema — the grammar mask from
+[Anatomy of a Serving Engine](#/anatomy-of-an-engine) — while `"auto"` lets the
+model write freely unless a tool sets `strict: true` or the server sets
+`--tool-strict-level`. Most agent frameworks never set `strict`.
 
-> **Common trap:** "cache hit means same answer." Reusing KV blocks is
-> exact when the reused tokens really are identical — that is arithmetic,
-> not approximation. But in **multi-agent and LLM-as-judge** setups, reusing
-> a prefix across roles can leak state in ways that quietly change behavior:
-> a "fresh" judge that shares KV with the thing it is judging is not
-> actually fresh. Whether this subtly degrades quality is
-> [open research](https://arxiv.org/pdf/2601.08343) — flag it, don't reuse
-> blindly across independent reasoners.
+> [!trap] "Reused KV always gives the same result"
+> *Exact* prefix reuse is exact: identical tokens from position zero give identical
+> keys and values. Some systems go further and reuse KV computed in a *different*
+> context — for example, each candidate answer's KV computed on its own, then
+> spliced into an LLM judge's prompt that compares the candidates. That is an
+> approximation, and a 2026 study found that end-task accuracy can look stable while
+> the judge's choices diverge from those made with full prefill
+> ([arXiv 2601.08343](https://arxiv.org/abs/2601.08343)). Know which kind of reuse
+> your stack performs.
+
+## Cache hits on an invoice
+
+Hosted APIs pass the prefix cache through to the price sheet as a separate,
+cheaper line for cached input — and some charge extra to write the cache.
+
+> [!predict] Before you read on
+> The 1.12M-token coding task above runs on an API at $3 per million fresh input
+> tokens and $0.30 per million cached ones. What does its input cost uncached, and
+> at its 95% hit rate: more or less than 10× cheaper?
+
+Less: about 7×. Uncached, `1.12M × $3 ≈ $3.37`. Cached, the 55K fresh tokens cost
+`$0.16` and the 1.07M cached ones `$0.32`: **$0.48**. A 10× discount on 95% of the
+tokens leaves the 5% at full price carrying a third of the bill. If the provider
+charges 1.25× to write what it caches, the fresh tokens cost $0.21 and the total
+$0.53.
+
+The rules differ by provider and change often. As of November 2026, cached input is
+**10–40× cheaper** than fresh on the major APIs (0.1× at Google and on older models,
+0.05× on Anthropic's and OpenAI's current mid and top tiers, 0.025× on Anthropic's
+priciest models). Anthropic charges 1.25× the input price to write a 5-minute cache entry and
+2× for a 1-hour one; OpenAI charges 1.25× and 2.5× for 30-minute and 12-hour
+retention on GPT-5.6 and later, and nothing on earlier models. The lifetime is the
+operational trap: a provider's cache entry lives a fixed time from its last use
+(Anthropic's default is 5 minutes, refreshed on each hit), so an agent whose tool
+waits outlast it pays the write again on the next call. A self-hosted engine has no
+lifetime at all — blocks live until eviction pressure takes them, which is why
+Halden watches `vllm:kv_block_idle_before_evict_seconds` instead.
 
 ## Reasoning models pull the other way
 
-Now the opposite pressure. A reasoning model's long chain of thought is pure
-**decode** — token after token, each reading the whole KV cache, the
-memory-bandwidth-bound regime from [Inference
-Arithmetic](#/inference-arithmetic). Ten to a hundred times more output per
-request shifts the whole fleet decode-heavy.
+Thinking tokens are **output tokens**: decoded one step each, billed at the output
+price, and held in KV while the request runs — 164 KB each in FP8 KV for Halden's
+model, so 4,000 tokens of thinking is 0.66 GB per call in flight. vLLM reports them
+as `usage.completion_tokens_details.reasoning_tokens` when a reasoning parser is
+configured. In vLLM v0.34 a request can cap them:
 
-That breaks a tidy assumption from the last chapter. Naive **1-prefill /
-1-decode** disaggregation assumes prefill and decode are roughly balanced;
-for reasoning they are wildly not. The prefill pool sits idle while decode
-grinds for thousands of tokens, and the KV-transfer between pools becomes
-pure overhead. The fix is to skew the ratio — **decode-heavy layouts like
-1P3D** (three decode pools per prefill pool), covered in
-[Disaggregated Serving](#/disaggregation) — or to not disaggregate reasoning
-at all.
+```bash
+curl -sN http://reasoning-llm:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-32B",
+       "messages": [{"role": "user", "content": "Which open tickets block release 4.2?"}],
+       "thinking_token_budget": 4000,
+       "max_tokens": 5000,
+       "stream": true,
+       "stream_options": {"include_usage": true}}'
+```
 
-There is an economic echo too. Reasoning inflates the real compute behind
-each request far faster than user counts grow, and it is a big reason the
-token-price free-fall of 2023–25 **slowed** to single-digit deflation in
-2026. That story — the S-curve, the hardware behind it — belongs to
-[Hardware & Economics](#/hardware-and-economics), the next chapter.
+*Real format, illustrative values — `thinking_token_budget` from vLLM v0.34.0
+`vllm/entrypoints/openai/chat_completion/protocol.py` and `sampling_params.py`
+(a non-negative integer, `-1` for unlimited; the server needs `--reasoning-parser`,
+e.g. `qwen3`); host, model choice and prompt invented.*
 
-## Inference moved inside the training loop
+When the count of thinking tokens reaches the budget, vLLM forces the model's
+end-of-reasoning string (`reasoning_end_str` in `--reasoning-config`) and the answer
+begins. The budget sits *inside* `max_tokens`, which still caps everything the
+request writes. Dynamo v1.6 accepts the same root-level field and passes it to vLLM
+or SGLang.
 
-Here is the genuinely new thing. Reinforcement-learning post-training —
-teaching a model from its own generated attempts — needs to **generate those
-attempts**, thousands of them, fast. Generating is inference. So modern RL
-runs a real serving engine to produce **rollouts**, and the serving stack
-you have spent this course learning now sits *inside* training.
+Two consequences for an SLO. TTFT as clients usually measure it — the first chunk
+with text — now times the first *thinking* token, which says nothing about what the
+user waits for. The promise has to be **time to first answer token**: TTFT plus
+thinking tokens × TPOT. And a fleet serving reasoning shifts toward decode: thousands
+of memory-bound steps per request, a KV footprint that grows *during* decode, and,
+mixed with agent prefill bursts on the same replicas, inter-token latency spikes for
+every thinking request that shares a hybrid step — which is why mixed fleets route
+the two shapes to differently tuned pools ([Disaggregated
+Serving](#/disaggregation)).
 
-That creates problems training never had. The rollout engine and the trainer
-often want the same GPUs, alternating: generate a batch, train on it, repeat.
-Engines grew **sleep/wake modes** — between phases, free the KV cache and
-optionally offload the model weights to host memory so the trainer can use
-the GPU, then *wake* and reload for the next rollout, all without tearing
-down the server.
+Two other workloads that stretch the same engines — many fine-tuned adapters over
+one base model, and reinforcement-learning rollouts generated inside a training
+loop — are the subject of [Beyond Chat](#/beyond-chat).
 
-> [!bridge] You already know this — from the Linux course
-> Freeing a process's device memory, parking its state in host RAM, and bringing
-> it back later without restarting the service is the cuda-checkpoint / CRIU
-> manoeuvre. What differs is that sleep/wake is cooperative and in-process: the
-> engine knows which of its own allocations are rebuildable (the KV cache, which
-> it simply drops) and which must survive (the weights), so it never has to
-> snapshot an address space it does not understand.
-> [→ Linux: GPU Checkpointing](../#/gpu-checkpoint)
-
-And every training step changes the weights, so the freshly-trained weights
-must be pushed back into the rollout engine before the next batch — the
-**weight-sync problem**. Do it naively (ship every parameter) and it is
-glacial: a 32B model resynced the dumb way is reported around **14 minutes
-per round**, which would dwarf the rollouts themselves. The 2025–26 systems
-send only what changed — **weight-update sparsity over peer-to-peer RDMA** —
-and hit roughly **1.3-second cross-machine updates even at 1-trillion-parameter
-scale.** That is a fun number: a thousand-billion-parameter sync in the time
-it takes to blink, because you refuse to send the parts that didn't move.
-(The 1T/1.3s figures are from frontier-lab reports and
-[research systems](https://arxiv.org/pdf/2605.07330); directionally
-established, exact numbers volatile.) This is why SGLang and vLLM both grew
-first-class RL APIs — the training frameworks needed a serving engine they
-could drive programmatically.
-
-## Multi-LoRA: thousands of models, one base
-
-One more agent-era pattern, promised back in [Anatomy of a Serving
-Engine](#/anatomy-of-an-engine). Fine-tuning a full model per customer or
-per task is absurdly expensive to serve — a separate multi-hundred-GB copy
-each. **LoRA** adapters are the cheap alternative: a small low-rank "diff"
-(often megabytes) layered onto a shared base model. The serving question is,
-can you host *thousands* of adapters over *one* base model's weights and
-switch between them per request?
-
-Two ideas, both of which you will recognize:
-
-- **S-LoRA's unified paging.** The adapters live in host RAM and page into
-  GPU on demand — out of the **same paged pool** as the KV cache blocks.
-  This is [PagedAttention](#/paged-kv-cache) eating yet another problem: the
-  block allocator doesn't care whether a block holds KV or adapter weights,
-  so a single pool absorbs both and LRU-evicts whichever is cold. Thousands
-  of adapters on one GPU.
-- **Punica's SGMV kernel.** A batch can contain requests for *different*
-  adapters. A Segmented Gather Matrix-Vector kernel applies each request's
-  own adapter within one batched GPU call, so mixing adapters costs almost
-  nothing versus serving the bare base model.
-
-In the agent era this is not a niche: per-customer, per-task, per-tool
-adapters are exactly how you specialize one base model across a fleet of
-agents without paying for a fleet of models.
-
-## The through-line of Module 5
-
-Step back across the whole module. Parallelism split the model across GPUs.
-MoE serving spread experts across a fabric. Disaggregation cut prefill from
-decode into separate pools. Tiering pushed caches down a memory hierarchy.
-Affinity routers steered requests by where cache lives. RL fleets folded
-serving into training. Multi-LoRA paged adapters beside cache blocks.
-
-Say the through-line plainly, once: **every one of these systems is
-infrastructure orbiting the KV cache.** Expert-parallel pods exist so a
-batch big enough to feed the KV cache stays GEMM-efficient. Disaggregated
-pools exist to protect the KV cache's decode bandwidth from prefill bursts.
-Tiered caches, affinity routers, sleep/wake, unified paging — all of it is
-machinery for computing the KV cache once, keeping it warm, and finding it
-again. The cache hit rate is the dial that converts all that architecture
-into dollars. Learn to see the KV cache at the center and Module 5 stops
-being a list of tricks and becomes one system with one gravity well.
-
-Watch the dial move. Set the simulator below to the **agent** workload — a long
-shared prefix that grows a little with every iteration — and then toggle prefix
-caching off and back on. TTFT p50 is this whole chapter in one meter: with the
-cache off, every iteration pays to rebuild a context the fleet already computed;
-with it on, only the newly appended tool result is prefilled.
+In the simulator, choose the **agent** workload and toggle prefix caching: TTFT p50
+moves between rebuilding the whole context every call and prefilling only the new
+tool result.
 
 <div class="inf-widget" data-widget="engine-simulator">
 <p class="inf-widget-fallback">Interactive serving-engine simulator — needs JavaScript enabled.</p>
 </div>
 
-## What to remember
+> **State of play (November 2026):** agent traffic now has a public hardware
+> benchmark: SemiAnalysis's AgentX, part of InferenceX, replays agentic traces and
+> reports tokens per dollar against P90 interactivity (its September 2026 Rubin
+> results are vendor-hardware comparisons on pre-release software). Provider cache
+> prices and lifetimes moved twice this year; recheck the pricing pages before you
+> quote one. Thinking budgets are request fields in vLLM, in Dynamo v1.6 (October)
+> and, experimentally, in TensorRT-LLM v1.3 (November).
 
-- **The workload flipped.** 2023 was chat; 2026 is agents (prefill-heavy,
-  up to 267:1 input:output, 85–95% prefill) plus reasoning models
-  (decode-heavy, 10–100× more output). One fleet serves both opposite
-  pressures.
-- **Cache hit rate is the #1 lever, ahead of model choice.** An agent
-  re-sends a growing context every iteration; prefix caching turns 30 full
-  prefills into one build-up plus small deltas. 0%→90% hit rate is roughly a
-  10× bill cut. Provider "cached input, ~10× cheaper" pricing *is* this
-  physics on your invoice.
-- **It forces three things:** cache-aware/session-affinity routing (so
-  iteration N+1 finds N's cache), KV tiering (sessions outlive HBM during
-  slow tool calls), and client-side context engineering (stable, append-only
-  prefixes to keep caches hittable). Caveat: reused KV can subtly break
-  fresh-judgment semantics in multi-agent/judge setups.
-- **Reasoning wants decode-heavy layouts** (1P3D over naive 1P1D) and is part
-  of why token deflation slowed.
-- **RL runs a serving engine inside training:** sleep/wake to share GPUs,
-  and sparse P2P-RDMA weight-sync (~14 min naive → ~1.3s at 1T scale).
-- **Multi-LoRA** hosts thousands of adapters on one base: S-LoRA pages them
-  from the same pool as KV blocks; Punica's SGMV batches different adapters
-  in one call.
-- **The whole module orbits the KV cache.** Every system is machinery to
-  compute it once, keep it warm, and find it again.
+> [!dashboard] The prefix cache as a business metric
+> **Utilisation:** token-weighted hit rate = `rate(vllm:prompt_tokens_cached_total[5m]) ÷
+> rate(vllm:prompt_tokens_total[5m])`, host-tier reloads included
+> (`vllm:prefix_cache_hits_total ÷ vllm:prefix_cache_queries_total` counts HBM alone). **Saturation:**
+> `rate(vllm:prompt_tokens_by_source_total{source="local_compute"}[5m])` against the
+> replica's prefill capacity (~11K tokens/s per FP8 replica for Halden).
+> **Errors:** none in the engine — derive it from the application's per-call log of
+> `usage.prompt_tokens_details.cached_tokens`: a second or later call of a session
+> that hits only the preamble lost its history.
 
-## Frequently asked
+> [!case] The case: phase 2 lands
+> Derived above from the case's inputs: per agent request 47K prompt tokens
+> uncached, ~17K cached; ~850 output tokens (this chapter's assumption). At the
+> peak, cached prefill is ~10.7K tokens/s (**47%** of the two replicas), uncached
+> ~26.5K (**over capacity**); decode is 675 tokens/s, TPOT ~25 ms on average and
+> ~48 ms in hybrid steps against the 60 ms promise; ~40 sessions open, ~28 of them
+> parked as evictable blocks.
+>
+> **What this settles:** the prefix-cache hit rate is a capacity metric, not a
+> nicety. It goes on the dashboard with an alert — token-weighted hit rate below 50%
+> over ten minutes ([Operating It](#/operating-it)) — because at the ~60% the case expects,
+> the node fits, and at ~3% it does not. The agent's prompt template becomes an
+> interface reviewed for cache stability (byte-stable preamble, tools in a fixed
+> order, history append-only) with a CI test (Exercise 2), and every call logs
+> `cached_tokens`. **The stake:** the TPOT margin is ~12 ms. Swapping the agent's
+> model for a reasoning model, even one with a modest thinking budget, spends it
+> (Exercise 3).
 
-<div class="faq">
+## Exercises
 
-<details>
-<summary>My provider reports a high cached-token share but my bill barely moved. Why?</summary>
+<div class="exercise">
 
-Check what fraction of your spend was input in the first place. The cache
-discount only applies to input tokens, so on a 20:1 input:output workload it is
-the dominant term, and on a reasoning workload emitting thousands of output
-tokens per short prompt it is nearly irrelevant. The second possibility is the
-physical-vs-logical gap from [The KV Fabric](#/the-kv-fabric): a prefix that
-matched but had already been evicted gets recomputed and billed as fresh input.
-
-</details>
-
-<details>
-<summary>How much does one changing token at the top of my prompt actually cost?</summary>
-
-Everything after it. Prefix caches are keyed on the hash of the token sequence,
-so a block only matches if every token before it matched too — a timestamp, a
-session id, or a randomly-ordered tool schema at position 12 invalidates all
-20,000 tokens that follow. That is the entire reason context engineering is a
-discipline: put anything volatile at the *end* of the context, where it
-invalidates nothing, and keep the head byte-stable across turns.
-
-</details>
+**Exercise 1.** A coding agent runs on a hosted API at $3 per million input tokens,
+with Anthropic's published cache multipliers: writes 1.25× (5-minute lifetime) or 2×
+(1-hour lifetime), reads 0.1×. Each call carries ~50K tokens, of which ~2K are new.
+Tool waits are spread evenly between 3 and 8 minutes. What does an average call's
+input cost with the 5-minute cache, with the 1-hour cache, and with no caching?
 
 <details>
-<summary>Agents are prefill-heavy and reasoning is decode-heavy. Do they cancel out on one fleet?</summary>
+<summary>Reveal answer</summary>
 
-In aggregate capacity, partly; in scheduling, no. The two pressures land on
-different resources — agent prefill wants FLOP/s and burns them in bursts, while
-reasoning decode wants a steady drip of HBM bandwidth for thousands of
-consecutive steps — so mixing them on one pool means every agent burst is an
-inter-token-latency spike for every reasoning request in flight. It is the same
-interference argument as [Disaggregated Serving](#/disaggregation), which is why
-mixed fleets tend to route the two shapes to differently-tuned pools rather than
-letting them average out.
+With a 5-minute lifetime refreshed on use, a wait of 3–5 minutes keeps the entry
+(2 of the 5 minutes of the spread: 40%) and a longer one loses it (60%).
+
+- Hit: read 48K × $0.30/M + write 2K × $3.75/M = $0.0144 + $0.0075 ≈ **$0.022**.
+- Miss: write all 50K × $3.75/M ≈ **$0.19**.
+- 5-minute average: `0.4 × 0.022 + 0.6 × 0.19` ≈ **$0.12** per call.
+- 1-hour: every wait fits; read 48K × $0.30/M + write 2K × $6/M ≈ **$0.026**.
+- No caching: 50K × $3/M = **$0.15**.
+
+The 5-minute cache saves only ~20% here, because most calls pay the write premium
+on the whole context; the 1-hour cache, at the higher write price, is ~4.5× cheaper
+than it. Price caching against the distribution of tool waits, not the hit rate the
+dashboard shows on fast sessions.
 
 </details>
 
 </div>
 
+<div class="exercise">
+
+**Exercise 2 — diagnosis.** After a release of the agent framework, Ask Halden's
+prefix hit rate falls from ~60% to ~3%, TTFT climbs through the morning and
+`vllm:num_requests_waiting` never drains. The release diff touches the preamble:
+
+```diff
+ def build_preamble(tools, now):
+-    head = "You are Halden's ticket agent. Follow the rules below.\n"
+-    tool_defs = sorted(tools, key=lambda t: t["name"])
++    head = f"Current time: {now:%H:%M:%S}\nYou are Halden's ticket agent. Follow the rules below.\n"
++    names = {t["name"] for t in tools}               # de-duplicate tool names
++    tool_defs = [t for n in names for t in tools if t["name"] == n]
+     return head + RULES + json.dumps(tool_defs)
+```
+
+*Real format, illustrative values — a unified diff of an invented agent template;
+the numbers are the case's (below).*
+
+Which change broke the cache, why is the residual hit rate 3% and not 0, why does
+the node fall behind, and what test do you ask for?
+
+<details>
+<summary>Reveal answer</summary>
+
+Both. The timestamp in the first block changes every second, and block hashes chain
+from position zero, so no agent call — not even a session's next call — reuses
+anything. A Python `set` of strings iterates in an order that depends on the
+process's hash seed, so the tool definitions change order between workers and
+restarts. What still hits is Q&A's 800-token system prompt: ~0.8K of the 26.5K
+prompt tokens per second, 3%. Prefill demand rises from 10.7K to ~25.7K tokens/s,
+past the two replicas' ~22.6K: the queue grows without bound. Ask for the time to
+move to the end of the context and tools in a sorted order, and for this CI test,
+which renders the preamble twice in time and in eight interpreters with different
+hash seeds:
+
+```python
+import json, os, subprocess, sys
+from datetime import datetime, timedelta
+TOOLS = [{"name": n, "parameters": {"type": "object"}}
+         for n in ("create_ticket", "update_ticket", "search_kb", "get_user")]
+
+def preamble_v2(now):                       # the release under suspicion
+    names = {t["name"] for t in TOOLS}      # a set: its order follows the hash seed
+    tools = [t for n in names for t in TOOLS if t["name"] == n]
+    return f"Current time: {now:%H:%M:%S}\nYou file Halden tickets.\n" + json.dumps(tools)
+
+def preamble_fixed(now):                    # the time moves to the end of the context
+    tools = sorted(TOOLS, key=lambda t: t["name"])
+    return "You file Halden tickets.\n" + json.dumps(tools, sort_keys=True)
+
+def render_in_child(name, seed):            # a fresh interpreter, another hash seed
+    env = dict(os.environ, PYTHONHASHSEED=str(seed))
+    return subprocess.run([sys.executable, __file__, name], env=env,
+                          capture_output=True, text=True, check=True).stdout
+T0 = datetime(2026, 11, 21, 9, 0, 0)
+if len(sys.argv) > 1:
+    print(globals()[sys.argv[1]](T0), end="")
+else:
+    for name in ("preamble_v2", "preamble_fixed"):
+        render = globals()[name]
+        same_later = render(T0) == render(T0 + timedelta(seconds=20))
+        variants = len({render_in_child(name, seed) for seed in range(8)})
+        ok = same_later and variants == 1
+        print(f"{name:15} same 20 s later: {same_later!s:5} "
+              f"distinct bytes over 8 hash seeds: {variants}  {'PASS' if ok else 'FAIL'}")
+```
+
+*Runnable — Python 3 standard library only (save it as a file: it re-runs itself);
+output shown is from an actual run with Python 3.13.*
+
+```plaintext
+preamble_v2     same 20 s later: False distinct bytes over 8 hash seeds: 6  FAIL
+preamble_fixed  same 20 s later: True  distinct bytes over 8 hash seeds: 1  PASS
+```
+
+*Runnable — output of the program above, pasted from a real run with `python3`.*
+
+Identical bytes give identical tokens, so the test needs no tokenizer. Run it on
+the real template in CI; one red line here is cheaper than one morning at 3%.
+[When It Breaks](#/when-it-breaks) (incident 2) lives that morning from the
+on-call's side, with another trigger and the same numbers.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 3 — transfer.** A team proposes replacing Halden's agent model with a
+reasoning model of the same size and memory shape, calling it with
+`thinking_token_budget: 4000` on each of the four calls. Assume it uses most of the
+budget and the rest of phase 2 is unchanged. What happens to decode demand, to
+session length and live sessions, to the KV the engine must hold, and to the latency
+promises — and what would you measure or change?
+
+<details>
+<summary>Reveal answer</summary>
+
+- **Decode demand:** each agent request writes up to `4 × 4,000 + 850 ≈ 16,850`
+  tokens instead of 850. At 0.5 requests/s that is ~8,400 tokens/s plus Q&A's 250:
+  ~8,700 on the node, ~4,300 per replica — about 13× today's 340.
+- **Session length:** 16,000 thinking tokens at even today's ~25 ms a step is 400 s
+  of decode per session: sessions grow from ~80 s to ~480 s, and Little's law takes
+  open sessions from ~40 to ~240.
+- **KV:** each running call grows by 0.66 GB as it thinks, and six times as many
+  sessions are open. At ~4,300 tokens/s per replica and a 60 ms step, ~260
+  sequences would decode at once — far past the effective knee of ~160 tokens per
+  step, so steps lengthen, and far past what a 66 GB pool holds at 10–20K tokens of
+  context each. The plan does not fit; preemption would start before the SLOs break.
+- **Latency:** TPOT can no longer be met at 60 ms, and per-call TTFT stops meaning
+  anything to the agent: its real latency is time to first answer token,
+  ~0.3 s + 4,000 × TPOT ≈ 100 s per call even at 25 ms.
+
+Measure `usage.completion_tokens_details.reasoning_tokens` on real tickets before
+deciding: if the model needs a few hundred thinking tokens, the budget is the
+control; if it needs thousands, the agent needs its own decode-heavy replicas.
+
+</details>
+
+</div>
+
+## What to remember
+
+- An agent resends its growing context every call: uncached prefill grows with the
+  square of the loop's length, cached prefill linearly — 20× apart after 30 steps.
+- Halden's phase 2 is ~47% of the node's prefill capacity at a ~60% hit rate and
+  over capacity without it; its decode is light, but its prefill chunks set TPOT.
+- `usage.prompt_tokens_details.cached_tokens` (with `--enable-prompt-tokens-details`)
+  shows every call's hit, in multiples of the block size.
+- Cache-stable prompts are an interface: stable head, sorted tools, volatile content
+  last, enforced by a test that renders the preamble twice.
+- Hosted caches discount reads 10–40× but may charge 1.25–2.5× to write and expire
+  after minutes; tool waits longer than the lifetime pay the write again.
+- Thinking tokens are output tokens: they multiply decode, KV and session length,
+  and the latency promise becomes time to first answer token.
+
 ```quiz
 [
   {
-    "q": "An agent runs 30 tool-call iterations over a ~20K-token context. Why does prefix caching cut its cost by roughly an order of magnitude?",
+    "q": "A support agent makes 6 calls per ticket. Its context starts at 5,000 tokens and grows by 2,000 tokens per call. How many prompt tokens are prefilled per ticket with no caching, and with perfect session caching?",
     "choices": [
-      "It lets the agent skip tool calls whose results are already cached",
-      "Each iteration re-sends a nearly identical growing context; without caching that is ~30 full prefills of the same tokens, and caching makes each iteration prefill only the newly appended tokens",
-      "It compresses the KV cache so it fits in HBM",
-      "It switches the agent to a smaller model after the first iteration"
+      "30,000 uncached and 5,000 cached: the context is built once",
+      "60,000 uncached and 15,000 cached: a 4× reduction",
+      "42,000 uncached and 15,000 cached: a 2.8× reduction",
+      "60,000 uncached and 12,000 cached: only the deltas are new"
     ],
     "answer": 1,
-    "explain": "Naively the agent re-prefills the whole context every loop: 30 × 20K ≈ 600K token-reads of mostly-identical content. Prefix caching keeps the shared KV and prefills only the last tool result each iteration, collapsing 600K to one build-up plus small deltas — the 10–30× reduction."
+    "explain": "Uncached: 6 × 5,000 + 2,000 × (0 + 1 + … + 5) = 30,000 + 30,000 = 60,000. Cached: the first call prefills 5,000, each later call its 2,000 new tokens: 5,000 + 5 × 2,000 = 15,000. The 12,000 choice forgets that the first call still builds the starting context; the 30,000 choice treats the context as constant."
   },
   {
-    "q": "Why must an agent-serving router be cache-aware rather than round-robin?",
+    "q": "A reasoning model streams its thinking as reasoning content, which the chat UI hides. The client logs TTFT as the first chunk with text. The dashboard shows TTFT p95 of 0.6 s while users report 40-second waits before any answer appears. What is the most likely explanation?",
     "choices": [
-      "Round-robin is slower to compute per request",
-      "A prefix-cache hit only occurs if iteration N+1 lands on the same worker holding iterations 1..N's KV; round-robin scatters iterations and destroys every cache",
-      "Round-robin cannot handle more than one model",
-      "Cache-aware routing uses less network bandwidth"
+      "The prefill of long prompts is slow, and TTFT is sampled too rarely to catch it",
+      "The stream is buffered by a proxy, so tokens arrive in one burst at the end",
+      "The engine preempts reasoning requests, so they restart from the beginning",
+      "TTFT times the first thinking token; users wait thinking × TPOT longer"
     ],
-    "answer": 1,
-    "explain": "The cache is physically on one worker's HBM/tier. Round-robin treats replicas as interchangeable and sends the next iteration anywhere, so the prefix isn't there and the prefill re-runs. Prefix/session-affinity routing steers the request to where its KV already lives."
+    "answer": 3,
+    "explain": "With thinking streamed as reasoning content, the first chunk carrying text is a thinking token, so TTFT stays at the prefill time. The user waits for the first answer token: TTFT + thinking tokens × TPOT, e.g. 0.6 s + 1,600 × 25 ms ≈ 40 s. Slow prefill would show in TTFT itself; a buffering proxy would delay the first chunk too."
   },
   {
-    "q": "How does a reasoning model's workload differ from an agent's, and what serving layout does it favor?",
+    "q": "An agent's calls log usage per call. Call 2 of a session showed cached_tokens 3,456; call 3, after a 20 s tool wait, shows cached_tokens 2,944 — just the shared preamble. The template is byte-stable in CI, routing is by session, and vllm:kv_block_idle_before_evict_seconds has a median of 8 s at the peak. What happened?",
     "choices": [
-      "Reasoning is prefill-heavy and wants more prefill pools",
-      "Reasoning is decode-heavy (long chains of thought) and favors decode-skewed layouts like 1P3D, whereas naive 1P1D disaggregation leaves prefill GPUs idle",
-      "Reasoning and agents have identical profiles",
-      "Reasoning needs no KV cache because it thinks internally"
+      "Its history was evicted during the 20 s tool wait, under pool pressure",
+      "The call landed on another replica, which only holds the preamble",
+      "The template inserted a timestamp, which changed the session's history",
+      "The 64-token block size truncated the hit back to the preamble's end"
     ],
-    "answer": 1,
-    "explain": "Reasoning emits 10–100× more output tokens, all decode (memory-bandwidth-bound). Balanced 1P1D disaggregation wastes the prefill pool and adds pure KV-transfer overhead, so reasoning wants decode-heavy ratios (1P3D) or no disaggregation — the mirror image of prefill-heavy agents."
+    "answer": 0,
+    "explain": "Blocks are being evicted after ~8 s idle, and this session sat idle 20 s, so its history was reclaimed while the always-hot preamble survived. Session routing rules out another replica; a byte-stable template rules out a timestamp, which would also break the preamble; block rounding costs at most 63 tokens, not 5,500. Add pool (FP8 KV) or a host tier."
   },
   {
-    "q": "In RL post-training, why is the weight-sync problem solved by sparse P2P-RDMA updates instead of shipping all weights?",
+    "q": "A nightly batch sends 10,000 different 20,000-token documents to a hosted API, each exactly once, and the team turns on prompt caching at a provider that charges 1.25× the input price for cache writes and 0.1× for reads. What happens to the input bill?",
     "choices": [
-      "RDMA can only transfer sparse tensors",
-      "Every training step changes the weights the rollout engine must use next; sending all of a large model each round is glacial (~14 min for 32B), so systems send only the parameters that changed",
-      "The trainer and rollout engine never share weights",
-      "Sparse updates improve model accuracy"
+      "It falls about 10×, since every cached token is read at 0.1×",
+      "It is unchanged, because the provider bills only cache reads, not writes",
+      "It rises 25%: every token is written at 1.25×, and none is read",
+      "It falls about 2×, because half the documents share a common prefix"
     ],
-    "answer": 1,
-    "explain": "RL alternates generate-and-train on the same weights, so fresh weights must reach the rollout engine before each batch. Naive full sync (~14 min for 32B) would dwarf the rollouts; exploiting weight-update sparsity over P2P RDMA hits ~1.3s updates even at 1T scale."
+    "answer": 2,
+    "explain": "Caching pays only when a prefix is read again. Each document is sent once, so every token is written at 1.25× and never read: the bill rises by a quarter. Enable caching for prefixes you will reuse within the entry's lifetime, such as an agent's preamble, not for one-shot documents."
   },
   {
-    "q": "What is S-LoRA's core trick for hosting thousands of adapters on one base model?",
+    "q": "On vLLM v0.34 with default block settings, an agent's call 5 has a 10,000-token prompt; call 4's prompt was 7,050 tokens, and the template re-renders call 4's output differently from how the model wrote it. What is the most cached_tokens call 5 can report?",
     "choices": [
-      "It merges all adapters into the base weights ahead of time",
-      "Adapters page into GPU on demand from the same paged pool as the KV cache, so one allocator manages both and LRU-evicts whichever is cold",
-      "It runs one GPU process per adapter",
-      "It quantizes every adapter to 1 bit"
+      "7,050 tokens, the whole of call 4's prompt",
+      "6,976 tokens, one full block short of call 4's prompt",
+      "7,049 tokens, all but the logits token",
+      "7,040 tokens, the prompt in whole 64-token blocks"
     ],
-    "answer": 1,
-    "explain": "Unified paging reuses the PagedAttention block allocator: a block can hold KV or adapter weights, adapters live in host RAM and page in when needed, and the shared pool with LRU eviction lets thousands of adapters coexist on one GPU. Punica's SGMV kernel then batches different adapters in a single call."
+    "answer": 3,
+    "explain": "Hits land on full blocks: 7,050 ÷ 64 = 110 full blocks = 7,040 tokens; the last 10 tokens share a block with call 4's re-rendered output, which differs, so that block's hash differs. The 'all but one token' rule applies when a request's whole prompt is cached, which is not the case here."
   }
 ]
 ```

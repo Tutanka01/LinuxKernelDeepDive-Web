@@ -40,29 +40,70 @@ function scanLines(md) {
   return out;
 }
 
-/* All fenced blocks as { info, body, startLine } (1-based startLine of the
-   opening fence). */
-function fencedBlocks(md) {
+/* Strip up to `max` blockquote markers ("> ", ">") from the front of a line.
+   Returns { depth, rest }: how many markers were removed and what remains.
+   CommonMark allows up to three spaces before a marker and eats one optional
+   space after it; that is all that is modelled here. */
+function stripQuotes(line, max = Infinity) {
+  let depth = 0, rest = line;
+  while (depth < max) {
+    const m = /^\s{0,3}>\s?/.exec(rest);
+    if (!m) break;
+    rest = rest.slice(m[0].length);
+    depth++;
+  }
+  return { depth, rest };
+}
+
+/* All fenced blocks as { info, body, startLine, endLine, quoteDepth }
+   (1-based line numbers of the opening and closing fence).
+
+   By default only top-level fences are seen — a fence written inside a
+   blockquote ("> ```bash") is ordinary quoted text, which is what the quiz,
+   mermaid and link scanners have always assumed. Pass { blockquotes: true }
+   to also find fences nested in blockquotes: the quote markers are stripped
+   (`body` is the code as the reader sees it), `quoteDepth` says how deep the
+   fence sits, and a fence whose blockquote ends before its closing marker is
+   closed there, as a Markdown renderer closes it (`closedByContainer`). */
+function fencedBlocks(md, opts = {}) {
+  const quotes = !!opts.blockquotes;
   const blocks = [];
   let cur = null, fence = null;
   const lines = md.split("\n");
-  lines.forEach((line, i) => {
-    const m = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  const FENCE = /^\s{0,3}(`{3,}|~{3,})(.*)$/;
+  lines.forEach((raw, i) => {
     if (fence) {
-      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !m[2].trim()) {
-        blocks.push(cur);
-        cur = null; fence = null;
+      let line = raw;
+      if (quotes && cur.quoteDepth) {
+        const q = stripQuotes(raw, cur.quoteDepth);
+        if (q.depth < cur.quoteDepth) {
+          /* the blockquote ended under the fence: the fence ends with it */
+          blocks.push({ ...cur, endLine: i, closedByContainer: true });
+          cur = null; fence = null;
+          /* …and this line is read afresh below */
+        } else {
+          line = q.rest;
+        }
+      }
+      if (fence) {
+        const m = FENCE.exec(line);
+        if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !m[2].trim()) {
+          blocks.push({ ...cur, endLine: i + 1 });
+          cur = null; fence = null;
+          return;
+        }
+        cur.body.push(line);
         return;
       }
-      cur.body.push(line);
-      return;
     }
+    const q = quotes ? stripQuotes(raw) : { depth: 0, rest: raw };
+    const m = FENCE.exec(q.rest);
     if (m) {
       fence = m[1];
-      cur = { info: m[2].trim(), body: [], startLine: i + 1 };
+      cur = { info: m[2].trim(), body: [], startLine: i + 1, quoteDepth: q.depth };
     }
   });
-  if (cur) blocks.push({ ...cur, unterminated: true });
+  if (cur) blocks.push({ ...cur, endLine: lines.length, unterminated: true });
   return blocks.map(b => ({ ...b, body: b.body.join("\n") }));
 }
 
@@ -148,4 +189,4 @@ function links(md) {
   return out;
 }
 
-module.exports = { scanLines, fencedBlocks, proseLines, headings, headingIds, links, inlineText };
+module.exports = { scanLines, fencedBlocks, stripQuotes, proseLines, headings, headingIds, links, inlineText };

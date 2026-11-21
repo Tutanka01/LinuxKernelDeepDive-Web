@@ -1,3 +1,5 @@
+> **Superseded (2026-10-19) by [`STYLE-v2.md`](STYLE-v2.md).** Kept for history: v1 produced the first draft of the course. New and revised chapters follow v2, enforced by `tests/tier1/inference-pedagogy.test.js`.
+
 # Inference Engineering course — chapter style contract
 
 Every chapter agent MUST follow this contract exactly. Read `distributed/content/raft.md` and `distributed/content/what-is-a-distributed-system.md` first to absorb the house voice.

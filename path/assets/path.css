@@ -24,12 +24,13 @@
    body size, sitting between the phase heading and its chapters the way a
    chapter's opening paragraph sits under its title. */
 .phase-thesis {
+  max-width: var(--prose);
   margin: 0 0 1.4rem;
   color: var(--text-dim);
   line-height: 1.7;
 }
 
-.phase-count { font-style: normal; font-family: var(--mono); font-size: 0.78em; }
+.phase-count { font-variant-numeric: tabular-nums; }
 
 /* ---------- the deliverable ----------
 
@@ -45,15 +46,15 @@
   margin: 1.1rem 0 0;
   padding: 1.15rem 1.35rem;
   border: 1px solid var(--rule-mid);
-  border-left: 2px solid var(--accent-dim);
-  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--bg-raised);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .phase.is-delivered .deliverable {
-  border-left-color: var(--accent);
-  background: var(--accent-soft);
+  border-left-color: var(--c-green);
+  background: var(--c-green-soft);
 }
 
 /* The tick is the same circle as a chapter card's .card-check, because it
@@ -88,8 +89,8 @@
 .deliverable-tick:hover::before { border-color: var(--accent); }
 
 .deliverable-tick[aria-pressed="true"]::before {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--c-green);
+  background: var(--c-green);
 }
 
 /* the checkmark, drawn the way .card-check draws it on a done chapter */
@@ -107,13 +108,10 @@
 }
 
 .deliverable-label {
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.15rem;
   color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-small);
+  font-weight: 650;
 }
 
 .deliverable-title {
@@ -134,14 +132,12 @@
 /* ---------- a step ----------
 
    Every card on this page leaves for another course, which the card's second
-   line names. On a course home that line is the chapter's description, so it
-   is set in italic prose; here it is a label, and reads better as one. */
+   line names. On a course home that line is the chapter's description;
+   here it is a label, so it is set smaller and quieter. */
 .chapter-grid .card-desc {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  font-style: normal;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 /* The step number is a coordinate (phase.step), not a running count, so it
@@ -151,7 +147,7 @@
 /* ---------- what the track leaves out ---------- */
 
 .track-omits { margin-top: 3rem; }
-.track-omits .module-index { color: var(--rule-strong); }
+.track-omits .module-index { color: var(--text-faint); }
 
 @media (max-width: 600px) {
   .deliverable {

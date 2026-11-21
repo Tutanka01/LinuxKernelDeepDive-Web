@@ -74,6 +74,27 @@ test("every load-bearing widget placeholder carries a no-JS fallback", () => {
   noProblems(problems, "widget without a fallback");
 });
 
+/* Not every placeholder is authored in markdown: inf-review.js injects the
+   chapter warm-up (`data-widget="review"`, `data-mode="warmup"`) after the
+   render, because the chapters are rewritten independently of it. A rename on
+   either side would leave every chapter with an empty slot and no fallback. */
+test("every placeholder a widget script injects names a registered widget", () => {
+  const defined = definedWidgets();
+  const problems = [];
+  for (const f of widgetSources()) {
+    read(f).split("\n").forEach((line, i) => {
+      for (const m of line.matchAll(/\.dataset\.widget\s*=\s*["']([^"']+)["']/g)) {
+        if (!defined.has(m[1])) {
+          problems.push(`${f}:${i + 1} injects a "${m[1]}" placeholder, which no inf-*.js registers`);
+        }
+      }
+    });
+  }
+  /* the review deck is both authored (content/review.md) and injected */
+  if (!defined.has("review")) problems.push(`no inf-*.js registers the "review" widget`);
+  noProblems(problems, "injected widget");
+});
+
 test("every widget script the inference shell needs is loaded by it", () => {
   const html = read("inference/index.html");
   const problems = widgetSources()

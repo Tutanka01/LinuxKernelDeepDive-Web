@@ -25,6 +25,13 @@
    in the shared engine had to change to make this work, and if
    this file fails to load the chapters still read correctly —
    they just show the fallback line instead of the tool.
+
+   The same rescan also decorates plain Markdown that needs more than
+   marked gives it: [!kind] callouts (including the v3 [!dashboard]
+   row), the provenance caption under a real artifact, a lab's
+   "Not executed by the author." banner, and the glossary's
+   self-test toggle. Each decorator is idempotent and leaves the
+   Markdown readable if this file never loads.
    ============================================================ */
 
 (function () {
@@ -56,22 +63,30 @@
       return document.documentElement.dataset.theme === "paper" ? "paper" : "dark";
     },
 
-    /* The palette the diagrams use, resolved for the live theme.
-       Keep in sync with the .svg diagram ground in inf.css. */
+    /* The palette the canvas widgets draw with, resolved for the live
+       theme. A canvas cannot inherit a custom property, so this reads the
+       stylesheet's tokens at draw time instead of keeping a copy of them:
+       a copy is a palette that eventually disagrees with the page. The
+       literals are only a fallback for a page without style.css. */
     palette() {
       const paper = InfWidgets.theme() === "paper";
+      const cs = getComputedStyle(document.documentElement);
+      const tok = (name, dark, light) => (cs.getPropertyValue(name).trim() || (paper ? light : dark));
       return {
-        bg:      paper ? "#f1ebdd" : "#1e1b16",
-        panel:   paper ? "#e7dfcc" : "#14110d",
-        rule:    paper ? "#ddd3bd" : "#2c2720",
-        ink:     paper ? "#221c12" : "#f0e8d8",
-        text:    paper ? "#383022" : "#d4cbb7",
-        dim:     paper ? "#6b6250" : "#978d7c",
-        faint:   paper ? "#877d68" : "#6d6456",
-        accent:  paper ? "#8f5d1a" : "#d9a05b",
-        good:    paper ? "#4f7d2c" : "#9fbf7f",
-        warn:    paper ? "#a4462e" : "#d98a7a",
-        cool:    paper ? "#2f6d7d" : "#7fb8c4",
+        bg:      tok("--bg-raised",   "#181c22", "#ffffff"),
+        panel:   tok("--bg-code",     "#0e1115", "#f0f2f5"),
+        rule:    tok("--rule-mid",    "#2f353f", "#d3d8df"),
+        ink:     tok("--ink",         "#f1f3f6", "#14171c"),
+        text:    tok("--text",        "#d2d7de", "#262b33"),
+        dim:     tok("--text-dim",    "#9aa3af", "#555d68"),
+        faint:   tok("--text-faint",  "#87909c", "#626a75"),
+        accent:  tok("--accent",      "#8fb1ff", "#2747c9"),
+        good:    tok("--c-green",     "#7ccf98", "#1a7040"),
+        warn:    tok("--c-red",       "#ff8f87", "#b42318"),
+        amber:   tok("--c-amber",     "#e5b562", "#8d5400"),
+        cool:    tok("--c-teal",      "#5fc6c4", "#0b6e75"),
+        sans:    tok("--sans",        "system-ui, sans-serif", "system-ui, sans-serif"),
+        mono:    tok("--mono",        "ui-monospace, monospace", "ui-monospace, monospace"),
       };
     },
 
@@ -189,6 +204,9 @@
     });
 
     decorateCallouts(view);
+    decorateProvenance(view);
+    decorateLabBanners(view);
+    mountGlossarySelfTest(view);
   }
 
   /* ---------------- callouts ----------------
@@ -200,10 +218,15 @@
      emphasis inside a callout all still render. */
 
   const CALLOUTS = {
-    bridge: "You already know this",
-    prereq: "Prerequisite",
-    trap:   "Common trap",
-    note:   "Note",
+    bridge:  "You already know this",
+    prereq:  "Prerequisite",
+    trap:    "Common trap",
+    note:    "Note",
+    predict: "Predict first",
+    case:    "The case",
+    /* STYLE-v3: the chapter's row of the serving USE grid — a small
+       utilisation / saturation / errors table of real metric names. */
+    dashboard: "On the dashboard",
   };
 
   function decorateCallouts(root) {
@@ -231,6 +254,194 @@
       title.className = "inf-callout-title";
       title.textContent = (m[2] || "").trim() || CALLOUTS[kind];
       bq.insertBefore(title, bq.firstChild);
+
+      /* A dashboard row is a table of metric names, which at 320px cannot
+         hold three columns of `vllm:kv_cache_usage_perc`-length cells. Give
+         every cell its column header as a data-label, so the stylesheet can
+         stack each row into labelled lines on a phone. */
+      if (kind === "dashboard") {
+        bq.querySelectorAll("table").forEach(table => {
+          const heads = [...table.querySelectorAll("thead th")].map(th => (th.textContent || "").trim());
+          table.querySelectorAll("tbody tr").forEach(tr => {
+            [...tr.children].forEach((cell, i) => {
+              if (heads[i]) cell.dataset.label = heads[i];
+            });
+          });
+          /* `vllm:num_requests_waiting` should wrap at its separators,
+             not mid-word: offer a break after every ":" and "_". */
+          table.querySelectorAll("td code").forEach(code => {
+            if (code.children.length || !/[:_]/.test(code.textContent)) return;
+            const parts = code.textContent.split(/(?<=[:_])/);
+            code.textContent = "";
+            parts.forEach((part, i) => {
+              if (i) code.appendChild(document.createElement("wbr"));
+              code.appendChild(document.createTextNode(part));
+            });
+          });
+        });
+      }
+    });
+  }
+
+  /* ---------------- provenance captions ----------------
+     STYLE-v3: every real artifact (a fenced block of source, config, log or
+     metrics) is followed by one italic line saying where it came from:
+
+       *Verbatim — vLLM v0.34.0, `vllm/v1/metrics/loggers.py`.*
+
+     marked renders that as a <p><em>…</em></p> after the <pre>. Here it is
+     tied to its block — small, dim, tight under it — so it reads as the
+     block's caption and not as one more paragraph. The label word is kept
+     in its own span so the three kinds stay distinguishable at a glance. */
+
+  const PROVENANCE = [
+    { label: "Verbatim",                         kind: "verbatim" },
+    { label: "Real format, illustrative values", kind: "illustrative" },
+    { label: "Runnable",                         kind: "runnable" },
+  ];
+
+  function provenanceOf(p) {
+    const text = (p.textContent || "").trim();
+    return PROVENANCE.find(k => text.startsWith(k.label + " —")) || null;
+  }
+
+  function decorateProvenance(root) {
+    root.querySelectorAll(".article-body pre").forEach(pre => {
+      /* a future wrapper (copy button, scroller) must not break the pairing */
+      const parent = pre.parentElement;
+      const anchor = parent && parent.tagName === "DIV" && parent.children.length === 1 &&
+        !parent.matches(".article-body, .exercise, .inf-widget") ? parent : pre;
+      const p = anchor.nextElementSibling;
+      if (!p || p.tagName !== "P" || p.classList.contains("inf-provenance")) return;
+      const kind = provenanceOf(p);
+      if (!kind) return;
+
+      p.classList.add("inf-provenance", "inf-provenance-" + kind.kind);
+      anchor.classList.add("inf-has-provenance");
+
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node && !node.nodeValue.trim()) node = walker.nextNode();
+      if (!node) return;
+      const lead = node.nodeValue.length - node.nodeValue.replace(/^\s+/, "").length;
+      if (node.nodeValue.slice(lead, lead + kind.label.length) !== kind.label) return;
+      const labelNode = lead ? node.splitText(lead) : node;
+      labelNode.splitText(kind.label.length);
+      const span = document.createElement("span");
+      span.className = "inf-provenance-kind";
+      labelNode.replaceWith(span);
+      span.appendChild(labelNode);
+    });
+  }
+
+  /* ---------------- lab banner ----------------
+     A lab opens with "> **Not executed by the author.** …": the commands
+     come from a pinned tool version, and the expected results are shapes,
+     not measurements. It gets its own sober frame so it is never mistaken
+     for an aside. */
+
+  const LAB_BANNER = "Not executed by the author.";
+
+  function decorateLabBanners(root) {
+    root.querySelectorAll(".article-body blockquote").forEach(bq => {
+      if (bq.classList.contains("inf-lab-banner") || bq.classList.contains("inf-callout")) return;
+      const strong = bq.querySelector("strong");
+      if (!strong || (strong.textContent || "").trim() !== LAB_BANNER) return;
+      bq.classList.add("inf-lab-banner");
+      bq.setAttribute("role", "note");
+    });
+  }
+
+  /* ---------------- glossary self-test ----------------
+     The glossary is a <dl class="glossary"> of <dt>/<dd> pairs. On that page
+     only, a toggle turns it into flash cards: every definition hidden, each
+     term a button that reveals its own. Nothing is persisted — a reload is
+     a fresh test, which is what a self-test should be. */
+
+  function onGlossaryRoute() {
+    return /^#\/glossary(?:$|[@?/])/.test(location.hash || "");
+  }
+
+  function definitionsOf(dt) {
+    const out = [];
+    for (let n = dt.nextElementSibling; n && n.tagName === "DD"; n = n.nextElementSibling) out.push(n);
+    return out;
+  }
+
+  function mountGlossarySelfTest(root) {
+    const lists = [...root.querySelectorAll(".article-body dl.glossary")];
+    if (!lists.length || !onGlossaryRoute()) return;
+    if (root.querySelector(".inf-gloss-selftest")) return;
+
+    const bar = document.createElement("div");
+    bar.className = "inf-gloss-selftest";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Glossary self-test");
+    bar.innerHTML =
+      '<button type="button" class="inf-btn inf-gloss-toggle" aria-pressed="false">Self-test: hide definitions</button>' +
+      '<button type="button" class="inf-btn inf-gloss-showall" hidden>Show all</button>' +
+      '<span class="inf-gloss-status" role="status" aria-live="polite"></span>';
+    lists[0].parentNode.insertBefore(bar, lists[0]);
+
+    const toggle = bar.querySelector(".inf-gloss-toggle");
+    const showAll = bar.querySelector(".inf-gloss-showall");
+    const status = bar.querySelector(".inf-gloss-status");
+    let seq = 0;
+
+    const terms = () => lists.flatMap(dl => [...dl.querySelectorAll(":scope > dt, :scope > div > dt")]);
+
+    function count() {
+      const btns = [...bar.parentNode.querySelectorAll(".inf-gloss-term")];
+      const open = btns.filter(b => b.getAttribute("aria-expanded") === "true").length;
+      status.textContent = btns.length ? open + " of " + btns.length + " revealed" : "";
+    }
+
+    function setOpen(btn, open) {
+      btn.setAttribute("aria-expanded", String(open));
+      definitionsOf(btn.closest("dt")).forEach(dd => { dd.hidden = !open; });
+    }
+
+    function enable() {
+      terms().forEach(dt => {
+        if (dt.querySelector(".inf-gloss-term")) return;
+        const dds = definitionsOf(dt);
+        if (!dds.length) return;
+        const ids = dds.map(dd => dd.id || (dd.id = "inf-gloss-def-" + (++seq)));
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "inf-gloss-term";
+        btn.setAttribute("aria-controls", ids.join(" "));
+        while (dt.firstChild) btn.appendChild(dt.firstChild);
+        dt.appendChild(btn);
+        btn.addEventListener("click", () => {
+          setOpen(btn, btn.getAttribute("aria-expanded") !== "true");
+          count();
+        });
+        setOpen(btn, false);
+      });
+      toggle.setAttribute("aria-pressed", "true");
+      showAll.hidden = false;
+      count();
+    }
+
+    function disable() {
+      bar.parentNode.querySelectorAll(".inf-gloss-term").forEach(btn => {
+        const dt = btn.parentNode;
+        setOpen(btn, true);
+        while (btn.firstChild) dt.insertBefore(btn.firstChild, btn);
+        btn.remove();
+      });
+      toggle.setAttribute("aria-pressed", "false");
+      showAll.hidden = true;
+      status.textContent = "";
+    }
+
+    toggle.addEventListener("click", () => {
+      if (toggle.getAttribute("aria-pressed") === "true") disable(); else enable();
+    });
+    showAll.addEventListener("click", () => {
+      bar.parentNode.querySelectorAll(".inf-gloss-term").forEach(btn => setOpen(btn, true));
+      count();
     });
   }
 

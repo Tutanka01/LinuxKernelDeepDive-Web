@@ -124,9 +124,10 @@ test("every shell offers the same way to every course, and to the track", () => 
     /* the landing is "#/" on the root shell and "../" from a sub-directory;
        the chip-all class is what all four have in common */
     [/chip-all/, "the platform landing"],
-    [/href="(\.\.\/)?#\/course"|chip-title">The Linux Deep Dive/, "the Linux course"],
-    [/href="(\.\.\/)?distributed\/"|chip-title">Distributed Systems/, "the distributed course"],
-    [/href="(\.\.\/)?inference\/"|chip-title">Inference Engineering/, "the inference course"],
+    /* a link to it, or — on its own shell — the current chip naming it */
+    [/href="(\.\.\/)?#\/course"|data-course="linux"/, "the Linux course"],
+    [/href="(\.\.\/)?distributed\/"|data-course="distributed"/, "the distributed course"],
+    [/href="(\.\.\/)?inference\/"|data-course="inference"/, "the inference course"],
     [/chip-track/, "the GPU–Kernel Track"],
   ];
   for (const shell of SHELLS) {

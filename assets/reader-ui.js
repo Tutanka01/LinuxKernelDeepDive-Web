@@ -178,7 +178,7 @@
         open.href = src;
         open.target = "_blank";
         open.rel = "noopener";
-        open.textContent = "open full size ↗";
+        open.textContent = "Open full size";
         wrap.after(open);
       }
     });
@@ -285,19 +285,59 @@
   function mermaidConfig(theme) {
     return {
       startOnLoad: false,
-      theme: theme === "paper" ? "neutral" : "dark",
+      theme: "base",
       themeVariables: {
-        background: token("--bg"),
-        /* the inline-code chip: the one surface the design system defines
-           as reading raised above the page in both themes */
+        darkMode: theme !== "paper",
+        background: token("--bg-raised"),
+        /* nodes sit on the inline-code chip: the one surface the design
+           system defines as reading raised above the page in both themes */
         primaryColor: token("--bg-inline"),
-        primaryTextColor: token("--text"),
-        primaryBorderColor: token("--accent-dim"),
+        primaryTextColor: token("--ink"),
+        primaryBorderColor: token("--rule-strong"),
+        secondaryColor: token("--accent-soft"),
+        secondaryTextColor: token("--ink"),
+        secondaryBorderColor: token("--accent-dim"),
+        tertiaryColor: token("--bg-raised"),
+        tertiaryTextColor: token("--text"),
+        tertiaryBorderColor: token("--rule-mid"),
         lineColor: token("--text-faint"),
-        fontFamily: token("--mono"),
-        fontSize: "14px",
+        textColor: token("--text"),
+        mainBkg: token("--bg-inline"),
+        nodeBorder: token("--rule-strong"),
+        clusterBkg: token("--bg"),
+        clusterBorder: token("--rule-mid"),
+        titleColor: token("--ink"),
+        edgeLabelBackground: token("--bg-raised"),
+        noteBkgColor: token("--c-amber-soft"),
+        noteTextColor: token("--text"),
+        noteBorderColor: token("--c-amber"),
+        actorBkg: token("--bg-inline"),
+        actorBorder: token("--rule-strong"),
+        actorTextColor: token("--ink"),
+        actorLineColor: token("--rule-strong"),
+        signalColor: token("--text"),
+        signalTextColor: token("--text"),
+        labelBoxBkgColor: token("--bg-inline"),
+        labelBoxBorderColor: token("--rule-strong"),
+        labelTextColor: token("--ink"),
+        loopTextColor: token("--text"),
+        activationBkgColor: token("--accent-soft"),
+        activationBorderColor: token("--accent-dim"),
+        sequenceNumberColor: token("--on-accent"),
+        /* labels are words, so they take the text face; Mermaid measures
+           them at render time, which is why rendering waits for fonts */
+        fontFamily: token("--sans"),
+        fontSize: "15px",
       },
     };
+  }
+
+  /* Mermaid sizes every label box from a text measurement taken when it
+     renders. Measured in the fallback face, a label is clipped once the
+     webfont lands, so wait for the fonts (bounded, in case one never loads). */
+  function fontsReady() {
+    if (!document.fonts || !document.fonts.ready) return Promise.resolve();
+    return Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 1500))]);
   }
 
   /* The theme the engine last asked for. Kept even when nothing is loaded,
@@ -344,10 +384,11 @@
     const nodes = [...root.querySelectorAll("pre.mermaid")];
     if (!nodes.length) return Promise.resolve();     // nothing to draw, nothing to download
 
-    return loadMermaid().then(mermaid => {
+    return Promise.all([loadMermaid(), fontsReady()]).then(([mermaid]) => {
       mermaid.initialize(mermaidConfig(themeNow()));
       return mermaid.run({ nodes });
     }).then(() => {
+      holdLegibleScale(nodes);
       /* the diagram is usually the widest thing on the page and only exists
          now: re-measure so its frame becomes a reachable scroll region */
       refreshScrollables(root);
@@ -355,6 +396,22 @@
       /* the source text is still in the <pre>, so the chapter degrades to a
          readable diagram definition rather than a blank box */
       console.warn("Mermaid:", err.message);
+    });
+  }
+
+  /* A wide sequence diagram was squeezed into the column at half size or
+     less, so its 15px labels landed near 7px. Never draw a diagram below
+     80% of its own size (62% on a phone): past that point it keeps its size and its frame
+     scrolls, the same contract as the code blocks and tables. */
+  function holdLegibleScale(nodes) {
+    nodes.forEach(pre => {
+      const svg = pre.querySelector("svg");
+      const vb = svg && svg.viewBox && svg.viewBox.baseVal;
+      if (!vb || !vb.width) return;
+      /* a phone gets a lower floor: 80% of a 1,300px sequence diagram is
+         three screens of sideways scrolling there */
+      const floor = Math.round(vb.width * (window.innerWidth <= 600 ? 0.62 : 0.8));
+      svg.style.minWidth = floor > pre.clientWidth ? floor + "px" : "";
     });
   }
 
@@ -372,7 +429,7 @@
       pre.textContent = pre.dataset.src;
     });
     Promise.resolve(window.mermaid.run({ nodes }))
-      .then(() => { if (scrollRoot) refreshScrollables(scrollRoot); })
+      .then(() => { holdLegibleScale(nodes); if (scrollRoot) refreshScrollables(scrollRoot); })
       .catch(err => console.warn("Mermaid:", err.message));
   }
 
@@ -388,7 +445,7 @@
     const details = document.createElement("details");
     details.className = "page-toc-inline";
     details.innerHTML =
-      `<summary>On this page — ${headings.length} sections</summary><ul>` +
+      `<summary>On this page (${headings.length} sections)</summary><ul>` +
       headings.map(h =>
         `<li class="lvl-${h.tagName === "H2" ? 2 : 3}">` +
         `<a href="#/${slug}@${h.id}">${h.textContent.replace(/¶$/, "")}</a></li>`

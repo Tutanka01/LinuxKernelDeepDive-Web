@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif">
+<title>Naive attention vs. FlashAttention dataflow</title>
+<desc>Two panels compare where the attention score matrix lives. Left: naive attention materializes the full N-by-N score matrix S and the softmax weights P in HBM, round-tripping them four times (write S, read S, write P, read P) for roughly 8 GiB of traffic per head per layer at 32K context — attention is IO-bound. Right: FlashAttention streams Q, K, V into SRAM tile by tile, computes scores and runs online softmax entirely on-chip, and never writes S or P to HBM: Q and O cross the boundary once, while K and V are streamed once per query tile (and mostly served from the L2 cache). The traffic grows with N times d per pass instead of N squared, for the same output up to floating-point summation order.</desc>
+<rect width="880" height="460" rx="8" fill="#ffffff"/>
+<text x="24" y="34" font-size="17" font-weight="600" fill="#14171c">Where does the score matrix live?</text>
+
+<line x1="440" y1="54" x2="440" y2="440" stroke="#d3d8df" stroke-width="1"/>
+
+<!-- LEFT: naive -->
+<text x="24" y="64" font-size="14" font-weight="600" fill="#14171c">Naive: S round-trips through HBM four times</text>
+
+<rect x="24" y="84" width="392" height="96" fill="#f0f2f5" stroke="#d3d8df"/>
+<text x="32" y="98" font-size="11" fill="#555d68">HBM (slow, large)</text>
+
+<rect x="40" y="108" width="70" height="22" fill="#ffffff" stroke="#14171c"/>
+<text x="75" y="123" font-size="12" text-anchor="middle" fill="#14171c">Q, K</text>
+<rect x="300" y="108" width="50" height="22" fill="#ffffff" stroke="#14171c"/>
+<text x="325" y="123" font-size="12" text-anchor="middle" fill="#14171c">V</text>
+
+<rect x="120" y="142" width="90" height="22" fill="#b42318" fill-opacity="0.18" stroke="#b42318"/>
+<text x="165" y="157" font-size="11" text-anchor="middle" fill="#14171c">S (N&#215;N)</text>
+<rect x="230" y="142" width="90" height="22" fill="#b42318" fill-opacity="0.18" stroke="#b42318"/>
+<text x="275" y="157" font-size="11" text-anchor="middle" fill="#14171c">P (N&#215;N)</text>
+
+<line x1="24" y1="180" x2="416" y2="180" stroke="#14171c" stroke-width="2.5"/>
+<text x="220" y="193" font-size="10" text-anchor="middle" fill="#555d68">HBM / SRAM boundary</text>
+
+<g font-size="9" fill="#14171c">
+  <circle cx="60" cy="180" r="8" fill="#626a75" fill-opacity="0.4" stroke="#626a75"/>
+  <text x="60" y="167" text-anchor="middle">1</text>
+  <circle cx="130" cy="180" r="8" fill="#b42318" fill-opacity="0.5" stroke="#b42318"/>
+  <text x="130" y="167" text-anchor="middle" fill="#b42318">2</text>
+  <circle cx="190" cy="180" r="8" fill="#b42318" fill-opacity="0.5" stroke="#b42318"/>
+  <text x="190" y="167" text-anchor="middle" fill="#b42318">3</text>
+  <circle cx="250" cy="180" r="8" fill="#b42318" fill-opacity="0.5" stroke="#b42318"/>
+  <text x="250" y="167" text-anchor="middle" fill="#b42318">4</text>
+  <circle cx="310" cy="180" r="8" fill="#b42318" fill-opacity="0.5" stroke="#b42318"/>
+  <text x="310" y="167" text-anchor="middle" fill="#b42318">5</text>
+  <circle cx="370" cy="180" r="8" fill="#626a75" fill-opacity="0.4" stroke="#626a75"/>
+  <text x="370" y="167" text-anchor="middle">6</text>
+</g>
+
+<rect x="24" y="200" width="392" height="100" fill="none" stroke="#d3d8df" stroke-dasharray="4,3"/>
+<text x="32" y="214" font-size="11" fill="#555d68">SRAM (tiny, fast) &#8212; S, P exist only as transient tiles here</text>
+<text x="32" y="234" font-size="10" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" fill="#14171c">1 read Q,K &#183; 2 write S &#183; 3 read S &#183; 4 write P &#183; 5 read P,V &#183; 6 write O</text>
+<text x="32" y="254" font-size="10" fill="#626a75">(2, 3, 4, 5 are all full N&#215;N passes through HBM)</text>
+
+<rect x="24" y="310" width="392" height="50" fill="#b42318" fill-opacity="0.14" stroke="#b42318"/>
+<text x="220" y="330" font-size="12" font-weight="600" text-anchor="middle" fill="#14171c">~8 GiB HBM traffic per head, per layer</text>
+<text x="220" y="348" font-size="9" text-anchor="middle" fill="#555d68">(four round trips of the N&#215;N matrix &#8212; attention is IO-bound, not compute-bound)</text>
+
+<!-- RIGHT: FlashAttention -->
+<text x="456" y="64" font-size="14" font-weight="600" fill="#14171c">FlashAttention: S never touches HBM</text>
+
+<rect x="456" y="84" width="392" height="96" fill="#f0f2f5" stroke="#d3d8df"/>
+<text x="464" y="98" font-size="11" fill="#555d68">HBM (slow, large)</text>
+
+<rect x="472" y="108" width="110" height="22" fill="#ffffff" stroke="#14171c"/>
+<text x="527" y="123" font-size="12" text-anchor="middle" fill="#14171c">Q, K, V (tiles)</text>
+<rect x="780" y="108" width="50" height="22" fill="#ffffff" stroke="#14171c"/>
+<text x="805" y="123" font-size="12" text-anchor="middle" fill="#14171c">O</text>
+
+<rect x="580" y="142" width="140" height="22" fill="none" stroke="#b42318" stroke-dasharray="3,3" opacity="0.5"/>
+<text x="650" y="157" font-size="11" text-anchor="middle" fill="#b42318" opacity="0.7">S, P &#8212; never materialize</text>
+
+<line x1="456" y1="180" x2="848" y2="180" stroke="#14171c" stroke-width="2.5"/>
+<text x="652" y="193" font-size="10" text-anchor="middle" fill="#555d68">HBM / SRAM boundary</text>
+
+<circle cx="520" cy="180" r="8" fill="#0b6e75" fill-opacity="0.4" stroke="#0b6e75"/>
+<text x="520" y="167" font-size="9" text-anchor="middle" fill="#0b6e75">&#8635;</text>
+<text x="536" y="171" font-size="9" fill="#0b6e75">stream tiles (repeated)</text>
+<circle cx="800" cy="180" r="8" fill="#626a75" fill-opacity="0.4" stroke="#626a75"/>
+<text x="800" y="167" font-size="9" text-anchor="middle">1</text>
+
+<rect x="456" y="200" width="392" height="100" fill="none" stroke="#d3d8df" stroke-dasharray="4,3"/>
+<text x="464" y="214" font-size="11" fill="#555d68">SRAM (tiny, fast) &#8212; the tile loop lives entirely here</text>
+
+<rect x="480" y="222" width="60" height="26" fill="#0b6e75" fill-opacity="0.18" stroke="#0b6e75"/>
+<text x="510" y="239" font-size="10" text-anchor="middle" fill="#14171c">tile 1</text>
+<rect x="560" y="222" width="60" height="26" fill="#0b6e75" fill-opacity="0.18" stroke="#0b6e75"/>
+<text x="590" y="239" font-size="10" text-anchor="middle" fill="#14171c">tile 2</text>
+<rect x="640" y="222" width="60" height="26" fill="#0b6e75" fill-opacity="0.18" stroke="#0b6e75"/>
+<text x="670" y="239" font-size="10" text-anchor="middle" fill="#14171c">tile 3</text>
+<path d="M 700 224 C 730 208, 745 208, 745 222" fill="none" stroke="#0b6e75" stroke-width="1"/>
+<polygon points="745,222 741,214 749,216" fill="#0b6e75"/>
+<text x="748" y="216" font-size="9" fill="#0b6e75">next tile</text>
+
+<line x1="590" y1="248" x2="620" y2="256" stroke="#626a75" stroke-width="1"/>
+<rect x="520" y="256" width="200" height="30" fill="#9a5d00" fill-opacity="0.18" stroke="#9a5d00"/>
+<text x="620" y="275" font-size="11" text-anchor="middle" fill="#14171c">running (m, &#8467;, O) &#8212; rescaled each tile</text>
+
+<rect x="456" y="310" width="392" height="50" fill="#1a7040" fill-opacity="0.14" stroke="#1a7040"/>
+<text x="652" y="330" font-size="12" font-weight="600" text-anchor="middle" fill="#14171c">HBM traffic: no N&#215;N matrix</text>
+<text x="652" y="348" font-size="9" text-anchor="middle" fill="#555d68">Q, O once; K, V streamed once per query tile (L2 catches most re-reads)</text>
+
+<text x="440" y="400" font-size="12" text-anchor="middle" fill="#555d68">Same function, same output up to summation order. FlashAttention changes where the scores live, not what is computed.</text>
+</svg>

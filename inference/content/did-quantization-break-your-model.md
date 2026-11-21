@@ -1,457 +1,581 @@
 # Did Quantization Break Your Model?
 
-> **Goal of this chapter:** answer the question every quantized deployment
-> eventually has to answer, and answer it honestly. By the end you will know why
-> the field's default quality metric is nearly useless here, why the damage
-> scales with how hard the task is, why a model that "recovered" by thinking
-> longer may have cost you money rather than saved it, how a *kernel* rather than
-> a format lost a 91% score, and exactly what to measure before you ship.
+> **The question:** how do you prove that a quantized deployment still does the
+> job you deployed it for — and which of the usual checks would tell you
+> everything is fine when it is not?
+>
+> **You'll be able to:** predict which models, tasks and settings are fragile,
+> and why averages over easy text miss the damage; compute the net speedup after
+> token inflation; size a paired evaluation and read its result — flips and
+> McNemar's test — against the noise floor of the unquantized model; write the
+> evaluation plan that gates a quantized release.
 
 <div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="runner"></div>
 
-[Quantization](#/quantization) gave you the formats and the arithmetic: fewer
-bits, fewer bytes, faster decode, more concurrency. Every number in that chapter
-was a division. Not one of them said anything about whether the model still gets
-the answer right.
+[Quantization](#/quantization) was all division: fewer bits, fewer bytes, faster
+steps, more users. Not one of those numbers said whether the model still gets the
+answer right.
 
-That is this chapter. It is the harder half, because quantization damage is
-**silent by default**. Nothing crashes. No warning is logged. The model keeps
-producing fluent, confident, plausible text — it just gets a little worse at the
-things you actually deployed it for, and the standard way people check misses it
-completely.
+Quantization damage is silent. Nothing crashes, nothing is logged, and the model
+keeps producing fluent, confident text — slightly worse at some things, sometimes
+much worse at the things you deployed it for. It is the storage engineer's
+silent data corruption, without a checksum: you cannot verify a generated token
+against a hash. The only detector is a comparison against a baseline you kept
+runnable.
 
-> [!bridge] You already know this — from the distributed course
-> This is the Byzantine failure model, arriving where you did not expect it. A
-> crash-stop failure announces itself and is easy to build around; a component
-> that keeps answering, in the right format, at the right latency, with answers
-> that are quietly wrong is the expensive class — which is why that chapter
-> reaches for checksums at every layer rather than trusting the wire. A
-> quantized model is exactly that component, and this chapter's harness is your
-> checksum. What differs is that you cannot verify a token against a hash; the
-> only detector you have is a comparison against a baseline you kept runnable.
-> [→ Distributed: Failure Models & Detection](../distributed/#/failure-models)
+## Why averages miss it
 
-## Perplexity lies
+The cheapest check people run is **perplexity**: how surprised the model is, on
+average, by held-out text. It is a mean over every token, and most tokens of
+ordinary text are easy — the rest of a common word, a closing quotation mark,
+"the". On those, the right token wins by a wide margin, and a little rounding
+noise changes nothing. They dominate the average.
 
-The default way people check "did quantization hurt?" is **perplexity** (PPL) —
-roughly, how surprised the model is by held-out text. It is cheap, standard, and
-for judging quantization **nearly useless.** PPL averages next-token loss over
-ordinary text, where almost any quantization looks fine, and misses exactly where
-low-bit models break: long chains of exact reasoning.
+Rounding noise flips the *close* decisions: a carry in an arithmetic step, which
+of two similar names, which retrieved fact applies. Those are rare in ordinary
+text, so flipping them barely moves the mean. They are common in exactly the
+tasks people deploy models for.
 
-Look at what averaging does. A perplexity run over a few hundred thousand tokens
-of web text is dominated by tokens that are *easy* — the second half of a common
-word, the closing quote after a quotation, the word "the." A model that has lost
-some precision still nails those, because the correct answer was miles ahead of
-the alternatives and a little numerical noise does not close that gap. Those
-tokens are the overwhelming majority, so they set the average.
+> [!predict] Before you read on
+> A task needs ten reasoning steps, all correct. Quantization lowers the success
+> rate of each step from 99% to 97% — a change too small to see in any per-token
+> average. What happens to the task's success rate?
 
-The tokens where quantization actually bites are the ones where two candidates
-were nearly tied and the right one won by a hair — a carry in an arithmetic step,
-the choice between two lemma names, which of three retrieved facts is the
-relevant one. Rounding error flips those. But they are rare, so flipping them
-moves the mean loss by a fraction of a percent, and perplexity reports "fine."
+It falls from 90% to 74%: `0.99¹⁰ ≈ 0.90`, `0.97¹⁰ ≈ 0.74`. A 2-point change per
+step becomes a 16-point change per task. Chains multiply small per-step losses,
+which is why the damage concentrates in long, exact work — multi-step reasoning,
+long-context retrieval, tool calls that must be character-perfect.
 
-This is the general shape of the problem, and it is worth stating on its own:
+Accuracy itself can hide damage too. Dutta et al.
+([Accuracy is Not All You Need, NeurIPS 2024](https://arxiv.org/abs/2407.09141))
+found that compressed models with nearly the baseline's accuracy still changed
+individual answers — correct to wrong *and* wrong to correct, cancelling in the
+total. They call these **flips**, and propose flips and the KL divergence
+between the two models' next-token distributions as the metrics to report
+alongside accuracy; they found the two well correlated.
 
-> [!trap] An average over easy cases cannot see damage in the tail
-> Perplexity is a mean, and the mean is set by the common case. Quantization
-> damages the *decisions that were close*, which are rare in ordinary text and
-> concentrated in exactly the tasks people deploy models for. A metric can be
-> flat and a capability can be gone at the same time, with no contradiction.
+KL divergence is the cheap first screen, because it needs no reference answers.
+Send the same text to both servers and ask each for its top-20 log-probabilities
+at every position of the *prompt*, so both models are scored on identical
+contexts:
 
-And a chain of reasoning multiplies this. If a 10-step derivation needs all ten
-steps right, and quantization takes each step from 99% to 97%, end-to-end
-accuracy falls from 90% to 74% — a 16-point collapse built entirely out of
-per-token changes too small for perplexity to notice.
-
-## The evidence: flat perplexity, collapsed accuracy
-
-The numbers are stark. A study of 3-bit AWQ found perplexity essentially flat
-while **MATH-500 accuracy collapsed from 85.6% to 47.0%** — and the model
-*inflated* its chain-of-thought from 5.2K to **23.4K tokens (4.5×)** trying to
-compensate. PPL saw none of it. **[from arXiv 2606.25519.]**
-
-Read that twice. The metric everyone reports said nothing happened. The
-capability the model was chosen for lost nearly half its accuracy. And a third
-thing happened that nobody was measuring at all.
-
-Two lessons hide in that one result, and each deserves its own section.
-
-## Lesson one: degradation scales with task hardness
-
-**The same quantization costs more the harder the task is.** The same setting
-that costs ~7% on grade-school GSM8K costs ~15% on MATH and can drive
-competition-level AIME to **total failure**. An easy eval blesses a model that
-falls apart on hard ones.
-
-This is not a mysterious property of low-bit arithmetic; it falls straight out of
-the chain argument above. An easy task is a short chain with wide margins at
-every step, so rounding noise never flips anything. A hard task is a long chain
-with narrow margins, and the failure probability compounds along it. Task
-difficulty *is* chain length times margin narrowness, which is precisely what
-quantization attacks.
-
-The practical consequence is uncomfortable, because it inverts the usual
-convenience ordering. The evals that are cheap to run and quick to interpret are
-the easy ones, and they are the ones with no diagnostic power. **The only evals
-that tell you anything are the expensive ones.** If your quantized model scores
-identically on GSM8K, you have learned that it can still do arithmetic a child
-can do. You have learned nothing about the workload you are deploying it for.
-
-The same slope shows up across every axis of difficulty, not just math:
-
-- **Long context.** Retrieval over 128K tokens is a harder discrimination than
-  retrieval over 4K — more distractors, thinner margins. Degradation is
-  systematically worse at long context than short. The next section is an
-  extreme case of exactly this.
-- **Multilingual.** Quality loss is consistently larger on languages that were a
-  smaller share of pretraining. The mechanism is the same margin story: the model
-  is less certain in a low-resource language to begin with, so it has less
-  headroom to spend on rounding error. Reported degradations on non-English
-  evaluation sets run several times the English figure for the same setting.
-  **[directional — the effect is well attested across model reports, but the
-  multiplier varies enormously by language and model and no single number should
-  be quoted.]** If you serve a multilingual product, an English-only eval of a
-  quantized model is not an eval.
-- **Agentic and tool-use.** A tool call is a long exact string: a function name,
-  a schema-valid argument object, a well-formed JSON close. Every character is a
-  narrow-margin decision, and one wrong one fails the whole call. Agentic
-  workloads sit at the hard end of this scale, and they are usually the last
-  thing anyone thinks to evaluate.
-
-## Lesson two: count the tokens
-
-This is the sharpest point in the material, and it is the one most often missed.
-
-**A quantized reasoning model can recover accuracy by thinking longer.** That
-sounds like a happy ending — the model compensates, the score comes back, no harm
-done. It is not a happy ending. Those extra tokens are a hidden tax, and it can
-cancel or reverse the entire speedup you quantized for.
-
-Do the arithmetic, because it is the only way to see how large the effect is. You
-are serving a 70B reasoning model and you move from BF16 to FP8. From
-[Quantization](#/quantization), the batch-1 decode step goes from ~42 ms to ~21
-ms: each token is **2× cheaper**. Now suppose the quantized model needs more
-tokens to reach the same answer. What you actually care about is the time and the
-cost of a whole *response*, which is tokens × cost-per-token:
-
-```text
-   net speedup  =  per-token speedup  ÷  token inflation factor
+```bash
+curl -s localhost:8000/v1/completions -H 'Content-Type: application/json' -d '{
+  "model": "llama-3.3-70b-fp8",
+  "prompt": "<a 2,000-token document from your own traffic>",
+  "max_tokens": 1,
+  "prompt_logprobs": 20
+}' | jq '.choices[0].prompt_logprobs[1:3]'
 ```
 
-| Token inflation | Net speedup at 2× per-token | Verdict |
-|---|---|---|
-| 1.0× (no inflation) | 2.00× | the win you were promised |
-| 1.2× | 1.67× | still good |
-| 1.5× | 1.33× | most of the win is gone |
-| **2.0×** | **1.00×** | **break-even — you gained nothing** |
-| 4.5× (the 3-bit AWQ case) | 0.44× | **2.25× slower and 2.25× more expensive** |
+*Real format, illustrative values — request fields from vLLM v0.34.0 `vllm/entrypoints/openai/completion/protocol.py` (`prompt_logprobs` returns, per position, a map of token id to `logprob`, `rank` and `decoded_token`); the server caps the count at `--max-logprobs`, 20 by default.*
 
-The break-even is at token inflation equal to your per-token speedup. Below it
-you win; above it you have paid engineering effort, accuracy risk, and an
-evaluation campaign in order to make your service **slower**.
+From the two responses compute, per position, whether the top token agrees, and
+the KL divergence over the top-20 tokens. A quantized model that agrees on
+99.9% of positions has told you little; one whose disagreements cluster in
+numbers, names or JSON has told you where to look. Generated text would not do:
+after the first different token the two models continue from different
+contexts.
 
-The 4.5× row is not hypothetical — that is the measured chain-of-thought
-inflation from the 3-bit AWQ study, and it was measured on a model whose accuracy
-had *also* collapsed. That configuration was worse on both axes at once, and the
-metric everyone reports said it was fine.
+## The evidence: size and difficulty
 
-Three things follow, and they are not obvious:
+The most systematic public sweep is Liu et al.,
+[Quantization Hurts Reasoning?](https://arxiv.org/abs/2504.04823) (COLM 2025).
+They quantized DeepSeek-R1 distilled reasoning models from 1.5B to 70B with
+several methods and averaged accuracy over five benchmarks. Notation:
+`W4A4KV4` means 4-bit weights, activations and KV cache; FlatQuant is the
+paper's best method at that setting, a learned transformation that flattens
+outliers before rounding. "Best method" is the best of those tested at each size.
 
-- **Latency is worse than the cost figure suggests.** Cost scales with total
-  tokens; user-visible latency scales with total tokens too, but users experience
-  it as a wait. A 2.25× longer response is a 2.25× longer wait, and TTFT — the
-  metric you were probably watching — did not move at all, because prefill got
-  faster.
-- **The effect is invisible to accuracy evals.** A model that recovers its score
-  by generating 4× the tokens scores the *same*. If your eval harness reports
-  only accuracy, it reports a tie for a configuration that is far worse.
-- **It hits reasoning models hardest, which are the ones you most want to
-  quantize.** Long-chain-of-thought models are expensive precisely because they
-  emit thousands of decode tokens, so they are the obvious quantization target —
-  and they are the ones with a token budget elastic enough to absorb the damage
-  and hide it.
+| Configuration | 1.5B | 7B | 14B | 32B | 70B (Llama) |
+|---|---|---|---|---|---|
+| W8A8KV8 (best method) | +0.2 | −0.2 | +0.6 | −0.0 | +0.5 |
+| W4A16 (AWQ) | −2.1 | −2.1 | −1.1 | −0.4 | −0.8 |
+| KV4 only (best method) | −1.4 | −1.0 | −0.1 | −0.3 | −1.0 |
+| W4A4KV4 (FlatQuant) | −10.9 | −11.8 | −3.0 | −2.9 | −2.5 |
+| W3A16 (AWQ) | −18.6 | −6.3 | −6.2 | −3.9 | −6.2 |
 
-**[the "token-inflation tax" framing is contested, but the length blow-up itself
-is real and has been reproduced.]** So measure it. Generated-token count per
-task, quantized versus baseline, is one line in an eval harness and it is the
-cheapest insurance in this chapter.
+*Points of average accuracy versus BF16, from the paper's Table 1 (Qwen-based
+1.5B–32B) and Table 4 (R1-Distill-Llama-70B).*
 
-> [!trap] "Accuracy held, so we shipped it"
-> Accuracy held *at unbounded token budget*. Re-run the same eval with a hard cap
-> on generated tokens — the cap your product actually enforces — and the
-> quantized model's recovered accuracy often evaporates, because the mechanism it
-> was using to recover was the budget you just took away.
+> [!predict] Before you read on
+> Under W4A4KV4, which loses more: a 1.5B model or a 32B model? And on which
+> benchmark — grade-school arithmetic (GSM8K) or competition math (AIME)?
 
-## The 91% → 13% → 89% story: correctness lives in kernels too
+The small model, on the hard benchmark. At 32B, W4A4KV4 left GSM8K unchanged
+(94.2 → 94.2) while AIME fell 3.9 points (61.7 → 57.8). At 1.5B, GSM8K fell 7.7
+points (84.5 → 76.8) and AIME fell from 23.3 to 8.6 — losing nearly two-thirds of
+its score. The same setting is harmless or ruinous depending on model size and
+task difficulty. So: 8 bits is safe at every size in this sweep; 4-bit weights
+are within about a point from 14B up; 4-bit activations and anything at 3 bits
+cost several points to many. And an easy evaluation cannot see the damage: if
+your quantized model matches the baseline on GSM8K, you have learned that it
+still does grade-school arithmetic.
 
-Correctness doesn't only live in the format — it lives in the **kernels**. vLLM
-documented FP8 KV cache on Hopper silently collapsing at long context:
-128k-token needle-in-a-haystack retrieval fell from **91% (BF16) to 13%**. The
-format was fine; the *kernel* accumulated over the long context in low-precision
-registers and lost the needle. The [two-level accumulation](#/flashattention) fix
-— promote partial sums to real FP32 — restored it to **89%**. Perplexity, of
-course, looked perfect throughout.
+The same margin argument applies beyond math. Long-context retrieval has more
+distractors and thinner margins than short. Languages that were a small share of
+pretraining start with less certainty to spend. Tool calls are long exact strings
+in which one wrong character fails the call.
 
-Sit with the shape of that. FP8 KV cache is the *safest* thing in the previous
-chapter — the near-lossless default, the one vLLM turns on for you. And in one
-specific kernel, at one specific context length, it went from working to
-essentially random, then back to working, with **no change to the format at
-all**. The bits stored in the cache were the same bits in all three
-configurations.
+## Count the tokens
 
-What changed was the accumulator. Attention over a 128K context is a sum with
-128K terms. Each term is small; each rounding error is tiny; but they accumulate,
-and in a narrow register the running total eventually stops being able to
-represent the difference between "this key matched" and "this key did not."
-Two-level accumulation — exactly the DeepSeek trick from the previous chapter,
-promoting partial sums to an FP32 accumulator every so often — fixes it, because
-FP32 has range to spare for the total while the products stay cheap.
+A reasoning model whose steps got slightly worse can sometimes hold its accuracy
+by **thinking longer**. Every extra token is paid for.
 
-The general lesson is broader than KV cache:
+Lian et al. ([Quantization Inflates Reasoning, 2026](https://arxiv.org/abs/2606.25519))
+measured this. At 4 bits with AWQ, where accuracy held within a point, reasoning
+tokens still grew 8% on Qwen3-4B and 14% on Qwen3-30B; naive round-to-nearest
+grew them ~43% on both (their Table 2). Their headline +276% is a different
+regime: Qwen3-4B at 3 bits with AWQ, where AIME25 accuracy fell from 76.7% to
+20.0% and outputs on two code benchmarks grew 4.6× and 10.6×. That is a broken model rambling, not
+a working one recovering. Liu et al. saw the same divide: output lengths close to
+baseline for 8-bit, 4-bit weight-only and KV4, longer under aggressive settings,
+especially on small models.
 
-- **A format is a claim about representation; a kernel is a claim about
-  execution.** They fail independently. You can validate the format perfectly and
-  still lose the model to the kernel that consumes it.
-- **The failure mode was length-dependent.** At 4K context the same kernel was
-  fine. Anything that only breaks past a threshold will pass every short test you
-  run.
-- **Therefore: evaluate the deployment, not the checkpoint.** Your engine, your
-  version, your kernel selection, your context length, your batch size. A quality
-  number measured on a different stack is a number about a different system. An
-  engine upgrade is a reason to re-run the evals, not a reason to trust the old
-  ones.
+> [!predict] Before you read on
+> FP8 makes each token twice as cheap. The quantized model needs 1.5× as many
+> tokens per answer. What is the net speedup per answer?
 
-> [!bridge] You already know this — from the Linux course
-> Two habits from performance methodology transfer intact. **Workload
-> characterization** — measure what the system actually does, at the sizes it
-> actually does it, rather than what the benchmark suite finds convenient — is
-> the whole content of "your hardest real task, at your real context length."
-> And the warning that a mean hides the tail is the same warning perplexity
-> earns here. What differs is the direction of the danger: a latency
-> investigation goes wrong when a metric looks *bad* for an uninteresting
-> reason, and a quantization evaluation goes wrong when every metric looks
-> *good* and the capability is gone anyway.
-> [→ Linux: Performance Analysis Methodology](../#/perf-methodology)
-
-## What to actually measure
-
-Here is the harness. It is not long, and every line of it exists because
-something in this chapter would otherwise have gone undetected.
-
-**1. Your hardest real task, not a benchmark.** Take the actual workload — the
-prompts your product sends, at the length it sends them — and score it. If you
-must use public evals, pick the ones at the top of the difficulty range for your
-domain, because the easy ones cannot resolve the damage.
-
-**2. Long context, at your real maximum.** Needle-in-a-haystack at the context
-length you advertise, not at 4K. This is the test that catches kernel
-accumulation bugs, and it is the one nobody runs until after the incident.
-
-**3. Generated-token count, per task, both configurations.** One extra column in
-the results table. Divide your per-token speedup by the inflation factor to get
-the number you actually care about.
-
-**4. The same eval under your production token cap.** Not unbounded. If your
-product cuts a response off at 4,000 tokens, evaluate at 4,000 tokens, so that
-"recovered by thinking longer" cannot silently pass.
-
-**5. Every language you serve, weighted by traffic.** An English-only eval on a
-multilingual product measures a fraction of your users.
-
-**6. Structured-output validity, if you use it.** Rate of schema-valid tool calls
-and parseable JSON. This is a cheap, fast, brutally sensitive metric, because it
-is pass/fail on exact strings.
-
-**7. The tail, not the mean.** Report the worst decile of your task set alongside
-the average. Quantization damage concentrates in the hard cases, so a mean over a
-mixed eval suite reproduces perplexity's exact failure at a higher level.
-
-**8. An A/B against the unquantized model on live traffic, if you can.** The only
-measurement with no proxy in it. Watch retry rate, conversation length, and
-thumbs-down rate; users detect degradation you did not think to test for.
-
-And one process rule, which matters more than any single metric: **keep the BF16
-baseline runnable.** The entire harness above is comparative. A quality number
-without a same-day baseline on the same stack is uninterpretable, and the moment
-the baseline becomes expensive to run is the moment you stop being able to answer
-the question in this chapter's title.
-
-## A decision guide
+`2 ÷ 1.5 ≈ 1.33×`. The time and cost of an answer is tokens × cost per token:
 
 ```text
-   SAFE ZONE                         DANGER ZONE
-   ─────────                         ──────────
-   FP8 (W8A8)   ← 2026 default       ≤4-bit W+A on small models
-   W4A16 (AWQ/GPTQ weight-only)      ≤4-bit W+A on reasoning models
-   FP8 / INT8 KV cache               3-bit ANYTHING
-                                     INT4 KV on small models
-   (near-lossless, ship freely)      (test hard tasks before trusting)
+   net speedup  =  per-token speedup  ÷  token inflation
 ```
 
-> **State of play (mid-2026), the safe map from a COLM 2025 sweep:**
-> **W8A8KV8** and **W4A16** are near-lossless across the board. **W4A4KV4** is
-> risky — about 2.3% loss on a 32B model but **over 10% on a 7B**, and ~4× worse
-> on hard tasks (AIME) than easy ones (GSM8K). **3-bit anything is a cliff —
-> avoid it.** Smaller models and reasoning models are the fragile cases.
+| Token inflation | Net, at 2× per token |
+|---|---|
+| 1.0× | 2.0× — the promised win |
+| 1.14× (AWQ-INT4, Qwen3-30B, accuracy held) | 1.75× |
+| 1.5× | 1.33× |
+| 2.0× | 1.0× — break-even |
 
-Notice the pattern in the failure column: **the fragile cases are small models,
-reasoning models, long contexts, and low-resource languages.** All four are
-narrow-margin regimes. If your deployment is none of those — a large model, short
-contexts, English, non-reasoning — you can be much bolder than the guide
-suggests. If it is all four, be conservative and stay at 8 bits.
+Inflation is invisible to accuracy-only evaluation, and it hurts most on
+reasoning models, the ones with the longest outputs and so the most tempting to
+quantize. Lian et al. measured an end-to-end case: Qwen3-4B on BBH took 285 s in
+BF16 and 292 s in 4-bit, although the 4-bit kernel was 1.2–1.4× faster per token.
 
-Matched to situations:
+> [!trap] "Accuracy held, so we shipped"
+> Accuracy held with an unlimited token budget. Re-run the evaluation with the
+> output cap your product enforces, and accuracy recovered by thinking longer can
+> disappear — the recovery mechanism was the budget you just removed.
 
-- **Serving a large model on Hopper or Blackwell, general workload.** FP8 W8A8
-  with FP8 KV. Run the harness once to establish the baseline, then ship.
-- **Memory is the binding constraint** — you want 70B on one GPU. W4A16, full
-  activation precision. Prove it on long context specifically, since weight-only
-  quantization does not touch the KV path but your engine change might.
-- **Concurrency is the binding constraint** at long context. FP8 KV first; it is
-  the highest capacity-per-unit-risk move available. Then measure
-  needle-in-a-haystack at your real maximum length, because that is the exact
-  configuration that produced the 13%.
-- **A small model, or a reasoning model, and someone is proposing 4-bit
-  weights-and-activations.** Ask what the alternative is. A larger model at 8
-  bits is frequently both more accurate and, after token inflation, no more
-  expensive.
-- **Anything at 3 bits.** No. If you have measured it working on your hardest
-  task, at your token cap, with your kernels, then you have earned it — and that
-  sentence is the point.
+## Correctness also lives in kernels
 
-A diagnostic for the community's favorite argument: **when someone says
-"quantization ruined my model," the first question is *which regime were they
-in?*** Near-lossless FP8 and a 3-bit reasoning-model catastrophe are both
-"quantization" and share almost nothing. The regime is the whole story.
+vLLM's engineers [documented](https://vllm.ai/blog/2026-04-22-fp8-kvcache) a
+failure on Hopper GPUs that every short test missed. With an **FP8 KV cache**, a
+**needle-in-a-haystack** test — one fact hidden in a 128K-token document, then
+asked for — fell from 91.2% retrieval in BF16 to 13.0% on Llama-3.1-8B-Instruct
+([flash-attention PR #104](https://github.com/vllm-project/flash-attention/pull/104)).
+The stored format was not the problem.
 
-## What to remember
+The cause is in the attention kernel's second multiply, softmax weights × values,
+which sums one term per cached token: 131,072 terms at 128K. The PR states that
+the FP8 tensor-core accumulator "does not correctly work in FP32 precision but in
+some reduced format"; DeepSeek measured "around 14 bits" for Hopper's FP8
+accumulation ([V3 report](https://arxiv.org/abs/2412.19437), §3.3). A narrow
+accumulator loses any addend smaller than half its last bit. Spread attention
+over 131,072 tokens and each term is ~1/131,072 of the total: once the running
+sum is large enough, new terms vanish. A model of that, with 14 significant bits:
 
-- **Perplexity lies.** It is a mean over easy tokens, and quantization damages the
-  rare close decisions. Flat PPL alongside a collapsed capability is not a
-  contradiction — it is the expected result. 3-bit AWQ held perplexity while
-  MATH-500 fell 85.6% → 47.0%.
-- **Damage scales with task hardness**, because hard tasks are long chains of
-  narrow-margin decisions. ~7% on GSM8K, ~15% on MATH, total failure on AIME, for
-  the same setting. The same slope applies to long context, low-resource
-  languages, and tool-use.
-- **Count the tokens.** Net speedup = per-token speedup ÷ token inflation.
-  Break-even at 2× inflation for a 2× format win; the measured 4.5× inflation
-  makes the quantized model 2.25× *slower and dearer*. Accuracy evals score this
-  as a tie.
-- **Evaluate under your production token cap**, or "recovered by thinking longer"
-  passes silently.
-- **Correctness lives in kernels too.** FP8 KV: 91% → 13% → 89% at 128K with the
-  format unchanged; the fix was two-level FP32 accumulation. Evaluate the
-  deployment — your engine, version, context length — not the checkpoint.
-- **The harness:** hardest real task, long context at your real max, token
-  counts, production cap, every language, structured-output validity, the worst
-  decile not the mean, and a live A/B. Keep the BF16 baseline runnable, because
-  every one of those numbers is only meaningful as a difference.
-- **Fragile regimes are narrow-margin regimes**: small models, reasoning models,
-  long context, low-resource languages. Away from all four, be bold; inside all
-  four, stay at 8 bits.
+```python
+import math, random
 
-## Frequently asked
+def rnd(x, bits=14):  # keep `bits` significant bits, round to nearest (a model, not the hardware)
+    if x == 0.0:
+        return 0.0
+    m, e = math.frexp(x)
+    return math.ldexp(round(m * 2 ** bits), e - bits)
 
-<div class="faq">
+def attend(n, tile=None):  # sum of n terms p_i * v_i, softmax weights spread evenly (p_i = 1/n)
+    rng = random.Random(0)
+    terms = [rng.uniform(0.5, 1.5) / n for _ in range(n)]
+    acc = total = 0.0
+    for i, t in enumerate(terms, 1):
+        acc = rnd(acc + t)                   # every add lands in the narrow accumulator
+        if tile and i % tile == 0:           # two-level: flush the tile into a wide register
+            total, acc = total + acc, 0.0
+    return math.fsum(terms), total + acc
+
+print(f"{'context':>8}{'exact':>9}{'one level':>11}{'two-level (128)':>17}")
+for n in (1_024, 8_192, 32_768, 131_072):
+    exact, one = attend(n)
+    _, two = attend(n, tile=128)
+    print(f"{n:>8,}{exact:9.4f}{one:11.4f}{two:17.4f}")
+
+# --- output of an actual run ---
+#  context    exact  one level  two-level (128)
+#    1,024   0.9979     0.9985           0.9979
+#    8,192   1.0030     1.0034           1.0030
+#   32,768   1.0004     1.0000           1.0004
+#  131,072   0.9997     0.2500           0.9997
+```
+
+*Runnable — Python 3 standard library only; the output shown in the comments is from an actual run. An illustration of the mechanism under DeepSeek's 14-bit figure, not a simulation of NVIDIA's hardware.*
+
+At 32K tokens the narrow accumulator is still close; at 128K it stalls at a
+quarter of the true sum, the shape of the failure the blog reports, which
+appears when "the contraction dimension reaches 100K or more". The fix,
+**two-level accumulation**, does what the last column does: accumulate one tile
+in the tensor core, then flush it into a true FP32 register. It restored 89.2%,
+cost ~5% of FP8 decode speed and some prefill speed, and is on by default.
+Blackwell's kernel path does not need it. Lessons: a format is a claim about
+storage and a kernel a claim about execution, and they fail independently;
+evaluate the deployment — engine version, attention backend, GPU, context length
+— not the checkpoint, and re-run after every engine upgrade.
+
+## The noise floor: BF16 against BF16
+
+Run the *unquantized* model twice on the same questions at temperature 0 and you
+will not get identical answers. SGLang's v0.5.23 documentation names the cause:
+"Different batch sizes cause GPU kernels to split reduction operations
+differently, leading to different addition orders", and floating-point addition
+is not associative. On a busy server a request's batch-mates change from run to
+run, and with them the last bits of its logits, enough to flip a close decision.
+That is why the same prompt can return different answers at temperature 0.
+
+Engines now offer a cure, at a price. vLLM v0.34 has a **batch-invariant** mode,
+`VLLM_BATCH_INVARIANT=1` ("currently in beta", "may impact performance"), whose
+output is "independent of the batch size or the order of requests in a batch";
+SGLang v0.5.23 has `--enable-deterministic-inference`. Production rarely runs
+them, so the evaluation needs both views: a batch-invariant run isolates what
+quantization changed, and a BF16-against-BF16 run under production-like
+concurrency measures the **flip floor**, the flips you would see with no
+quantization at all. A quantized model's flip count means something only above
+that floor.
+
+## The harness, as code
+
+The comparison that matters is **paired**: both models answer the same
+questions, and you look question by question. **McNemar's test** uses only the
+discordant questions — `b` that went right→wrong and `c` that went wrong→right.
+If quantization did nothing systematic, each discordant question is a coin flip,
+and the test asks how unlikely a split as lopsided as `b` versus `c` is.
+
+```python
+import json, math, sys
+
+def load(path):  # one JSON object per line: {"id": ..., "correct": true/false}
+    with open(path) as f:
+        return {r["id"]: r["correct"] for r in map(json.loads, f) if r}
+
+def mcnemar_exact(b, c):  # two-sided: is a b-vs-c split this lopsided likely if flips are 50/50?
+    n, k = b + c, min(b, c)
+    return min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n) if n else 1.0
+
+if len(sys.argv) == 1:  # no files given: write two tiny samples and use them
+    base = "1111011101110111101101"; quant = "1101011111100111101001"
+    for name, bits in (("bf16.jsonl", base), ("fp8.jsonl", quant)):
+        with open(name, "w") as f:
+            f.writelines(json.dumps({"id": f"q{i:02}", "correct": x == "1"}) + "\n"
+                         for i, x in enumerate(bits, 1))
+    sys.argv += ["bf16.jsonl", "fp8.jsonl"]
+a, q = load(sys.argv[1]), load(sys.argv[2])
+ids = sorted(a.keys() & q.keys())
+b = sum(a[i] and not q[i] for i in ids)     # right before, wrong after
+c = sum(q[i] and not a[i] for i in ids)     # wrong before, right after
+n = len(ids)
+print(f"questions {n}   baseline {sum(a[i] for i in ids) / n:.1%}   candidate {sum(q[i] for i in ids) / n:.1%}")
+print(f"flips {b + c} ({(b + c) / n:.1%}): right->wrong {b}, wrong->right {c}")
+se = math.sqrt(b + c - (c - b) ** 2 / n) / n    # standard error of the paired difference
+print(f"paired difference {(c - b) / n:+.1%} +/- {1.96 * se:.1%} (95%)")
+print(f"McNemar exact p = {mcnemar_exact(b, c):.3f}")
+
+# --- output of an actual run (no arguments: the two sample files) ---
+# questions 22   baseline 77.3%   candidate 68.2%
+# flips 4 (18.2%): right->wrong 3, wrong->right 1
+# paired difference -9.1% +/- 17.4% (95%)
+# McNemar exact p = 0.625
+```
+
+*Runnable — Python 3 standard library only; the output shown in the comments is from an actual run. It writes `bf16.jsonl` and `fp8.jsonl` in the current directory when run without arguments.*
+
+The sample shows why size matters: a 9-point drop, and an interval of ±17 points
+around it. Four discordant questions cannot tell a real loss from luck.
+
+## How many questions?
+
+> [!trap] A two-point drop on 200 questions is noise
+> At an accuracy near 80%, the standard error of a 200-question evaluation is
+> `√(0.8 × 0.2 ÷ 200) ≈ 2.8` points. A two-point difference is well inside it.
+
+Pairing helps because only the discordant questions carry information: the
+standard error of a paired difference is about `√(flips) ÷ n`, set by the flip
+rate, not by the accuracy. The standard sample-size formula for McNemar's test
+turns that into a number of questions:
+
+```python
+from statistics import NormalDist
+z = NormalDist().inv_cdf
+za, zb = z(1 - 0.05 / 2), z(0.80)   # 95% two-sided confidence, 80% power
+
+def paired_n(delta, flips):  # McNemar sample size (Connor 1987): flips = share of discordant pairs
+    return (za * flips ** 0.5 + zb * (flips - delta ** 2) ** 0.5) ** 2 / delta ** 2
+
+def unpaired_n(delta, acc):  # two independent samples, per model
+    return (za + zb) ** 2 * 2 * acc * (1 - acc) / delta ** 2
+
+print(f"detect a 1-point drop near 80% accuracy:")
+print(f"  independent samples:     {unpaired_n(0.01, 0.80):8,.0f} questions per model")
+for f in (0.02, 0.05, 0.10):
+    print(f"  paired, {f:4.0%} of answers flip: {paired_n(0.01, f):8,.0f} questions")
+n, f = 1_500, 0.05
+delta = (za + zb) * (f / n) ** 0.5
+print(f"with {n:,} paired questions and {f:.0%} flips, the smallest reliable drop is ~{delta:.1%}")
+
+# --- output of an actual run ---
+# detect a 1-point drop near 80% accuracy:
+#   independent samples:       25,116 questions per model
+#   paired,   2% of answers flip:    1,567 questions
+#   paired,   5% of answers flip:    3,922 questions
+#   paired,  10% of answers flip:    7,847 questions
+# with 1,500 paired questions and 5% flips, the smallest reliable drop is ~1.6%
+```
+
+*Runnable — Python 3 standard library only; the output shown in the comments is from an actual run.*
+
+Read the last line before you write a gate. "Within one point" cannot be
+checked with 1,500 questions at a 5% flip rate; the evaluation can resolve about
+1.6 points. Either collect ~4,000 questions or write the gate as a margin the
+evaluation can test: the 95% interval of the paired difference must stay above
+−2 points. [Lab: Bits, Bytes and Drafts](#/lab-squeezing) runs this harness in
+miniature on your laptop.
+
+> [!dashboard] Answer quality in production
+> **Utilisation:** not applicable — quality has no capacity. **Saturation:**
+> output-length drift, from the engine's `vllm:request_generation_tokens`
+> histogram (`_sum ÷ _count` per day) against the BF16 baseline week.
+> **Errors:** the share of `vllm:request_success_total{finished_reason="length"}`
+> (answers cut by the cap); `finished_reason="repetition"` counts only requests
+> that set `repetition_detection`. Everything else you must build: tool-call and
+> JSON parse failures in the application, sampled shadow comparisons against a
+> BF16 replica, user feedback.
+
+> [!case] The case: the gate for FP8
+> [Quantization](#/quantization) chose the pinned FP8 checkpoint, two TP=2
+> replicas and an FP8 cache, conditional on this evaluation. Llama-3.3-70B is
+> large and 8 bits is the safest row of the table, so the prior is good. The
+> evaluation catches what the prior cannot: Halden's task, its kernels, its long
+> documents.
+>
+> - **First screen:** top-1 agreement and KL on 200 real documents
+>   (`prompt_logprobs`); a cluster of disagreements on numbers or German text
+>   is investigated before anything else runs.
+> - **Task set:** 1,500 real employee questions with answers checked by the
+>   document owners, ~30% in German. Scored for answer and citation correctness,
+>   flips, generated tokens and refusals.
+> - **Floor:** BF16 against BF16 under production concurrency, same day, same
+>   stack.
+> - **Gate, per stage** (FP8 weights against BF16, then FP8 KV against FP8
+>   weights): the 95% interval of the paired difference stays above −2 points;
+>   flips at most twice the floor; generated tokens within 5%. The German slice
+>   (~450 questions) has its own, wider interval (~±1.7 points at a ~3.5% flip
+>   rate) and blocks only if it lies entirely below −2.
+> - **Long context:** needle retrieval at 16K tokens, the deployment's
+>   `--max-model-len`, on vLLM v0.34 with the attention backend named in the
+>   startup log — and again at 20K before phase 2 raises the limit.
+>
+> **What this settles:** a pass/fail gate someone outside the team can check, and
+> a BF16 configuration that stays deployable, because every engine upgrade
+> re-runs this harness against it. If FP8 KV fails the needle test, Halden ships
+> FP8 weights with a BF16 cache and loses phase 2's failover margin.
+
+## Exercises
+
+<div class="exercise">
+
+**Exercise 1.** A 4-bit weight-only deployment makes each decode token 1.3×
+cheaper than FP8 at your batch size. On your task set, accuracy is unchanged but
+the average answer grows from 900 to 1,050 tokens. What is the net speedup per
+answer, and at what length would you break even?
 
 <details>
-<summary>Is there any use left for perplexity?</summary>
+<summary>Reveal answer</summary>
 
-Yes, one: as a *smoke test*. Perplexity is sensitive to gross breakage — a
-mis-specified scale, a transposed block, a calibration set that did not match the
-model. If PPL moves a lot, something is badly wrong and you can stop before
-running anything expensive. What it cannot do is the opposite inference. Flat
-perplexity is not evidence of preserved quality, only the absence of evidence of
-catastrophe.
-
-</details>
-
-<details>
-<summary>How many evaluation samples do I need for the difference to mean anything?</summary>
-
-Enough that the confidence interval is smaller than the effect you care about. A
-2-point difference on a 200-sample eval is well inside the noise — the standard
-error on a proportion near 0.8 at n=200 is about 2.8 points, so you cannot
-distinguish a 2-point regression from nothing. Detecting a few points reliably
-needs low thousands of samples, or paired evaluation on identical prompts with a
-fixed seed, which removes most of the variance and is much cheaper. Paired,
-seeded, same-prompt comparison is the right default.
-
-</details>
-
-<details>
-<summary>The quantized model passes everything. Am I done?</summary>
-
-Until something in the stack changes. The 91% → 13% result came from a kernel,
-not a checkpoint, so your quality guarantee is scoped to the exact engine
-version, kernel selection, context length, and batch shape you tested. Treat an
-engine upgrade the way you treat a model change: re-run the harness. And keep
-watching production, because the tail of real traffic is longer and stranger than
-any eval set you will assemble.
+Inflation = 1,050 / 900 ≈ 1.17, so net speedup = 1.3 / 1.17 ≈ **1.11×**: most of
+the per-token gain is gone. Break-even is inflation equal to the per-token gain:
+900 × 1.3 = **1,170 tokens**. Check the result again under your output cap,
+since an accuracy that depends on longer answers may not survive it.
 
 </details>
 
 </div>
 
+<div class="exercise">
+
+**Exercise 2 — diagnosis.** Halden runs the harness twice on its 1,500
+questions. A colleague reads only the second run: "FP8 flipped 54 answers and
+lost half a point, and more went right→wrong than the reverse. Block it."
+
+```plaintext
+== run A: BF16 against BF16, production concurrency ==
+questions 1500   baseline 81.2%   candidate 81.0%
+flips 47 (3.1%): right->wrong 25, wrong->right 22
+paired difference -0.2% +/- 0.9% (95%)
+McNemar exact p = 0.771
+== run B: BF16 against FP8 weights ==
+questions 1500   baseline 81.2%   candidate 80.7%
+flips 54 (3.6%): right->wrong 31, wrong->right 23
+paired difference -0.5% +/- 1.0% (95%)
+McNemar exact p = 0.341
+```
+
+*Real format, illustrative values — the output format of the harness script above; counts invented for the exercise.*
+
+Is the conclusion supported? Does FP8 pass Halden's gate?
+
+<details>
+<summary>Reveal answer</summary>
+
+Not supported. Run A is the floor: the unquantized model flips 47 answers
+against itself, so 54 is 7 above the floor, well under twice it. The asymmetry,
+31 against 23, has a McNemar p of 0.34: splits that lopsided are common when
+nothing changed. And the interval, −1.5 to +0.5 points, stays above −2: FP8
+passes the gate. What the data cannot say is whether FP8 costs half a point;
+1,500 questions resolve ~1.6. If half a point matters, the answer is more
+questions, not a stricter reading of these.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 3 — diagnosis.** A quantized reasoning model passed every accuracy
+test in staging. In production, users complain about timeouts. One day's
+metrics, before and after the switch:
+
+```plaintext
+sum by (finished_reason) (increase(vllm:request_success_total[1d]))
+  {finished_reason="stop"}     11640  ->  10920
+  {finished_reason="length"}     360  ->   1080
+increase(vllm:request_generation_tokens_sum[1d]) / increase(vllm:request_generation_tokens_count[1d])
+                                 910  ->   1350
+```
+
+*Real format, illustrative values — metric and label names from vLLM v0.34.0 `vllm/v1/metrics/loggers.py`, queried in PromQL; numbers invented for the exercise.*
+
+What happened, and what was missing from the evaluation?
+
+<details>
+<summary>Reveal answer</summary>
+
+**Token inflation.** Mean output grew 48% (910 → 1,350 tokens), and the share of
+answers ending at the cap tripled (3% → 9%). The model recovers accuracy by
+reasoning longer; in staging, with no cap, the longer chains finished and scored
+correctly. In production they hit the cap and are cut off. The evaluation lacked
+two lines: generated-token counts against the baseline, and a run under the
+production output cap. These two metrics are the production alarm for the same
+failure.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 4 — transfer.** Another team wants to ship an 8B model at W4A4
+(4-bit weights and activations) for a support bot that emits JSON tool calls,
+serves five languages and accepts 32K-token contexts. Write their evaluation
+plan: what to run, what gates the release, and what you expect to find.
+
+<details>
+<summary>Reveal answer</summary>
+
+Expect damage: W4A4 on small models cost 10–12 points of average accuracy in
+Liu et al.'s sweep, so the plan must be able to *find* it, not to confirm a
+prior.
+
+- **Screen:** KL and top-1 agreement on real tickets in each language, at
+  short and 32K lengths.
+- **Floor:** the 8B model in BF16 against itself under production concurrency.
+- **Tasks:** real tickets with checked outcomes, stratified by language, with
+  enough per language to resolve the drop that matters (from the sample-size
+  script: thousands per slice at a 1-point resolution, hundreds at 3–4).
+- **Exact strings:** tool-call validity — parses, schema-valid, right function
+  and arguments — pass/fail, per language; one wrong character fails the call.
+- **Long context:** needle retrieval at 32K on the deployed engine and GPU.
+- **Tokens:** generated tokens per ticket, and every score re-run under the
+  production output cap.
+- **Gate:** per-language paired intervals above the agreed margin, tool-call
+  validity within a point of BF16, tokens within 5%. If it fails, the fallbacks
+  are W4A16 or FP8, both far safer at 8B.
+
+</details>
+
+</div>
+
+## What to remember
+
+- Quantization damage is silent and concentrates in close decisions; averages
+  over easy text cannot see it, and chains of steps multiply small losses.
+- 8 bits held within a point at every size in the largest sweep; small models,
+  4-bit activations and 3-bit anything are fragile, most of all on hard tasks.
+- Compare paired: flips and McNemar's test on the same questions, read against
+  the BF16-against-BF16 flip floor, which exists because batching changes
+  floating-point addition order.
+- Size the evaluation from the flip rate: at 5% flips, ~3,900 paired questions
+  detect a 1-point drop; 1,500 resolve ~1.6 points.
+- Net speedup = per-token speedup ÷ token inflation; evaluate under the
+  production output cap.
+- Kernels can break what formats preserve: Hopper's narrow FP8 accumulator lost
+  long sums until two-level accumulation. Evaluate the deployed stack.
+
 ```quiz
 [
   {
-    "q": "You quantize a 7B reasoning model to 3-bit and its perplexity barely moves. What is the correct conclusion?",
+    "q": "A team reruns its BF16 model against itself at temperature 0 under production load and sees 2.5% of answers flip. The FP8 candidate flips 2.8% against BF16. What does the 2.8% tell them?",
     "choices": [
-      "The quantization is safe to ship; flat perplexity confirms quality is preserved",
-      "Perplexity is a near-useless quant metric here — you must test hard reasoning/long-context tasks and count generated tokens, where 3-bit models often collapse",
-      "3-bit is always lossless as long as the block scales are FP16",
-      "The model will be faster with no downside because 3 bits is fewer bytes than 4"
+      "FP8 changed about 2.8% of answers, which is the quantity the gate should cap",
+      "Little by itself: most such flips happen with no quantization at all",
+      "The BF16 server is misconfigured, since temperature 0 must be deterministic",
+      "FP8 is more stable than BF16, because its flips are close to the floor"
     ],
     "answer": 1,
-    "explain": "Perplexity averages loss over ordinary text and misses reasoning failures. Real sweeps show 3-bit holding PPL while MATH accuracy collapses (85.6%→47.0%) and chains inflate ~4.5×. Evaluate on your hardest target tasks and measure token counts; 3-bit is a known cliff."
+    "explain": "Batch composition changes the order of floating-point additions, so the unquantized model flips 2.5% against itself. FP8 adds ~0.3 points above that floor; whether that is systematic is a question for McNemar's test on the discordant pairs. Temperature 0 is not deterministic on a batching server unless a batch-invariant mode is on."
   },
   {
-    "q": "vLLM saw FP8 KV cache drop 128k needle-in-a-haystack retrieval from 91% to 13%, then fixed it back to 89% without changing the format. What does this teach?",
+    "q": "In a pilot, 10% of answers flip between BF16 and a 4-bit candidate. Roughly how many paired questions are needed to detect a 1-point drop at 95% confidence and 80% power?",
     "choices": [
-      "FP8 is fundamentally broken for long context and should never be used",
-      "The fix was to switch from FP8 to INT8 KV",
-      "Correctness lives in kernels too: the failure was low-precision accumulation over the long contraction, fixed by promoting partial sums to FP32 — the format was fine",
-      "Perplexity would have caught the regression immediately"
+      "About 25,000, as for two independent samples near 80% accuracy",
+      "About 400, since pairing removes nearly all of the variance",
+      "About 7,800: only the discordant tenth carries information",
+      "About 1,600, the same as at a 2% flip rate"
     ],
     "answer": 2,
-    "explain": "The FP8 format was correct; the kernel accumulated over the long context in low-precision registers and lost the needle. Two-level accumulation (partial sums promoted to real FP32) restored retrieval. Lesson: quantization correctness is partly a kernel-accumulation problem, and perplexity looked perfect throughout — silent failure is the default."
+    "explain": "The paired standard error grows with the flip rate: n ≈ (1.96 √0.10 + 0.84 √0.0999)² ÷ 0.01² ≈ 7,850. At 2% flips it would be ~1,600, and unpaired ~25,000 per model. Pairing helps most when few answers flip; it does not make a high-flip model cheap to evaluate."
   },
   {
-    "q": "FP8 makes each decode token 2× cheaper, but your quantized reasoning model now emits 2.5× as many tokens to reach the same answer. What happened to the cost of a response?",
+    "q": "To screen an FP8 model with logprobs, a colleague generates 500 answers from each model and compares the log-probabilities of the generated tokens. Why is scoring prompt_logprobs on fixed documents better?",
     "choices": [
-      "It fell 2×, since per-token cost is what you pay for",
-      "It stayed the same, since accuracy was preserved",
-      "It rose ~1.25×: net speedup is per-token speedup ÷ token inflation = 2 ÷ 2.5 = 0.8×, so responses are slower and dearer",
-      "It cannot be computed without knowing the batch size"
+      "After the first differing token, the two models condition on different text",
+      "Generated tokens never return log-probabilities in vLLM's OpenAI-compatible server",
+      "Prompt log-probabilities are computed in FP32 even on quantized models",
+      "Generation at temperature 0 always yields the same text from both models"
     ],
-    "answer": 2,
-    "explain": "You pay for whole responses, not tokens. Net speedup = per-token speedup ÷ token inflation, so break-even sits at inflation equal to the format win — 2× here. At 2.5× inflation you are at 0.8×, meaning 1.25× the cost and 1.25× the wait. Accuracy evals score this configuration as a tie, which is exactly why generated-token count belongs in the harness."
+    "answer": 0,
+    "explain": "KL and top-1 agreement compare two distributions over the same context. Once the generated texts diverge, later positions compare different questions. Scoring a fixed text with prompt_logprobs keeps every position's context identical. Generated tokens can return logprobs too; that is not the problem."
   },
   {
-    "q": "The same quantization setting costs ~7% on GSM8K, ~15% on MATH, and drives AIME to near-total failure. Why does damage scale with task hardness?",
+    "q": "The Hopper FP8-KV failure appeared at 128K tokens but not at 8K. Which property of the attention kernel explains the dependence on length?",
     "choices": [
-      "Harder benchmarks use longer prompts, and long prompts overflow the block scales",
-      "Hard tasks are long chains of narrow-margin decisions, so small per-step error probabilities compound; easy tasks are short chains with wide margins that rounding noise never flips",
-      "Hard benchmarks are graded more strictly, which is a scoring artifact rather than a real effect",
-      "AIME problems are underrepresented in quantization calibration sets"
+      "Query × key sums over head_dim, which grows with the context length",
+      "FP8 keys lose range at long contexts because RoPE angles grow larger",
+      "The cache's FP8 scales are recalibrated per block and drift over time",
+      "Softmax weights × values adds one term per cached token"
+    ],
+    "answer": 3,
+    "explain": "The second multiply sums over the context: 131,072 terms at 128K, each tiny relative to the running sum, which a ~14-bit accumulator drops. Query × key sums over head_dim (128), which does not grow with context. The stored format and its scales were not the cause: two-level accumulation fixed it with the same cache."
+  },
+  {
+    "q": "Quantization makes each token 1.6× cheaper. On your traffic, answers become 1.25× longer at equal accuracy. What is the net effect per answer?",
+    "choices": [
+      "2.0× faster, since the two gains combine",
+      "1.28× faster, since inflation divides the gain",
+      "1.35× faster, since 1.6 minus 0.25 remains",
+      "No change, since longer answers cancel any gain"
     ],
     "answer": 1,
-    "explain": "Quantization perturbs decisions that were nearly tied. Easy tasks have wide margins and few steps, so nothing flips. Hard tasks chain many narrow-margin steps, and per-step failure compounds: 99%→97% per step over ten steps takes end-to-end accuracy from 90% to 74%. The same mechanism explains why long context, low-resource languages, and exact-string tool calls all degrade earlier."
-  },
-  {
-    "q": "Your quantized model matches the BF16 baseline's accuracy on your eval suite. Which single change to the harness is most likely to reveal a problem that is really there?",
-    "choices": [
-      "Run perplexity on a larger held-out corpus",
-      "Re-run the same eval with the generated-token cap your product actually enforces, and record token counts per task",
-      "Increase the batch size during evaluation",
-      "Evaluate the checkpoint on a different serving engine to get a second opinion"
-    ],
-    "answer": 1,
-    "explain": "Matched accuracy at unbounded token budget is the classic false pass: the quantized model can recover its score by thinking longer, which costs real money and real latency and shows up nowhere in an accuracy column. Capping generation at the production limit removes the mechanism it was using to recover, and logging token counts quantifies the tax. Perplexity on more text repeats the metric that already failed."
+    "explain": "Cost per answer is tokens × cost per token: 1.25 × (1 ÷ 1.6) = 0.78 of the baseline, a net speedup of 1.6 ÷ 1.25 = 1.28×. Inflation divides the per-token gain; it does not subtract from it. Break-even would need 1.6× longer answers."
   }
 ]
 ```

@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" width="880" height="560" role="img" aria-labelledby="t d">
 <title id="t">Prefill and decode on the H100 roofline, with the batching trail</title>
 <desc id="d">The same log-log roofline chart as the H100 roofline figure: a sloped bandwidth roof of 3.35 terabytes per second meets a flat 990 TFLOP per second compute roof at the ridge, arithmetic intensity 295 FLOP per byte. Decode at batch one is plotted at intensity 1, roughly 300 times below the ridge and under one percent of peak FLOPs. Prefill is plotted at intensity about 2000, on the compute roof. A trail of points at batch sizes 1, 4, 16, 64, 128 and 295 walks rightward up the bandwidth roof until it reaches the ridge at the critical batch size of about 295.</desc>
-<rect width="880" height="560" rx="8" fill="#f6f1e6"/>
-<text x="24" y="34" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="17" font-weight="600" fill="#221c12">Prefill, decode, and the batch trail between them</text>
-<text x="24" y="56" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" fill="#6b6250">The same H100 chart. Same weights, same kernels &#8212; only how many tokens share each weight read has changed.</text>
-<rect x="100.0" y="100.37" width="513.65" height="339.63" fill="#a4462e" fill-opacity="0.18"/>
-<rect x="613.65" y="100.37" width="226.35" height="339.63" fill="#4f7d2c" fill-opacity="0.18"/>
-<g stroke="#ddd3bd" stroke-width="1">
+<rect width="880" height="560" rx="8" fill="#ffffff"/>
+<text x="24" y="34" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="17" font-weight="600" fill="#14171c">Prefill, decode, and the batch trail between them</text>
+<text x="24" y="56" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#555d68">The same H100 chart. Same weights, same kernels &#8212; only how many tokens share each weight read has changed.</text>
+<rect x="100.0" y="100.37" width="513.65" height="339.63" fill="#b42318" fill-opacity="0.18"/>
+<rect x="613.65" y="100.37" width="226.35" height="339.63" fill="#1a7040" fill-opacity="0.18"/>
+<g stroke="#d3d8df" stroke-width="1">
 <line x1="100.0" y1="100.37" x2="100.0" y2="440.0"/>
 <line x1="248.0" y1="100.37" x2="248.0" y2="440.0"/>
 <line x1="396.0" y1="100.37" x2="396.0" y2="440.0"/>
@@ -19,7 +19,7 @@
 <line x1="100.0" y1="185.0" x2="840.0" y2="185.0"/>
 <line x1="100.0" y1="100.0" x2="840.0" y2="100.0"/>
 </g>
-<g stroke="#ddd3bd" stroke-width="1">
+<g stroke="#d3d8df" stroke-width="1">
 <line x1="144.55" y1="440.0" x2="144.55" y2="436.0"/>
 <line x1="170.61" y1="440.0" x2="170.61" y2="436.0"/>
 <line x1="189.1" y1="440.0" x2="189.1" y2="436.0"/>
@@ -93,66 +93,66 @@
 <line x1="100.0" y1="108.24" x2="104.0" y2="108.24"/>
 <line x1="100.0" y1="103.89" x2="104.0" y2="103.89"/>
 </g>
-<g stroke="#6b6250" stroke-width="1.4" fill="none">
+<g stroke="#555d68" stroke-width="1.4" fill="none">
 <line x1="100.0" y1="94.37" x2="100.0" y2="440.0"/>
 <line x1="100.0" y1="440.0" x2="840.0" y2="440.0"/>
 </g>
-<text x="100.0" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="middle">0.1</text>
-<text x="248.0" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="middle">1</text>
-<text x="396.0" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="middle">10</text>
-<text x="544.0" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="middle">100</text>
-<text x="692.0" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="middle">1000</text>
-<text x="840.0" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="middle">10000</text>
-<text x="92" y="444.0" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="end">0.1 T</text>
-<text x="92" y="359.0" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="end">1 T</text>
-<text x="92" y="274.0" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="end">10 T</text>
-<text x="92" y="189.0" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="end">100 T</text>
-<text x="92" y="104.0" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#8d8370" text-anchor="end">1000 T</text>
-<text x="470" y="486" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250" text-anchor="middle">arithmetic intensity &#160;I&#160; = FLOPs performed &#247; bytes moved from HBM &#160;(log scale)</text>
-<text x="34" y="270" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250" text-anchor="middle" transform="rotate(-90 34 270)">attainable throughput, TFLOP/s (log scale)</text>
-<polyline points="100.0,395.37 613.65,100.37 840.0,100.37" fill="none" stroke="#b8791f" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="269.08" y="286.73" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" fill="#a4462e" text-anchor="start" transform="rotate(-29.87 269.08 286.73)">bandwidth roof&#160;&#160;attainable = I &#215; 3.35 TB/s</text>
-<text x="836" y="90" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" fill="#4f7d2c" text-anchor="end">compute roof&#160;&#160;attainable = 990 TFLOP/s, dense BF16</text>
-<line x1="613.65" y1="100.37" x2="613.65" y2="440.0" stroke="#221c12" stroke-width="1.4" stroke-dasharray="5 4"/>
-<text x="613.65" y="460" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" font-weight="600" fill="#b8791f" text-anchor="middle">B_crit &#8776; 295</text>
-<text x="356.82" y="432" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#a4462e" text-anchor="middle" letter-spacing="1.2">MEMORY-BOUND</text>
-<text x="726.82" y="432" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#4f7d2c" text-anchor="middle" letter-spacing="1.2">COMPUTE-BOUND</text>
-<text x="150" y="400" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">Under this roof you pay for bytes, not FLOPs.</text>
-<circle cx="248.0" cy="310.37" r="5.5" fill="#f6f1e6" stroke="#b8791f" stroke-width="1.6"/>
-<circle cx="248.0" cy="310.37" r="2.6" fill="#b8791f"/>
-<text x="248.0" y="330.37" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">B=1</text>
-<circle cx="337.1" cy="259.2" r="5.5" fill="#f6f1e6" stroke="#b8791f" stroke-width="1.6"/>
-<circle cx="337.1" cy="259.2" r="2.6" fill="#b8791f"/>
-<text x="337.1" y="279.2" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">4</text>
-<circle cx="426.21" cy="208.02" r="5.5" fill="#f6f1e6" stroke="#b8791f" stroke-width="1.6"/>
-<circle cx="426.21" cy="208.02" r="2.6" fill="#b8791f"/>
-<text x="426.21" y="228.02" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">16</text>
-<circle cx="515.31" cy="156.85" r="5.5" fill="#f6f1e6" stroke="#b8791f" stroke-width="1.6"/>
-<circle cx="515.31" cy="156.85" r="2.6" fill="#b8791f"/>
-<text x="515.31" y="176.85" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">64</text>
-<circle cx="559.87" cy="131.26" r="5.5" fill="#f6f1e6" stroke="#b8791f" stroke-width="1.6"/>
-<circle cx="559.87" cy="131.26" r="2.6" fill="#b8791f"/>
-<text x="559.87" y="151.26" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="middle">128</text>
-<circle cx="613.65" cy="100.37" r="5.5" fill="#f6f1e6" stroke="#b8791f" stroke-width="1.6"/>
-<circle cx="613.65" cy="100.37" r="2.6" fill="#b8791f"/>
-<text x="622" y="118" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#6b6250" text-anchor="start">B = 295</text>
-<circle cx="248.0" cy="310.37" r="6" fill="#a4462e"/>
-<rect x="112" y="104" width="288" height="84" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
-<text x="128" y="124" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#a4462e">DECODE, batch 1</text>
-<text x="128" y="142" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">every weight read serves one token</text>
-<text x="128" y="160" font-family="SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#221c12">I = 2P FLOPs / 2P bytes = 1</text>
-<text x="128" y="180" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="11" fill="#a4462e">&#8776; 300&#215; below the ridge: &lt;1% of peak FLOPs</text>
-<line x1="248.0" y1="190" x2="248.0" y2="302.37" stroke="#a4462e" stroke-width="1.2" stroke-dasharray="3 3"/>
-<circle cx="736.55" cy="100.37" r="6" fill="#4f7d2c"/>
-<rect x="622" y="150" width="214" height="126" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
-<text x="638" y="172" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="13" font-weight="600" fill="#4f7d2c">PREFILL</text>
-<text x="638" y="192" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">the whole prompt at once:</text>
-<text x="638" y="208" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">each weight read serves all</text>
-<text x="638" y="224" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">T tokens, so I &#8776; T</text>
-<text x="638" y="248" font-family="SF Mono, Menlo, Consolas, monospace" font-size="12" font-weight="600" fill="#b8791f">I &#8776; T &#8776; 2,000</text>
-<text x="638" y="266" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">&#8776; 7&#215; past the ridge</text>
-<line x1="736.55" y1="150" x2="736.55" y2="108.37" stroke="#4f7d2c" stroke-width="1.2" stroke-dasharray="3 3"/>
-<rect x="24" y="498" width="832" height="50" rx="6" fill="#ece5d4" stroke="#ddd3bd"/>
-<text x="40" y="519" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#221c12">Batching is the only lever that walks decode toward the ridge: B sequences share one weight read, so intensity &#8776; B.</text>
-<text x="40" y="538" font-family="Iowan Old Style, Palatino, Georgia, serif" font-size="12" fill="#6b6250">Weight bytes stay constant; FLOPs scale with B. Past B_crit the extra sequences stop being free and latency grows with B.</text>
+<text x="100.0" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="middle">0.1</text>
+<text x="248.0" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="middle">1</text>
+<text x="396.0" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="middle">10</text>
+<text x="544.0" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="middle">100</text>
+<text x="692.0" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="middle">1000</text>
+<text x="840.0" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="middle">10000</text>
+<text x="92" y="444.0" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="end">0.1 T</text>
+<text x="92" y="359.0" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="end">1 T</text>
+<text x="92" y="274.0" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="end">10 T</text>
+<text x="92" y="189.0" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="end">100 T</text>
+<text x="92" y="104.0" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" fill="#626a75" text-anchor="end">1000 T</text>
+<text x="470" y="486" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#555d68" text-anchor="middle">arithmetic intensity &#160;I&#160; = FLOPs performed &#247; bytes moved from HBM &#160;(log scale)</text>
+<text x="34" y="270" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#555d68" text-anchor="middle" transform="rotate(-90 34 270)">attainable throughput, TFLOP/s (log scale)</text>
+<polyline points="100.0,395.37 613.65,100.37 840.0,100.37" fill="none" stroke="#9a5d00" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="269.08" y="286.73" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#b42318" text-anchor="start" transform="rotate(-29.87 269.08 286.73)">bandwidth roof&#160;&#160;attainable = I &#215; 3.35 TB/s</text>
+<text x="836" y="90" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#1a7040" text-anchor="end">compute roof&#160;&#160;attainable = 990 TFLOP/s, dense BF16</text>
+<line x1="613.65" y1="100.37" x2="613.65" y2="440.0" stroke="#14171c" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="613.65" y="460" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" font-weight="600" fill="#9a5d00" text-anchor="middle">B_crit &#8776; 295</text>
+<text x="356.82" y="432" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#b42318" text-anchor="middle" letter-spacing="1.2">MEMORY-BOUND</text>
+<text x="726.82" y="432" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1a7040" text-anchor="middle" letter-spacing="1.2">COMPUTE-BOUND</text>
+<text x="150" y="400" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#555d68">Under this roof you pay for bytes, not FLOPs.</text>
+<circle cx="248.0" cy="310.37" r="5.5" fill="#ffffff" stroke="#9a5d00" stroke-width="1.6"/>
+<circle cx="248.0" cy="310.37" r="2.6" fill="#9a5d00"/>
+<text x="248.0" y="330.37" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#555d68" text-anchor="middle">B=1</text>
+<circle cx="337.1" cy="259.2" r="5.5" fill="#ffffff" stroke="#9a5d00" stroke-width="1.6"/>
+<circle cx="337.1" cy="259.2" r="2.6" fill="#9a5d00"/>
+<text x="337.1" y="279.2" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#555d68" text-anchor="middle">4</text>
+<circle cx="426.21" cy="208.02" r="5.5" fill="#ffffff" stroke="#9a5d00" stroke-width="1.6"/>
+<circle cx="426.21" cy="208.02" r="2.6" fill="#9a5d00"/>
+<text x="426.21" y="228.02" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#555d68" text-anchor="middle">16</text>
+<circle cx="515.31" cy="156.85" r="5.5" fill="#ffffff" stroke="#9a5d00" stroke-width="1.6"/>
+<circle cx="515.31" cy="156.85" r="2.6" fill="#9a5d00"/>
+<text x="515.31" y="176.85" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#555d68" text-anchor="middle">64</text>
+<circle cx="559.87" cy="131.26" r="5.5" fill="#ffffff" stroke="#9a5d00" stroke-width="1.6"/>
+<circle cx="559.87" cy="131.26" r="2.6" fill="#9a5d00"/>
+<text x="559.87" y="151.26" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#555d68" text-anchor="middle">128</text>
+<circle cx="613.65" cy="100.37" r="5.5" fill="#ffffff" stroke="#9a5d00" stroke-width="1.6"/>
+<circle cx="613.65" cy="100.37" r="2.6" fill="#9a5d00"/>
+<text x="622" y="118" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#555d68" text-anchor="start">B = 295</text>
+<circle cx="248.0" cy="310.37" r="6" fill="#b42318"/>
+<rect x="112" y="104" width="288" height="84" rx="6" fill="#f0f2f5" stroke="#d3d8df"/>
+<text x="128" y="124" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#b42318">DECODE, batch 1</text>
+<text x="128" y="142" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#14171c">every weight read serves one token</text>
+<text x="128" y="160" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="11" fill="#14171c">I = 2P FLOPs / 2P bytes = 1</text>
+<text x="128" y="180" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#b42318">&#8776; 300&#215; below the ridge: &lt;1% of peak FLOPs</text>
+<line x1="248.0" y1="190" x2="248.0" y2="302.37" stroke="#b42318" stroke-width="1.2" stroke-dasharray="3 3"/>
+<circle cx="736.55" cy="100.37" r="6" fill="#1a7040"/>
+<rect x="622" y="150" width="214" height="126" rx="6" fill="#f0f2f5" stroke="#d3d8df"/>
+<text x="638" y="172" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1a7040">PREFILL</text>
+<text x="638" y="192" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#14171c">the whole prompt at once:</text>
+<text x="638" y="208" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#14171c">each weight read serves all</text>
+<text x="638" y="224" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#14171c">T tokens, so I &#8776; T</text>
+<text x="638" y="248" font-family="JetBrains Mono, SF Mono, Menlo, Consolas, monospace" font-size="12" font-weight="600" fill="#9a5d00">I &#8776; T &#8776; 2,000</text>
+<text x="638" y="266" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#555d68">&#8776; 7&#215; past the ridge</text>
+<line x1="736.55" y1="150" x2="736.55" y2="108.37" stroke="#1a7040" stroke-width="1.2" stroke-dasharray="3 3"/>
+<rect x="24" y="498" width="832" height="50" rx="6" fill="#f0f2f5" stroke="#d3d8df"/>
+<text x="40" y="519" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#14171c">Batching is the only lever that walks decode toward the ridge: B sequences share one weight read, so intensity &#8776; B.</text>
+<text x="40" y="538" font-family="Atkinson Hyperlegible Next, system-ui, -apple-system, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#555d68">Weight bytes stay constant; FLOPs scale with B. Past B_crit the extra sequences stop being free and latency grows with B.</text>
 </svg>

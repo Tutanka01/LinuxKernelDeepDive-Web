@@ -189,3 +189,176 @@ for (const course of COURSES) {
     });
   });
 }
+
+/* ---------------- Inference: the v3 decorators, the glossary self-test,
+   the simulator and the KV calculator ----------------
+
+   The decorators in inference/assets/inf-widgets.js run on whatever the
+   chapter renders. No chapter is guaranteed to carry a [!dashboard] row or a
+   provenance line while the v3 rewrite is in flight, so the test renders a
+   fixture through the page's own marked and appends it to the live article:
+   the same pipeline a chapter goes through, minus the fetch. */
+
+const inference = COURSES.find(c => c.id === "inference");
+
+/* While chapters are being added, inf.js may declare a slug whose file has
+   not landed yet, and the reader prefetches its neighbour: that 404 belongs
+   to the content work (tier 1 reports it as a dangling slug), not to the
+   widget under test. Everything else still fails the test. */
+function widgetErrors(capture) {
+  const missing = capture.failedRequests.filter(r => /^404 .*\/inference\/content\/[\w-]+\.md$/.test(r));
+  return capture.consoleErrors.filter(e => !(missing.length && /Failed to load resource.*404/.test(e)));
+}
+
+const V3_FIXTURE = [
+  "> [!dashboard]",
+  "> | resource | utilisation | saturation | errors |",
+  "> |---|---|---|---|",
+  "> | KV cache | `vllm:kv_cache_usage_perc` | `vllm:num_requests_waiting` | `vllm:num_preemptions_total` |",
+  "",
+  "```plaintext",
+  "vllm:num_preemptions_total{model_name=\"meta-llama/Llama-3.3-70B-Instruct\"} 12.0",
+  "```",
+  "",
+  "*Verbatim — vLLM v0.34.0, `vllm/v1/metrics/loggers.py`.*",
+  "",
+  "> **Not executed by the author.** Commands are from llama.cpp b12608; results are described by shape.",
+].join("\n");
+
+test.describe("Inference Engineering — v3 widgets", () => {
+  const arith = inference.flat.find(c => c.slug === "inference-arithmetic");
+
+  test("dashboard callout, provenance caption and lab banner are decorated, and fit at 320px", async ({ page, capture }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto(courseUrl(inference, "#/inference-arithmetic"), { waitUntil: "domcontentloaded" });
+    await waitForChapter(page, arith.title);
+
+    await page.evaluate(md => {
+      const host = document.createElement("section");
+      host.id = "v3-fixture";
+      host.innerHTML = window.marked.parse(md);
+      document.querySelector("#view .article-body").appendChild(host);
+    }, V3_FIXTURE);
+
+    const dash = page.locator("#v3-fixture blockquote.callout-dashboard");
+    await expect(dash, "the [!dashboard] blockquote was not turned into a callout").toHaveCount(1);
+    await expect(dash.locator(".inf-callout-title")).toHaveText("On the dashboard");
+    await expect(dash.locator("td[data-label='saturation']"),
+      "dashboard cells did not get their column header as data-label").toHaveCount(1);
+
+    const fit = await dash.evaluate(bq => {
+      const t = bq.querySelector("table");
+      return { table: t.getBoundingClientRect().width, box: bq.clientWidth, doc: document.documentElement.scrollWidth,
+               vw: document.documentElement.clientWidth };
+    });
+    expect(fit.table, `the dashboard table is ${Math.round(fit.table)}px wide inside a ${fit.box}px callout at 320px`)
+      .toBeLessThanOrEqual(fit.box);
+    expect(fit.doc, "the page scrolls horizontally at 320px").toBeLessThanOrEqual(fit.vw);
+
+    const prov = page.locator("#v3-fixture p.inf-provenance");
+    await expect(prov, "the provenance line after the <pre> was not decorated").toHaveCount(1);
+    await expect(prov).toHaveClass(/inf-provenance-verbatim/);
+    await expect(prov.locator(".inf-provenance-kind")).toHaveText("Verbatim");
+    const gap = await prov.evaluate(p => {
+      const pre = p.previousElementSibling;
+      return { gap: p.getBoundingClientRect().top - pre.getBoundingClientRect().bottom, preCls: pre.className };
+    });
+    expect(gap.preCls).toContain("inf-has-provenance");
+    expect(gap.gap, "the provenance caption should sit tight under its block").toBeLessThan(12);
+
+    await expect(page.locator("#v3-fixture blockquote.inf-lab-banner"),
+      "the 'Not executed by the author.' blockquote did not get the lab banner").toHaveCount(1);
+
+    expect(capture.pageErrors, capture.pageErrors.join("\n")).toEqual([]);
+    expect(widgetErrors(capture), widgetErrors(capture).join("\n")).toEqual([]);
+  });
+
+  test("glossary self-test hides definitions and reveals them one by one", async ({ page, capture }) => {
+    const gloss = inference.flat.find(c => c.slug === "glossary");
+    test.skip(!gloss, "no glossary chapter");
+    await page.goto(courseUrl(inference, "#/glossary"), { waitUntil: "domcontentloaded" });
+    await waitForChapter(page, gloss.title);
+
+    const toggle = page.getByRole("button", { name: "Self-test: hide definitions" });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    const visibleDefs = () => page.locator("dl.glossary dd:visible").count();
+    expect(await visibleDefs()).toBeGreaterThan(5);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(await visibleDefs(), "self-test on, but definitions are still visible").toBe(0);
+
+    const terms = page.locator("dl.glossary .inf-gloss-term");
+    const n = await terms.count();
+    expect(n).toBeGreaterThan(5);
+    await expect(terms.first()).toHaveAttribute("aria-expanded", "false");
+
+    await terms.first().click();
+    await expect(terms.first()).toHaveAttribute("aria-expanded", "true");
+    expect(await visibleDefs()).toBe(1);
+
+    /* keyboard: a term is a real button */
+    await terms.nth(1).focus();
+    await page.keyboard.press("Enter");
+    await expect(terms.nth(1)).toHaveAttribute("aria-expanded", "true");
+    expect(await visibleDefs()).toBe(2);
+    await expect(page.locator(".inf-gloss-status")).toContainText(`2 of ${n} revealed`);
+
+    await page.getByRole("button", { name: "Show all" }).click();
+    expect(await visibleDefs()).toBe(n);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(terms, "turning the self-test off should restore plain terms").toHaveCount(0);
+    expect(await visibleDefs()).toBeGreaterThanOrEqual(n);
+
+    expect(capture.pageErrors, capture.pageErrors.join("\n")).toEqual([]);
+    expect(widgetErrors(capture), widgetErrors(capture).join("\n")).toEqual([]);
+  });
+
+  test("the simulator mounts, its meters move, and it prices steps with the course's cost model", async ({ page, capture }) => {
+    await page.goto("/inference/simulator.html", { waitUntil: "domcontentloaded" });
+    const sim = page.locator('.inf-widget[data-widget="engine-simulator"]');
+    await expect(sim.locator(".inf-results")).toBeVisible();
+
+    const ttft = sim.locator(".inf-result-value").first();
+    await expect(ttft, "TTFT p50 never left its placeholder: the simulator is not running").not.toHaveText("—", { timeout: 10_000 });
+
+    await sim.getByRole("button", { name: /^2\. / }).click();
+    await expect(sim.locator(".inf-verdict").first()).toContainText("0.9 s");
+    await expect(sim.locator(".inf-verdict").last()).toContainText("effective knee");
+
+    /* the meters respond to a control: an arrival-rate change moves the queue or TTFT */
+    const before = await sim.locator(".inf-result-value").allTextContents();
+    await sim.getByRole("button", { name: /^1\. / }).click();
+    await page.waitForTimeout(1500);
+    const after = await sim.locator(".inf-result-value").allTextContents();
+    expect(after, "no meter changed after switching scenario").not.toEqual(before);
+
+    expect(capture.pageErrors, capture.pageErrors.join("\n")).toEqual([]);
+    expect(widgetErrors(capture), widgetErrors(capture).join("\n")).toEqual([]);
+  });
+
+  test("the KV calculator lands on the case's 132 GB and 66 GB pools", async ({ page, capture }) => {
+    const sizing = inference.flat.find(c => c.slug === "sizing-a-deployment");
+    test.skip(!sizing, "no sizing chapter");
+    await page.goto(courseUrl(inference, "#/sizing-a-deployment"), { waitUntil: "domcontentloaded" });
+    await waitForChapter(page, sizing.title);
+
+    const calc = page.locator('.inf-widget[data-widget="kv-calculator"]').first();
+    await expect(calc.locator(".inf-results")).toBeVisible();
+    const poolTile = calc.locator(".inf-results > div", { hasText: "KV pool" }).locator(".inf-result-value");
+
+    await calc.getByLabel("Model").selectOption("llama3-70b");
+    await calc.getByLabel("GPU", { exact: true }).selectOption("h100");
+    await calc.getByLabel("GPUs").selectOption("4");
+    await calc.getByLabel("Weight dtype").selectOption("2");
+    await expect(poolTile).toHaveText("132.0 GB");
+
+    await calc.getByLabel("GPUs").selectOption("2");
+    await calc.getByLabel("Weight dtype").selectOption("1");
+    await expect(poolTile).toHaveText("66.0 GB");
+
+    expect(capture.pageErrors, capture.pageErrors.join("\n")).toEqual([]);
+  });
+});

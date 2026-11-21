@@ -23,6 +23,8 @@ const QF = "```quiz";
    chapter that quietly cannot be completed the intended way. */
 const QUIZLESS_BY_DESIGN = new Set([
   "inference/content/glossary.md",
+  "inference/content/review.md",          /* the review deck: a tool, not a chapter */
+  "inference/content/mixed-problems.md",  /* a problem set; its problems are the checkpoint */
 ]);
 
 const guided = COURSES.filter(c => c.guided);

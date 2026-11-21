@@ -56,7 +56,10 @@ test("every asset referenced from the site's own JS and CSS exists on disk", () 
 
   for (const file of sources) {
     const src = read(file);
-    const baseDir = file.startsWith("inference/") ? "inference"
+    /* a url() in a stylesheet resolves against the stylesheet itself; a
+       string in a script resolves against the page that loads it */
+    const baseDir = file.endsWith(".css") ? path.dirname(file)
+      : file.startsWith("inference/") ? "inference"
       : file.startsWith("distributed/") ? "distributed" : "";
 
     /* vendorUrl("x") resolves against assets/vendor/, wherever it is called

@@ -18,9 +18,9 @@
       if (theme === "paper") document.documentElement.dataset.theme = "paper";
     })();
   </script>
-  <link rel="stylesheet" href="../assets/style.css?v=20260726">
-  <link rel="stylesheet" href="../assets/course.css?v=20260726">
-  <link rel="stylesheet" href="assets/inf.css?v=20260726">
+  <link rel="stylesheet" href="../assets/style.css?v=20261123">
+  <link rel="stylesheet" href="../assets/course.css?v=20261123">
+  <link rel="stylesheet" href="assets/inf.css?v=20261123">
   <style>
     /* one bar of chrome for a page that has no sidebar */
     .sim-topline {
@@ -30,12 +30,11 @@
       gap: 0.15rem 0.6rem;
       margin: 0 0 1.6rem;
       padding-bottom: 0.9rem;
-      border-bottom: 1px solid var(--rule);
-      font-family: var(--mono);
-      font-size: 0.72rem;
+      border-bottom: 1px solid var(--rule-mid);
+      font-size: var(--fs-small);
       color: var(--text-faint);
     }
-    .sim-topline .theme-switch { margin: 0 0 0 auto; width: 148px; }
+    .sim-topline .theme-switch { margin: 0 0 0 auto; width: 164px; }
   </style>
 </head>
 <body>
@@ -62,17 +61,22 @@
 
             <h1>Serving-engine simulator</h1>
 
-            <p>One replica of Llama-3-70B in BF16, tensor-parallel over four
+            <p>One replica of Llama-3.3-70B in BF16, tensor-parallel over four
             H100s. Requests arrive by a Poisson process with heavy-tailed
             prompt and output lengths, the scheduler batches them one
-            iteration at a time, the paged KV block pool allocates and frees,
-            and three meters move. A step costs a fixed weight read (14&nbsp;ms,
-            paid once however many sequences ride on it), a per-sequence KV
-            read proportional to context length, and a compute term that only
-            binds once the step's token count passes <code>B_crit</code>. Every
+            iteration at a time, the paged KV block pool (64-token blocks, vLLM
+            v0.34's default) allocates and frees, and the meters move. A step
+            costs the course's one model, <code>max(t_w, t_c) + t_kv</code>: a
+            weight read of 14&nbsp;ms, paid once however many sequences ride on
+            it; a compute term of 0.089&nbsp;ms per token at 40% MFU, which only
+            binds past the effective knee of ~160 tokens per step (the
+            nameplate <code>B_crit</code> is 295); and a per-sequence KV read
+            proportional to context length. So a 3,000-token prefill takes
+            ~0.27&nbsp;s and an unchunked 10,000-token one ~0.89&nbsp;s. Every
             constant is derived from the course's reference numbers, so the
             meters read like a real machine and the knobs move them for the
-            real reasons. Start with the numbered scenarios.</p>
+            real reasons. These are estimates, not measurements. Start with the
+            numbered scenarios.</p>
 
             <div class="inf-widget" data-widget="engine-simulator">
             <p class="inf-widget-fallback">Interactive serving-engine simulator &mdash; needs JavaScript.</p>
@@ -92,9 +96,9 @@
 
   <p id="live-region" class="sr-only" role="status" aria-live="polite"></p>
 
-  <script src="../assets/reader-ui.js?v=20260726"></script>
-  <script defer src="assets/inf-widgets.js?v=20260726"></script>
-  <script defer src="assets/inf-simulator.js?v=20260726"></script>
+  <script src="../assets/reader-ui.js?v=20261123"></script>
+  <script defer src="assets/inf-widgets.js?v=20261123"></script>
+  <script defer src="assets/inf-simulator.js?v=20261123"></script>
   <script>
     /* This page has no reader engine, so it wires its own theme switch —
        the same localStorage key and the same data-theme attribute the

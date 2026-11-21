@@ -3,36 +3,32 @@
    The course home (hero, progress ring, module map, chapter
    cards), the quiz blocks and the completion control.
 
-   The product shell — typography, article, navigation, search,
-   themes, responsive layout, focus states and motion — lives in
-   style.css, which every page loads first.
+   The product shell — typography, tokens, article, navigation,
+   search, themes, responsive layout, focus states and motion —
+   lives in style.css, which every page loads first.
    ============================================================ */
 
 :root {
-  --quiz-good: #9fbf7f;
-  --quiz-bad: #d98a7a;
-}
-
-html[data-theme="paper"] {
-  --quiz-good: #4f7d2c;
-  --quiz-bad: #a4462e;
+  --quiz-good: var(--c-green);
+  --quiz-bad:  var(--c-red);
 }
 
 /* Course home */
 
-/* The course map is the same column as a chapter — same measure, same
-   gutter — so moving between the two does not shift the text sideways.
-   style.css owns the gutter; this file only has to stop overriding it. */
+/* The course map is the same column as a chapter — same outer measure,
+   same gutter, same left edge — so moving between the two does not shift
+   the text sideways. Its sentences keep the prose measure; the cards take
+   the wide box. */
 .home {
   max-width: var(--measure);
   margin: 0 auto;
-  padding: 3.25rem var(--gutter) 2rem;
+  padding: 3rem var(--gutter) 2rem;
   padding-inline: max(var(--gutter), env(safe-area-inset-left))
                   max(var(--gutter), env(safe-area-inset-right));
   overflow-wrap: break-word;
 }
 
-.home.fade-in { animation: fadeIn 0.35s ease-out; }
+.home.fade-in { animation: fadeIn 0.25s ease-out; }
 @media (prefers-reduced-motion: reduce) { .home.fade-in { animation: none; } }
 
 .hero {
@@ -44,39 +40,30 @@ html[data-theme="paper"] {
 .hero-text { flex: 1; min-width: 0; }
 
 .hero-kicker {
-  margin: 0 0 0.8rem;
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
+  margin: 0 0 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .hero h1 {
   margin: 0 0 0.4rem;
   color: var(--ink);
-  font-size: 2rem;
-  line-height: 1.18;
-  letter-spacing: -0.01em;
+  font-size: 2.3rem;
+  font-weight: 750;
+  line-height: 1.12;
+  letter-spacing: -0.024em;
+  text-wrap: balance;
 }
 
-.hero h1::after {
-  content: "";
-  display: block;
-  width: 2.5rem;
-  height: 2px;
-  margin-top: 1.1rem;
-  background: var(--accent);
-}
-
-.hero-lede { margin: 1rem 0 1.5rem; }
-.hero-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.hero-hint { color: var(--text-faint); font-size: 0.85rem; font-style: italic; }
+.hero-lede { max-width: var(--prose); margin: 1rem 0 1.5rem; }
+.hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
+.hero-hint { color: var(--text-faint); font-size: var(--fs-small); }
 
 .hero-ring { position: relative; flex-shrink: 0; max-width: 100%; }
 .hero-ring svg { display: block; max-width: 100%; height: auto; }
-.ring-track { fill: none; stroke: var(--rule); stroke-width: 6; }
+.ring-track { fill: none; stroke: var(--rule-mid); stroke-width: 6; }
 .ring-fill {
   fill: none;
   stroke: var(--accent);
@@ -95,35 +82,23 @@ html[data-theme="paper"] {
   pointer-events: none;
 }
 
-.ring-label strong { color: var(--ink); font-size: 1.45rem; line-height: 1; }
+.ring-label strong { color: var(--ink); font-size: 1.5rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .ring-label span {
-  margin-top: 0.3rem;
+  margin-top: 0.25rem;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+  font-size: 0.8rem;
 }
 
-/* Footnote-grade copy about a tick-off mechanic used to carry the heaviest
-   accent bar in the system, full column width, directly under the CTA — it
-   read as a warning banner. Demoted to what it is. */
+/* Footnote-grade copy about the tick-off mechanic. */
 .path-legend {
+  max-width: var(--prose);
   margin: 1.6rem 0 2.4rem;
   padding: 0 0 0 0.9rem;
-  border-left: 2px solid var(--rule-mid);
-  color: var(--text-faint);
-  font-size: 0.82rem;
-  font-style: italic;
+  border-left: 3px solid var(--rule-mid);
+  color: var(--text-dim);
+  font-size: 0.9rem;
   line-height: 1.6;
 }
-
-/* the signature amber tick is rounded on chapters; make the home match */
-.hero h1::after { border-radius: 2px; }
-
-/* a fixed <br> in the hero headline broke at the same character at every
-   width; let the line find its own balance */
-.hero h1 { text-wrap: balance; }
 
 /* Course map and chapter cards */
 
@@ -132,88 +107,80 @@ html[data-theme="paper"] {
   display: flex;
   align-items: baseline;
   gap: 0.9rem;
-  margin-bottom: 1rem;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid var(--rule);
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule-mid);
 }
 
 .module-index {
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.9rem;
+  font-size: 1rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
-.module-head h2 { margin: 0 0 0.15rem; color: var(--ink); font-size: 1.4rem; overflow-wrap: break-word; min-width: 0; }
-.module-blurb { margin: 0 0 0.35rem; color: var(--text-dim); font-size: 0.86rem; font-style: italic; }
-.module-head .lvl-badge { margin-left: auto; flex-shrink: 0; }
+.module-head h2 { min-width: 0; margin: 0 0 0.15rem; color: var(--ink); font-size: 1.4rem; font-weight: 700; letter-spacing: -0.012em; overflow-wrap: break-word; }
+.module-blurb { margin: 0 0 0.35rem; color: var(--text-dim); font-size: 0.9rem; line-height: 1.55; }
+.module-head .lvl-badge { flex-shrink: 0; margin-left: auto; }
 
-/* course.js has always emitted `lvl-badge lvl-${level}` — beginner,
-   intermediate, advanced — and no stylesheet defined any of them, so
-   PREFACE, BEGINNER and ADVANCED+ all rendered the same amber and the
-   difficulty progression the course data models was invisible. */
-.lvl-badge.lvl-beginner {
-  border-color: var(--lvl-core);
-  background: color-mix(in srgb, var(--lvl-core) 12%, transparent);
-  color: var(--lvl-core);
-}
-.lvl-badge.lvl-intermediate {
-  border-color: var(--lvl-mechanism);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.lvl-badge.lvl-advanced {
-  border-color: var(--lvl-internals);
-  background: color-mix(in srgb, var(--lvl-internals) 12%, transparent);
-  color: var(--lvl-internals);
-}
-
+/* Level marker: a dot and a word in the level's colour. Beginner, middle
+   and advanced read as green / amber / red here, in the chapter header and
+   in the Linux course's level dots alike. */
 .lvl-badge {
-  display: inline-block;
-  padding: 0.18em 0.65em;
-  border: 1px solid var(--accent-dim);
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.3;
   white-space: nowrap;
 }
+.lvl-badge.lvl-beginner,
+.lvl-badge.lvl-intermediate,
+.lvl-badge.lvl-advanced { font-weight: 650; }
+.lvl-badge.lvl-beginner::before,
+.lvl-badge.lvl-intermediate::before,
+.lvl-badge.lvl-advanced::before {
+  content: "";
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.lvl-badge.lvl-beginner     { color: var(--lvl-core); }
+.lvl-badge.lvl-intermediate { color: var(--lvl-mechanism); }
+.lvl-badge.lvl-advanced     { color: var(--lvl-internals); }
 
-.chapter-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.65rem; }
+.chapter-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
 .chapter-card {
   display: flex;
   align-items: center;
   gap: 0.9rem;
-  padding: 0.85rem 1.1rem;
+  padding: 0.75rem 1rem;
   border: 1px solid var(--rule-mid);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
   color: var(--text);
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .chapter-card:hover,
 .chapter-card:focus-visible { border-color: var(--accent-dim); background: var(--accent-soft); }
-/* the hover-only arrow was the card's only affordance for mouse users and
-   nothing at all for keyboard ones */
-.chapter-card:focus-visible .card-arrow { color: var(--accent); opacity: 1; transform: translateX(0); }
+.chapter-card:hover .card-title { color: var(--accent); }
 
 .card-check {
   position: relative;
+  flex-shrink: 0;
   width: 17px;
   height: 17px;
-  flex-shrink: 0;
-  /* an unchecked ring at 1.16:1 was invisible, so "how many have I done"
-     read as "there is nothing here" */
   border: 1.5px solid var(--rule-strong);
   border-radius: 50%;
 }
 
-.chapter-card.done .card-check { border-color: var(--accent); background: var(--accent); }
+.chapter-card.done .card-check { border-color: var(--c-green); background: var(--c-green); }
 .chapter-card.done .card-check::after {
   content: "";
   position: absolute;
@@ -226,145 +193,194 @@ html[data-theme="paper"] {
   transform: rotate(42deg);
 }
 
-.chapter-card.done .card-title { color: var(--text-faint); }
-.card-num { flex-shrink: 0; color: var(--text-faint); font-family: var(--mono); font-size: 0.76rem; }
+.chapter-card.done .card-title { color: var(--text-dim); }
+.card-num { flex-shrink: 0; min-width: 1.4rem; color: var(--text-faint); font-size: 0.86rem; font-variant-numeric: tabular-nums; }
 .card-body { min-width: 0; }
-.card-title { display: block; color: var(--ink); font-size: 0.96rem; font-weight: 700; }
-.card-desc { display: block; margin-top: 0.1rem; color: var(--text-dim); font-size: 0.82rem; font-style: italic; }
-.card-arrow {
-  margin-left: auto;
-  color: var(--text-faint);
-  opacity: 0;
-  transform: translateX(-6px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-.chapter-card:hover .card-arrow { color: var(--accent); opacity: 1; transform: translateX(0); }
+.card-title { display: block; color: var(--ink); font-size: 0.98rem; font-weight: 650; line-height: 1.35; }
+.card-desc { display: block; margin-top: 0.15rem; color: var(--text-dim); font-size: 0.86rem; line-height: 1.5; }
 
 /* Course-specific chapter metadata */
 
-.crumb { color: var(--text-faint); text-decoration: none; }
-.crumb:hover, .crumb:focus-visible { color: var(--accent); }
-/* was var(--rule) — 1.21:1, so the separator simply was not there */
+.crumb { color: var(--text-dim); text-decoration: none; }
+.crumb:hover, .crumb:focus-visible { color: var(--accent); text-decoration: underline; }
 .crumb-sep { color: var(--text-faint); }
-.crumb-here { color: var(--text-dim); }
-.meta-right { display: inline-flex; align-items: center; gap: 0.7rem; margin-left: auto; }
-.read-time { color: var(--text-faint); font-family: var(--mono); font-size: 0.72rem; }
+.crumb-here { color: var(--text-faint); }
+.meta-right { display: inline-flex; align-items: center; gap: 0.9rem; margin-left: auto; }
+.read-time { color: var(--text-faint); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
 
-/* Quiz blocks and answer states */
+/* ------------------------------------------------------------
+   Quiz.
+
+   Each question is a card. The legend is floated so it is laid out
+   *inside* the fieldset like any other block: a wrapped question can
+   no longer have the card's top border drawn through it, which is
+   what a native legend does once it runs to two lines. The answer
+   state is carried three ways — colour, a glyph and a word — so it
+   never rests on colour alone.
+   ------------------------------------------------------------ */
 
 .quiz {
-  margin: 2.4rem 0 1.5rem;
-  padding: 1.4rem 1.5rem 1.2rem;
+  margin: 2.6rem 0 1.5rem;
+  padding: 1.35rem 1.4rem 1.2rem;
   border: 1px solid var(--rule-mid);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
 }
 
-.quiz-head h3 { margin: 0.3rem 0 0.2rem; color: var(--accent); font-size: 1.15rem; }
+.quiz-head { margin-bottom: 1.1rem; }
+.quiz-head h3 { margin: 0 0 0.2rem; color: var(--ink); font-size: 1.22rem; }
 .quiz-flag {
-  color: var(--accent-dim);
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--accent);
+  font-size: var(--fs-small);
+  font-weight: 650;
 }
-.quiz-sub { margin: 0 0 1.1rem; color: var(--text-dim); font-size: 0.84rem; font-style: italic; }
-.quiz-q { margin: 0 0 0.9rem; padding: 0.9rem 1.1rem 0.8rem; border: 1px solid var(--rule-mid); border-radius: 5px; }
-.quiz-q legend { padding: 0 0.4rem; color: var(--ink); font-size: 0.95rem; font-weight: 700; }
-/* Correctness was a border colour and nothing else — and --quiz-good
-   against --quiz-bad measures 1.30:1, so the two states were the same
-   state to a colour-blind reader. The legend now carries a glyph and a
-   word as well. */
-.quiz-q.right { border-color: var(--quiz-good); }
-.quiz-q.wrong { border-color: var(--quiz-bad); }
+.quiz-sub { margin: 0; color: var(--text-dim); font-size: 0.9rem; }
+
+.quiz-q {
+  min-width: 0;
+  margin: 0 0 0.8rem;
+  padding: 0.95rem 1rem 0.75rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.quiz-q legend {
+  float: left;           /* a floated legend is an ordinary block inside the card */
+  width: 100%;
+  margin: 0 0 0.65rem;
+  padding: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.quiz-q legend + * { clear: both; }
+.quiz-q.right { border-color: color-mix(in srgb, var(--quiz-good) 70%, var(--rule-mid)); }
+.quiz-q.wrong { border-color: color-mix(in srgb, var(--quiz-bad) 70%, var(--rule-mid)); }
 
 .quiz-verdict {
   display: inline-block;
   margin-left: 0.5rem;
-  font-family: var(--mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-small);
   font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  white-space: nowrap;
 }
 .quiz-q.right .quiz-verdict { color: var(--quiz-good); }
 .quiz-q.wrong .quiz-verdict { color: var(--quiz-bad); }
-/* thumb-sized: the block padding does the lifting so the floor rarely bites,
-   and the baseline answers wrap onto stays where the eye expects it */
+
+/* an option is a full-width, thumb-sized target with a visible edge */
 .quiz-choice {
   display: flex;
-  align-items: baseline;
-  gap: 0.55rem;
+  align-items: flex-start;
+  gap: 0.65rem;
   min-height: 44px;
-  margin: 0 -0.5rem;
-  padding: 0.55rem 0.5rem;
-  border-radius: 4px;
+  margin: 0 0 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.5;
   cursor: pointer;
-  font-size: 0.93rem;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
-.quiz-choice:hover { background: var(--accent-soft); }
-.quiz-choice input { appearance: auto; accent-color: var(--accent); cursor: pointer; }
+.quiz-choice:hover { border-color: var(--rule-strong); }
+.quiz-choice input {
+  flex-shrink: 0;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0.2rem 0 0;
+  appearance: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.quiz-choice > span { flex: 1; min-width: 0; }
+/* selected: accent edge and ground (and the filled radio) */
+.quiz-choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.quiz-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* after checking: the chosen option says whether it was right */
+.quiz-q.right .quiz-choice:has(input:checked) {
+  border-color: var(--quiz-good);
+  background: var(--c-green-soft);
+}
+.quiz-q.wrong .quiz-choice:has(input:checked) {
+  border-color: var(--quiz-bad);
+  background: var(--c-red-soft);
+}
+.quiz-q.right .quiz-choice:has(input:checked) > span::after,
+.quiz-q.wrong .quiz-choice:has(input:checked) > span::after {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: var(--fs-small);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.quiz-q.right .quiz-choice:has(input:checked) > span::after { content: "✓ your answer"; color: var(--quiz-good); }
+.quiz-q.wrong .quiz-choice:has(input:checked) > span::after { content: "✗ your answer"; color: var(--quiz-bad); }
+
 .quiz-explain {
   margin: 0.6rem 0 0.2rem;
   padding-top: 0.6rem;
-  border-top: 1px dashed var(--rule);
+  border-top: 1px solid var(--rule);
   color: var(--text-dim);
-  font-size: 0.86rem;
-  font-style: italic;
+  font-size: 0.92rem;
 }
-.quiz-q.right .quiz-explain { color: var(--quiz-good); }
-.quiz-foot { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 1.1rem; }
-.quiz-result { color: var(--text-dim); font-size: 0.9rem; font-style: italic; }
+.quiz-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin-top: 1.1rem; }
+.quiz-result { color: var(--text-dim); font-size: 0.92rem; }
 .quiz-result.pass { color: var(--quiz-good); font-weight: 700; }
-.quiz-result.fail { color: var(--quiz-bad); }
+.quiz-result.fail { color: var(--quiz-bad); font-weight: 600; }
 /* answers were right but the write was refused — never claim a save that failed */
-.quiz-result.warn { color: var(--lvl-internals); font-style: normal; }
+.quiz-result.warn { color: var(--c-amber); }
 
 /* Per-chapter completion control */
 
-.chapter-done { margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--rule); text-align: center; }
-/* the one control a reader taps at the end of every chapter — thumb-sized too */
+.chapter-done { margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--rule-mid); text-align: center; }
 .complete-toggle {
   min-height: 44px;
-  padding: 0.7rem 1.5rem;
+  padding: 0.6rem 1.4rem;
   border: 1px solid var(--rule-strong);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--text-dim);
-  font-size: 0.9rem;
-  font-weight: 700;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
-.complete-toggle:hover { border-color: var(--accent-dim); color: var(--ink); }
-.complete-toggle.done { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.complete-toggle:hover { border-color: var(--accent-dim); color: var(--accent); }
+.complete-toggle.done { border-color: var(--c-green); background: var(--c-green-soft); color: var(--c-green); }
 .save-warning {
   margin: 0.7rem 0 0;
-  color: var(--lvl-internals);
-  font-size: 0.82rem;
-  font-style: italic;
+  color: var(--c-red);
+  font-size: var(--fs-small);
 }
 
 @media (max-width: 900px) {
-  .home { padding-top: 2.4rem; padding-bottom: 1.5rem; }
+  .home { padding-top: 2.2rem; padding-bottom: 1.5rem; }
   .hero { flex-direction: column-reverse; align-items: flex-start; gap: 1rem; }
   .hero-ring { align-self: flex-end; }
-  .hero h1 { font-size: 1.75rem; }
+  .hero h1 { font-size: 1.95rem; }
   .module-head { flex-wrap: wrap; }
 }
 
 @media (min-width: 601px) and (max-width: 900px) {
-  .home { padding-top: 3rem; padding-bottom: 2rem; }
+  .home { padding-top: 2.8rem; padding-bottom: 2rem; }
 }
 
 @media (max-width: 600px) {
-  .home { padding-top: 1.85rem; padding-bottom: 1rem; }
-  .hero h1 { font-size: 1.55rem; }
+  .home { padding-top: 1.7rem; padding-bottom: 1rem; }
+  .hero h1 { font-size: 1.7rem; }
   .hero-ring svg { width: 100px; height: 100px; }
-  .ring-label strong { font-size: 1.1rem; }
-  .module-head h2 { font-size: 1.22rem; }
-  .chapter-card { gap: 0.7rem; padding: 0.75rem 0.9rem; }
+  .ring-label strong { font-size: 1.15rem; }
+  .module-head h2 { font-size: 1.24rem; }
+  .chapter-card { gap: 0.7rem; padding: 0.7rem 0.85rem; }
   /* the map is all a phone reader has to steer by — clip the blurb, never drop it */
   .card-desc {
     display: -webkit-box;
@@ -372,29 +388,28 @@ html[data-theme="paper"] {
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    font-size: 0.78rem;
+    font-size: 0.84rem;
   }
-  .quiz { padding: 1.1rem 1rem 1rem; }
+  .quiz { padding: 1.05rem 0.9rem 1rem; }
+  .quiz-q { padding: 0.8rem 0.75rem 0.6rem; }
+  .quiz-choice { padding: 0.55rem 0.6rem; }
   .meta-right { flex-basis: 100%; margin-left: 0; }
 }
 
 /* ---------------- platform landing (#/ on the root shell) ----------------
-
-   Reuses the course-home vocabulary — .hero, .card-arrow, the progress ring —
-   because it is the same product, one level up. The only new idea is a card
-   big enough to be the page's primary content rather than a nav chip.
-
-   Ring geometry is r=26 here against r=52 on a course home, so the stroke is
-   halved to keep the same visual weight. */
+   Reuses the course-home vocabulary — .hero, the progress ring — because it
+   is the same product, one level up. The cards are the page's primary
+   content rather than nav chips. Ring geometry is r=26 here against r=52
+   on a course home, so the stroke is halved. */
 
 .platform-hero { display: block; }
-.platform-hero .hero-lede { max-width: 46rem; }
+.platform-hero .hero-lede { max-width: var(--prose); }
 .platform-hero .hero-hint { display: block; margin-top: 1.2rem; }
 
 .course-cards {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0.9rem;
+  gap: 0.75rem;
   margin: 2rem 0 0;
 }
 
@@ -402,12 +417,12 @@ html[data-theme="paper"] {
   display: flex;
   align-items: center;
   gap: 1.2rem;
-  padding: 1.2rem 1.3rem;
+  padding: 1.15rem 1.3rem;
   border: 1px solid var(--rule-mid);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .course-card:hover,
@@ -415,65 +430,42 @@ html[data-theme="paper"] {
   border-color: var(--accent-dim);
   background: var(--accent-soft);
 }
+.course-card:hover .course-card-title,
+.course-card:focus-visible .course-card-title { color: var(--accent); }
 
-/* Three cards *are* the landing page, so their arrow is not a hover reward:
-   at rest it is the only mark that says a card is somewhere to go. The
-   chapter cards can keep theirs hidden — a 56-card grid of arrows is noise. */
-.course-card .card-arrow {
-  align-self: center;
-  opacity: 0.55;
-  transform: translateX(0);
-}
-
-.course-card:hover .card-arrow,
-.course-card:focus-visible .card-arrow {
-  color: var(--accent);
-  opacity: 1;
-  transform: translateX(3px);
-}
-
-.course-card-body { min-width: 0; flex: 1; }
+.course-card-body { flex: 1; min-width: 0; }
 
 .course-card-title {
   display: block;
   color: var(--ink);
-  font-size: 1.12rem;
+  font-size: 1.14rem;
   font-weight: 700;
+  letter-spacing: -0.008em;
 }
 
 .course-card-desc {
   display: block;
   margin-top: 0.25rem;
   color: var(--text-dim);
-  font-size: 0.86rem;
+  font-size: 0.92rem;
   line-height: 1.55;
 }
 
 .course-card-meta {
   display: block;
-  margin-top: 0.5rem;
+  margin-top: 0.45rem;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
 }
 
-/* started: a real ring. Not started: the size of the thing, because an empty
-   donut reading "0%" tells a first-time visitor nothing. */
+/* started: a real ring. Not started: the size of the thing. */
 .course-ring { position: relative; flex-shrink: 0; width: 64px; height: 64px; }
 .course-ring svg { display: block; }
 .course-ring .ring-track,
 .course-ring .ring-fill { stroke-width: 3.5; }
-/* the shared --rule track vanishes at this stroke, and a ring with no visible
-   track reads as "4% of nothing" rather than "4% of the course" */
 .course-ring .ring-track { stroke: var(--rule-mid); }
 
-/* One centred flex item holding one line of text: `align-items: baseline` on a
-   box stretched over the whole ring packed the line at the top of the cross
-   axis, so "4%" sat against the rim instead of in the middle. The "%" is
-   inline *inside* that item, so it keeps the digits' baseline — as a flex
-   sibling it aligned to the ring's edges rather than to the number. */
 .course-ring-label {
   position: absolute;
   inset: 0;
@@ -481,91 +473,76 @@ html[data-theme="paper"] {
   align-items: center;
   justify-content: center;
   color: var(--ink);
-  font-family: var(--mono);
-  font-size: 0.92rem;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   pointer-events: none;
 }
 
-.course-ring-label b { font-weight: 400; }
-.course-ring-label span { font-size: 0.58rem; color: var(--text-faint); }
+.course-ring-label b { font-weight: 650; }
+.course-ring-label span { color: var(--text-faint); font-size: 0.7rem; }
 
 .course-meter {
-  flex-shrink: 0;
-  width: 64px;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  gap: 0.1rem;
+  gap: 0.15rem;
+  width: 64px;
 }
 
-.course-meter-n { color: var(--ink); font-family: var(--mono); font-size: 1.3rem; line-height: 1; }
+.course-meter-n { color: var(--ink); font-size: 1.45rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .course-meter-l {
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.58rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-size: 0.76rem;
 }
 
-/* the way back up, above the three course chips in every sidebar */
-.chip-all { margin-bottom: 0.5rem; }
-.chip-all .chip-title { color: var(--accent); }
-
 @media (max-width: 600px) {
-  /* The blurb wraps to five or six lines on a phone, and a centred meter then
-     floated halfway down a tall card, level with nothing. Pin it to the title
-     it measures. */
-  .course-card { gap: 0.9rem; padding: 1rem; align-items: flex-start; }
-  .course-card-title { font-size: 1rem; }
+  /* The blurb wraps to five lines on a phone; pin the meter to the title
+     it measures instead of floating it halfway down a tall card. */
+  .course-card { align-items: flex-start; gap: 0.9rem; padding: 1rem; }
+  .course-card-title { font-size: 1.04rem; }
   .course-ring, .course-meter { width: 52px; margin-top: 0.1rem; }
   .course-ring { height: 52px; }
   .course-ring svg { width: 52px; height: 52px; }
-  .course-card .card-arrow { align-self: flex-start; margin-top: 0.35rem; }
 }
 
 /* ---- The GPU–Kernel Track card, platform landing ----
-   Not a fourth course card: it is a route *through* the three above it, so it
-   reads as a different kind of object — full width, quieter surface, the
+   Not a fourth course card: it is a route *through* the three above it, so
+   it reads as a different kind of object — a quieter surface with the
    accent carried by the left edge rather than by a progress ring. */
 .track-card {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.35rem 1rem;
-  align-items: start;
+  display: block;
   margin-top: 1.25rem;
-  padding: 1.35rem 1.5rem;
+  padding: 1.2rem 1.4rem;
   border: 1px solid var(--rule-mid);
-  border-left: 2px solid var(--accent-dim);
-  border-radius: 3px;
-  background: var(--bg-raised);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--bg);
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
-.track-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.track-card:hover { border-color: var(--accent-dim); border-left-color: var(--accent); background: var(--accent-soft); }
 
 .track-card-kicker {
-  grid-column: 1;
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
+  display: block;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-weight: 500;
 }
 .track-card-title {
-  grid-column: 1;
-  font-family: var(--serif);
-  font-size: 1.2rem;
+  display: block;
+  margin-top: 0.1rem;
   color: var(--ink);
+  font-size: 1.14rem;
+  font-weight: 700;
 }
+.track-card:hover .track-card-title { color: var(--accent); }
 .track-card-desc {
-  grid-column: 1;
-  font-family: var(--serif);
-  font-size: 0.94rem;
-  line-height: 1.6;
+  display: block;
+  margin-top: 0.25rem;
   color: var(--text-dim);
-  margin-top: 0.15rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
-.track-card .card-arrow { grid-column: 2; grid-row: 1 / span 3; align-self: center; color: var(--text-faint); }
-.track-card:hover .card-arrow { color: var(--accent); }

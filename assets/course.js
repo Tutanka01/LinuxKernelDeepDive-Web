@@ -108,8 +108,8 @@ const vendorUrl = window.ReaderUI
   : rel => new URL("vendor/" + rel, document.currentScript.src).href;
 
 const HLJS_THEME_HREF = {
-  dark:  vendorUrl("hljs/gruvbox-dark-medium.min.css"),
-  paper: vendorUrl("hljs/gruvbox-light-medium.min.css"),
+  dark:  vendorUrl("hljs/ldd-dark.css"),
+  paper: vendorUrl("hljs/ldd-paper.css"),
 };
 
 function currentTheme() {
@@ -256,7 +256,7 @@ function buildToc() {
         <span class="toc-title">${ch.title}</span>
         <span class="toc-check" aria-hidden="true">✓</span></a></li>`;
     }).join("");
-    return `<p class="toc-part">${mod.module}</p>
+    return `<p class="toc-part">${partLabelHtml(mod.module)}</p>
             <ul class="toc-list">${items}</ul>`;
   }).join("");
 }
@@ -374,6 +374,35 @@ function scrollToAnchor(anchor) {
   }
 }
 
+/* "Module 2 — The Engine" is how the course data names a module (the README
+   and tests quote it that way). The rail shows the name, with the module
+   number as a quieter coordinate in front of it rather than a dash. */
+function partName(name) {
+  return name.replace(/^(?:Part|Module)\s+[\w.]+\s+—\s+/, "");
+}
+
+function partLabelHtml(name) {
+  const m = /^((?:Part|Module)\s+[\w.]+)\s+—\s+(.+)$/.exec(name);
+  return m ? `<span class="toc-part-num">${m[1]}</span><span class="toc-part-name">${m[2]}</span>`
+           : `<span class="toc-part-name">${name}</span>`;
+}
+
+/* The blockquote straight under a chapter's title is its goal box
+   ("The question: …" / "You'll be able to: …", or "Goal of this chapter:").
+   Tag it so the stylesheet can make the question the page's loud element
+   and leave every other blockquote quiet. Markdown stays untouched. */
+function decorateGoalBox(root) {
+  const h1 = root.querySelector(".article-body > h1");
+  const bq = h1 && h1.nextElementSibling;
+  if (!bq || bq.tagName !== "BLOCKQUOTE") return;
+  const first = bq.firstElementChild;
+  if (!first || first.tagName !== "P" || !first.firstElementChild ||
+      first.firstElementChild.tagName !== "STRONG" ||
+      first.firstChild !== first.firstElementChild) return;
+  bq.classList.add("goal-box");
+  first.classList.add("goal-question");
+}
+
 /* ---------------- home / course map ---------------- */
 
 /* The home printed a positional index and then stripped the authored
@@ -415,7 +444,6 @@ function renderHome() {
             <span class="card-title">${ch.title}</span>
             <span class="card-desc">${ch.desc}</span>
           </span>
-          <span class="card-arrow" aria-hidden="true">&rarr;</span>
         </a>`;
     }).join("");
     return `
@@ -436,12 +464,12 @@ function renderHome() {
     <div class="home fade-in">
       <header class="hero">
         <div class="hero-text">
-          <p class="hero-kicker">A self-paced course · ${FLAT.length} chapters</p>
+          <p class="hero-kicker">A self-paced course in ${FLAT.length} chapters</p>
           <h1>${COURSE_META.heroTitle}</h1>
           <p class="hero-lede">${COURSE_META.heroLede}</p>
           <div class="hero-actions">
             <a class="btn-primary" href="#/${next.slug}">
-              ${started ? "Continue — " + next.title : "Start the course"}
+              ${started ? "Continue with " + next.title : "Start the course"}
             </a>
             ${started
               ? `<span class="hero-hint">${done} of ${FLAT.length} chapters complete</span>`
@@ -495,7 +523,7 @@ function renderQuizzes(slug) {
       <div class="quiz-head">
         <span class="quiz-flag">Checkpoint</span>
         <h3>Check your understanding</h3>
-        <p class="quiz-sub">${data.length} question${data.length > 1 ? "s" : ""} — answer them all to complete the chapter.</p>
+        <p class="quiz-sub">${data.length} question${data.length > 1 ? "s" : ""}. Answer them all to complete the chapter.</p>
       </div>
       ${data.map((q, qi) => `
         <fieldset class="quiz-q" data-qi="${qi}" data-answer="${q.answer}">
@@ -532,7 +560,7 @@ function renderQuizzes(slug) {
           verdict.className = "quiz-verdict";
           legend.appendChild(verdict);
         }
-        verdict.textContent = ok ? "✓ correct" : "✗ not quite";
+        verdict.textContent = ok ? "✓ Correct" : "✗ Not quite";
         fs.setAttribute("aria-invalid", String(!ok));
         explain.hidden = false;
         if (ok) correct += 1;
@@ -546,13 +574,13 @@ function renderQuizzes(slug) {
       if (correct === data.length) {
         const saved = setComplete(slug, true);   // write first, report second
         result.textContent = saved
-          ? "Perfect — chapter marked as complete ✓"
-          : "Perfect — every answer correct. Progress can't be saved: this browser is blocking local storage.";
+          ? "✓ All correct. Chapter marked as complete."
+          : "All correct, but progress can't be saved: this browser is blocking local storage.";
         result.className = saved ? "quiz-result pass" : "quiz-result warn";
         const btn = viewEl.querySelector(".complete-toggle");
         if (btn) syncCompleteButton(btn, slug);
       } else {
-        result.textContent = `${correct}/${data.length} correct — read the explanations and try again.`;
+        result.textContent = `${correct} of ${data.length} correct. Read the explanations and try again.`;
         result.className = "quiz-result fail";
       }
     });
@@ -566,7 +594,7 @@ function syncCompleteButton(btn, slug) {
   btn.classList.toggle("done", done);
   btn.setAttribute("aria-pressed", String(done));
   btn.innerHTML = done
-    ? `<span class="check-ic" aria-hidden="true">✓</span> Completed — tap to undo`
+    ? `<span class="check-ic" aria-hidden="true">✓</span> Completed (select to undo)`
     : `Mark chapter as complete`;
 }
 
@@ -644,19 +672,19 @@ async function renderChapter(slug, anchor) {
       <div class="article-body">${marked.parse(md)}</div>
       <div class="chapter-done">
         <button class="complete-toggle" type="button"></button>
-        <p class="save-warning" role="status" hidden>Progress can't be saved — this browser is blocking local storage.</p>
+        <p class="save-warning" role="status" hidden>Progress can't be saved: this browser is blocking local storage.</p>
       </div>
     </article>
     <nav class="pager" aria-label="Chapter navigation">
         ${prev ? `<a class="prev" href="#/${prev.slug}">
-                    <span class="pager-label">&larr; previous</span>
+                    <span class="pager-label">Previous</span>
                     <span class="pager-title">${prev.title}</span></a>` : `<a class="prev" href="#/">
-                    <span class="pager-label">&larr; back</span>
+                    <span class="pager-label">Back</span>
                     <span class="pager-title">Course home</span></a>`}
         ${next ? `<a class="next" href="#/${next.slug}">
-                    <span class="pager-label">next &rarr;</span>
+                    <span class="pager-label">Next</span>
                     <span class="pager-title">${next.title}</span></a>` : `<a class="next" href="#/">
-                    <span class="pager-label">finish &rarr;</span>
+                    <span class="pager-label">Finished</span>
                     <span class="pager-title">Back to the course map</span></a>`}
     </nav>
     <footer class="page-footer">
@@ -671,6 +699,7 @@ async function renderChapter(slug, anchor) {
         !el.classList.contains("language-mermaid")) hljs.highlightElement(el);
   });
   renderQuizzes(slug);
+  decorateGoalBox(viewEl);
   decorateHeadings(slug);
   wrapTables();
   buildPageToc(slug);
@@ -737,10 +766,10 @@ python3 -m http.server 8000</code></pre>
   viewEl.insertAdjacentHTML("beforeend",
     `<nav class="pager" aria-label="Chapter navigation">
        <a class="prev" href="#/${prev ? prev.slug : ""}">
-         <span class="pager-label">&larr; ${prev ? "previous" : "back"}</span>
+         <span class="pager-label">${prev ? "Previous" : "Back"}</span>
          <span class="pager-title">${prev ? prev.title : "Course home"}</span></a>
        <a class="next" href="#/${next ? next.slug : ""}">
-         <span class="pager-label">${next ? "next" : "finish"} &rarr;</span>
+         <span class="pager-label">${next ? "Next" : "Finished"}</span>
          <span class="pager-title">${next ? next.title : "Back to the course map"}</span></a>
      </nav>`);
   if (pageTocEl) pageTocEl.innerHTML = "";
@@ -965,7 +994,7 @@ function renderSearchResults(q) {
     `<li id="sr-${i}" class="search-result${i === 0 ? " selected" : ""}"
          role="option" aria-selected="${i === 0}" data-slug="${result.doc.slug}">
        <span class="sr-title">${result.doc.title}</span>
-       ${result.doc.module ? `<span class="sr-part">${result.doc.module}</span>` : ""}
+       ${result.doc.module ? `<span class="sr-part">${partName(result.doc.module)}</span>` : ""}
        <span class="sr-snippet">${snippet(result.doc, result.firstHit, terms)}</span>
      </li>`).join("");
   searchList.querySelectorAll(".search-result").forEach(li => {

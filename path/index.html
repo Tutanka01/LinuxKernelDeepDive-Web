@@ -24,13 +24,13 @@
       if (theme === "paper") document.documentElement.dataset.theme = "paper";
     })();
   </script>
-  <link rel="stylesheet" href="../assets/style.css?v=20260729">
+  <link rel="stylesheet" href="../assets/style.css?v=20261123">
   <!-- The track reuses the course-home vocabulary wholesale — .home, .hero,
        the progress ring, .module-head, .chapter-card — so a phase reads
        exactly like a module of a course. path.css only adds what is genuinely
        new here: the deliverable panel and the course tag on a step. -->
-  <link rel="stylesheet" href="../assets/course.css?v=20260727">
-  <link rel="stylesheet" href="assets/path.css?v=20260729">
+  <link rel="stylesheet" href="../assets/course.css?v=20261123">
+  <link rel="stylesheet" href="assets/path.css?v=20261123">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -64,26 +64,11 @@
       </div>
 
       <nav class="course-switch" aria-label="Courses on this site">
-        <p class="course-switch-title">Courses</p>
-        <a class="course-chip chip-all" href="../">
-          <span class="chip-title">All three courses</span>
-        </a>
-        <a class="course-chip" href="../#/course">
-          <span class="chip-title">The Linux Deep Dive</span>
-          <span class="chip-desc">67 chapters — kernel, processes, containers &amp; checkpoint/restore.</span>
-        </a>
-        <a class="course-chip" href="../distributed/">
-          <span class="chip-title">Distributed Systems</span>
-          <span class="chip-desc">13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span>
-        </a>
-        <a class="course-chip" href="../inference/">
-          <span class="chip-title">Inference Engineering</span>
-          <span class="chip-desc">24 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span>
-        </a>
-        <span class="course-chip chip-track current" aria-current="page">
-          <span class="chip-title">The GPU–Kernel Track</span>
-          <span class="chip-desc">A guided route through all three, in six phases.</span>
-        </span>
+        <a class="course-chip chip-all" data-course="all" href="../" title="All three courses"><span class="chip-title">All courses</span><span class="chip-desc">All three courses</span></a>
+        <a class="course-chip" data-course="linux" href="../#/course" title="The Linux Deep Dive"><span class="chip-title">Linux</span><span class="chip-desc">The Linux Deep Dive, 67 chapters — kernel, processes, containers &amp; checkpoint/restore.</span></a>
+        <a class="course-chip" data-course="distributed" href="../distributed/" title="Distributed Systems"><span class="chip-title">Distributed</span><span class="chip-desc">Distributed Systems, 13 chapters — first principles to Raft, Spanner &amp; CRDTs.</span></a>
+        <a class="course-chip" data-course="inference" href="../inference/" title="Inference Engineering"><span class="chip-title">Inference</span><span class="chip-desc">Inference Engineering, 36 chapters — rooflines, engines, kernels &amp; rack-scale serving.</span></a>
+        <span class="course-chip chip-track current" data-course="track" aria-current="page" title="The GPU–Kernel Track"><span class="chip-title">GPU track</span><span class="chip-desc">The GPU–Kernel Track, a guided route through all three, in six phases.</span></span>
       </nav>
 
       <div id="toc"><!-- the six phases, injected by assets/path.js --></div>
@@ -126,14 +111,14 @@
              role="combobox" aria-expanded="true" aria-autocomplete="list"
              aria-controls="search-results">
       <ul id="search-results" role="listbox" aria-label="Search results"></ul>
-      <p class="search-footer">↑↓ navigate · Enter open · Esc close</p>
+      <p class="search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></p>
     </div>
   </div>
 
   <!-- reader-ui.js is the shell's shared behaviour — the focus trap the drawer
        and the modal both need. It is loaded here for the same reason the three
        courses load it: so a fix lands on every page at once. -->
-  <script src="../assets/reader-ui.js?v=20260727"></script>
-  <script src="assets/path.js?v=20260729"></script>
+  <script src="../assets/reader-ui.js?v=20261123"></script>
+  <script src="assets/path.js?v=20261123"></script>
 </body>
 </html>

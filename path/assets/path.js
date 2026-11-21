@@ -324,7 +324,6 @@ function stepsMarkup(phase) {
           <span class="card-title">${escapeHtml(title)}</span>
           <span class="card-desc">${escapeHtml(meta.label)}</span>
         </span>
-        <span class="card-arrow" aria-hidden="true">&rarr;</span>
       </a>`;
   }).join("");
 }
@@ -336,8 +335,8 @@ function phaseMarkup(phase) {
       <header class="module-head">
         <span class="module-index">${String(phase.n).padStart(2, "0")}</span>
         <div>
-          <h2>Phase ${phase.n} — ${escapeHtml(phase.title)}</h2>
-          <p class="module-blurb">${escapeHtml(phase.months)} · <span
+          <h2>Phase ${phase.n}: ${escapeHtml(phase.title)}</h2>
+          <p class="module-blurb">${escapeHtml(phase.months)}, <span
              class="phase-count" data-count="${phase.id}"></span></p>
         </div>
         <span class="lvl-badge">${phase.steps.length} chapters</span>
@@ -365,7 +364,7 @@ function buildPage() {
   trackEl.innerHTML = `
     <header class="hero">
       <div class="hero-text">
-        <p class="hero-kicker">A guided track · six phases · ${TOTAL_STEPS} chapters</p>
+        <p class="hero-kicker">A guided track in six phases and ${TOTAL_STEPS} chapters</p>
         <h1>The GPU–Kernel Track</h1>
         <p class="hero-lede">
           Everything on this page lives somewhere else. This is not a course —
@@ -407,7 +406,7 @@ function buildPage() {
 
     <section class="module track-omits">
       <header class="module-head">
-        <span class="module-index">··</span>
+        <span class="module-index" aria-hidden="true">–</span>
         <div>
           <h2>What this track deliberately leaves out</h2>
           <p class="module-blurb">A route is defined as much by what it skips.</p>
@@ -428,7 +427,7 @@ function buildPage() {
     </section>`;
 
   tocEl.innerHTML = `
-    <p class="toc-part">Six phases</p>
+    <p class="toc-part"><span class="toc-part-name">Six phases</span></p>
     <ul class="toc-list">
       ${PHASES.map(p => `
         <li>
@@ -497,17 +496,17 @@ function refresh() {
   if (firstUnread) {
     const [course, slug, title] = firstUnread;
     cta.href = COURSE_META[course].href(slug);
-    cta.textContent = readTotal ? `Continue — ${title}` : `Start — ${title}`;
+    cta.textContent = readTotal ? `Continue with ${title}` : `Start with ${title}`;
   } else if (openPhase) {
     cta.href = `#phase-${openPhase.id}`;
-    cta.textContent = `Next deliverable — phase ${openPhase.n}`;
+    cta.textContent = `Next deliverable: phase ${openPhase.n}`;
   } else {
     cta.href = "#phase-patch";
     cta.textContent = "Track complete";
   }
 
   document.getElementById("track-hint").textContent =
-    `${readTotal} of ${TOTAL_STEPS} chapters · ${done.size} of ${PHASES.length} deliverables`;
+    `${readTotal} of ${TOTAL_STEPS} chapters read, ${done.size} of ${PHASES.length} deliverables done`;
 
   const summary = document.getElementById("progress-summary");
   if (summary) {
@@ -637,7 +636,7 @@ function updateSpy() {
     a.classList.toggle("active", a.dataset.phase === id);
   });
   if (window.ReaderUI) {
-    ReaderUI.setTopbarTitle(current ? `Phase ${current.n} — ${current.title}`
+    ReaderUI.setTopbarTitle(current ? `Phase ${current.n}: ${current.title}`
                                     : "The GPU–Kernel Track");
   }
 }
@@ -691,20 +690,20 @@ let searchSel = 0;
 
 const CORPUS = PHASES.flatMap(p => [
   {
-    title: `Phase ${p.n} — ${p.title}`,
+    title: `Phase ${p.n}: ${p.title}`,
     part: p.months,
     text: p.thesis,
     href: `#phase-${p.id}`,
   },
   {
     title: p.deliverable.title,
-    part: `Deliverable · phase ${p.n}`,
+    part: `Deliverable, phase ${p.n}`,
     text: p.deliverable.detail,
     href: `#phase-${p.id}`,
   },
   ...p.steps.map(([course, slug, title]) => ({
     title,
-    part: `Phase ${p.n} · ${COURSE_META[course].label}`,
+    part: `Phase ${p.n}, ${COURSE_META[course].label}`,
     text: slug.replace(/-/g, " "),
     href: COURSE_META[course].href(slug),
   })),

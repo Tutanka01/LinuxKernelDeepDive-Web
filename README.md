@@ -1,12 +1,12 @@
 # Deep Dive Courses
 
-Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **104 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
+Three self-paced systems courses served from a single static site: **The Linux Deep Dive**, **Distributed Systems**, and **Inference Engineering**. Together they contain **116 chapters** of source-level, example-driven material — the kernel machinery beneath the command line, the algorithms that keep many machines in agreement, and the systems that serve large language models on GPUs.
 
 | Course | Chapters | URL | Scope |
 |---|---:|---|---|
 | The Linux Deep Dive | 67 | `/#/course` | Kernel internals from processes and virtual memory through containers, checkpoint/restore, eBPF and KVM, the GPU–kernel boundary and upstream contribution, pinned to Linux 6.12 |
 | Distributed Systems | 13 | `/distributed/` | A guided course from partial failure and logical clocks through replication, consensus and CRDTs |
-| Inference Engineering | 24 | `/inference/` | A guided course on LLM serving: the roofline, KV cache, batching, quantization, kernels and disaggregated fleets |
+| Inference Engineering | 36 | `/inference/` | A guided course on LLM serving: the roofline, KV cache, batching, quantization, kernels and disaggregated fleets |
 
 This repository is also the website. Chapters are plain Markdown files under each course's `content/` directory; a small client-side application fetches and renders them with no framework and no build step.
 
@@ -39,7 +39,7 @@ Stop the site with:
 docker compose down
 ```
 
-The container serves the repository as static files through nginx. The readers load Markdown with `fetch()`, so opening `index.html` directly through a `file://` URL will not work — it needs a server, any server. No internet connection is required: marked, highlight.js and Mermaid are vendored under `assets/vendor/` and served from the same origin as everything else.
+The container serves the repository as static files through nginx. The readers load Markdown with `fetch()`, so opening `index.html` directly through a `file://` URL will not work — it needs a server, any server. No internet connection is required: marked, highlight.js, Mermaid and the two typefaces are vendored under `assets/vendor/` and served from the same origin as everything else.
 
 ## The Linux Deep Dive
 
@@ -113,17 +113,18 @@ Its entry point is `distributed/index.html`, served under `/distributed/`.
 
 ## Inference Engineering
 
-The `inference/` directory contains a second standalone guided course, built on the same engine. Its **24 chapters** progress through nine modules:
+The `inference/` directory contains a second standalone guided course, built on the same engine. Its **36 chapters** progress through eight modules, and one running case — self-hosting an internal assistant on Llama-3.3-70B and four H100s — is carried through every chapter, from the brief in chapter 1 to the full deployment plan in the capstone:
 
-- **Before we start** (1) — how to read a number in this field: six rules that defuse almost every benchmark claim, before you meet any of them;
-- **The Physics** (3) — what actually happens when you call an LLM, tokens and the autoregressive loop, prefill versus decode; the GPU mental model of SMs, HBM, tensor cores and the roofline; and inference arithmetic — KV-cache math, batching, critical batch size, TTFT and TPOT;
-- **The Engine** (3) — continuous batching and iteration-level scheduling, chunked prefill and prefill/decode interference; PagedAttention and prefix caching with block tables, copy-on-write and RadixAttention; and the anatomy of a serving engine, inside vLLM and SGLang;
-- **Squeezing the Model** (4) — attention architectures for serving from MHA to GQA to MLA, sliding-window and sparse attention and SSM hybrids; quantization in FP8, INT4 and FP4 with its evaluation traps; whether quantization broke your model, and why perplexity lies; and speculative decoding with draft models, EAGLE and MTP;
-- **Running It** (3) — sizing a deployment from the five-term memory budget; choosing a model, a GPU and a framework, with the buy-versus-build math; and operating it, from physical metrics through symptoms to causes, autoscaling traps and cold starts;
-- **Under the Hood** (2) — FlashAttention and decode kernels, online softmax and tiling, FlashDecoding and FlashInfer; and CUDA graphs, `torch.compile`, Triton versus CUTLASS, MoE kernels and Blackwell;
-- **Serving at Scale** (5) — tensor, pipeline, expert and context parallelism; MoE at scale with wide expert parallelism and rack-scale NVLink; disaggregated prefill/decode; the KV fabric of Mooncake, Dynamo and NIXL, KV tiering and cache-aware routing; and the agentic era of cache-hit economics, RL rollouts and multi-LoRA;
-- **The Big Picture** (2) — hardware and economics across GPUs, TPUs and SRAM silicon, token prices, margins, benchmarks and energy; and a dated snapshot of the frontier as of mid-2026; and
-- **Reference** (1) — a glossary of every acronym in the course, each linked to the chapter that teaches it.
+- **Foundations** (8) — what actually happens when you call an LLM, tokens and the autoregressive loop, prefill versus decode; where a model comes from and what is frozen by the time you serve it; reading a model card and every file in a model repository; inside a forward pass, deriving a model's size and its KV cache per token from `config.json`; the GPU mental model of SMs, HBM, tensor cores and the roofline; inference arithmetic — bandwidth-bound decode, compute-bound prefill, one step-time model, the critical batch size; how to read someone else's number; and a lab that measures TTFT and TPOT on your own machine;
+- **The Engine** (4) — continuous batching and iteration-level scheduling, chunked prefill and prefill/decode interference; paged KV memory and prefix caching; the anatomy of a serving engine, inside vLLM and SGLang; and a lab on parallel slots and the prefix cache;
+- **Squeezing the Model** (5) — attention architectures for serving from MHA to GQA to MLA, sliding-window and sparse attention and SSM hybrids; quantization in FP8, INT4 and FP4; whether quantization broke your model, and how to prove it did not; speculative decoding; and a lab on precision, KV dtype and draft models;
+- **Under the Hood** (2) — FlashAttention and decode kernels, online softmax and tiling; and CUDA graphs, `torch.compile`, Triton versus CUTLASS, MoE kernels and megakernels;
+- **Serving at Scale** (6) — tensor, pipeline, expert and context parallelism; MoE at scale with wide expert parallelism; disaggregated prefill/decode, including across different silicon; the KV fabric of tiering, cache-aware routing and fleet flow control; agent and reasoning workloads and their cache economics; and what changes beyond chat — encoders, embeddings and rerankers, adapters, offline workloads;
+- **In Production** (7) — the capstone: sizing a deployment from the memory budget, as an exercise; load testing, to replace every estimate with a measurement, and its lab; hardware and economics; choosing a model, a GPU and an engine; operating it, with the dashboard assembled as a USE grid of real metric names; and what to do when it breaks — failure modes, three incidents to diagnose, the runbook;
+- **Epilogue** (2) — a dated snapshot of the frontier as of late 2026, read against the running case; and a problem set over the whole course in shuffled order; and
+- **Reference** (2) — a glossary of every acronym in the course, with a self-test mode; and a review deck that schedules fresh numeric problems on the course's core calculations (spaced repetition, stored in `localStorage`).
+
+Every chapter is built to the contract in `inference/research/STYLE-v2.md` and its v3 addendum `STYLE-v3.md`: one question per chapter, "predict first" prompts before each key result, at least two real artifacts — a command, a log, a metrics scrape, a config or source excerpt, each labelled *verbatim*, *real format with illustrative values* or *runnable* — a `[!dashboard]` row naming the real metrics for the chapter's resource, exercises that include a diagnosis read from an artifact and a transfer problem, and a checkpoint quiz whose answers cannot be guessed from position or length (enforced by `tests/tier1/inference-pedagogy.test.js`). Engine facts are pinned to **vLLM v0.34.0**. The four `lab-*` chapters run on a laptop with llama.cpp; they were written from its documentation and are marked as not executed by the author.
 
 Its entry point is `inference/index.html`, served under `/inference/`. It also ships the only interactive material in the three courses: a KV-cache and deployment-sizing calculator, a roofline explorer, a token-cost calculator, a serving-engine simulator (also hosted full-page at `inference/simulator.html`), and a serving-stack orientation map at the head of every chapter. Each is a placeholder `<div class="inf-widget">` in the Markdown, filled in by the scripts under `inference/assets/`, and each carries a plain-text fallback for readers without JavaScript.
 
@@ -149,7 +150,8 @@ It runs in the same shell as the three courses, and deliberately borrows their v
 - A custom client-side Markdown reader built with vanilla HTML, CSS, and JavaScript, with no build step
 - A landing page at `/` listing all three courses, each with its own progress ring
 - A course home for each course — what it is, a progress ring, and every chapter on one map — at `/#/course`, `/distributed/` and `/inference/`
-- Terminal-style dark and paper-style light themes; the choice carries across courses
+- Two themes, Terminal (a neutral blue-graphite dark, the default) and Paper (near-white light), both built from one set of colour tokens in `assets/style.css`; colour is kept for meaning — links and focus, the three difficulty levels, the callout roles — and the choice carries across courses
+- Set for long reading: Atkinson Hyperlegible Next for text and interface (drawn so 0/O and 1/l/I never collide in prose full of numbers and identifiers), JetBrains Mono for code and ASCII diagrams, about 76 characters to a line, sentence-case labels and no italic blocks
 - A collapsible sidebar with a cross-course switcher at the top
 - Full-text search over the current course's chapters (`/` or `Ctrl/Cmd-K`). Search is per-course: it does not index the other two.
 - Keyboard shortcuts: `/` or `Ctrl/Cmd-K` to search, `[` to collapse the sidebar, ←/→ for previous and next chapter, `Esc` to close
@@ -159,7 +161,7 @@ It runs in the same shell as the three courses, and deliberately borrows their v
 - Responsive navigation for desktop and mobile; wide tables, code blocks and diagrams scroll inside their own region rather than widening the page
 - Progress kept in browser local storage, tracked separately per course
 - Scroll position kept across reloads, so a refresh does not lose your place
-- No third-party requests: marked, highlight.js and Mermaid are vendored under `assets/vendor/`
+- No third-party requests: marked, highlight.js, Mermaid and both fonts are vendored under `assets/vendor/`
 - Docker deployment with nginx and no application build step
 
 ### The Linux Deep Dive only
@@ -184,7 +186,7 @@ It runs in the same shell as the three courses, and deliberately borrows their v
 │   ├── app.js                 Linux course: curriculum, router, renderer, search, progress
 │   ├── course.js              Shared engine for the two guided courses: router, renderer, quizzes, search, progress
 │   ├── reader-ui.js           Shared reader layer used by all three: scroll regions, inline TOC, focus, Mermaid
-│   └── vendor/                marked, highlight.js, Mermaid and the two hljs themes, served from this origin
+│   └── vendor/                marked, highlight.js, Mermaid, the site's two hljs themes and the fonts (OFL), served from this origin
 ├── content/                   67 Linux course Markdown chapters
 ├── distributed/
 │   ├── index.html             Distributed Systems course shell
@@ -200,8 +202,10 @@ It runs in the same shell as the three courses, and deliberately borrows their v
 │   │   ├── inf-calculators.js KV-cache/sizing, roofline and token-cost calculators
 │   │   ├── inf-simulator.js   The serving-engine simulator
 │   │   ├── inf-stackmap.js    The per-chapter serving-stack orientation map
-│   │   └── diagrams/          Hand-drawn SVG figures, themed through CSS custom properties
-│   ├── content/               24 Inference Engineering chapters
+│   │   ├── inf-review.js      The review deck: generators of fresh numeric problems, Leitner scheduling, chapter warm-ups
+│   │   ├── inf-review.css     Styling for the review deck and the warm-up
+│   │   └── diagrams/          Hand-drawn SVG figures in the Paper palette; inf.css inverts them for the dark theme
+│   ├── content/               36 Inference Engineering chapters
 │   └── research/              Source and style notes; excluded from the image by .dockerignore
 ├── path/
 │   ├── index.html             The GPU–Kernel Track, in the same shell as the three courses
@@ -256,7 +260,7 @@ It can be run directly, without the wrapper:
 cd tests && node --test "tier1/*.test.js"
 ```
 
-**Tier 2 — browser.** Playwright drives headless Chromium against `python3 -m http.server` on an ephemeral port. It renders **all 104 chapters** and asserts, for each one, that the article holds real content and not the loading placeholder, that `document.title` is the chapter's, that there is exactly one `<h1>` and no heading-level skips, and that nothing was logged to the console or failed on the wire. It then exercises search, deep links, the 375 px layout and the theme toggle on one chapter per course. The whole tier takes about fifteen seconds.
+**Tier 2 — browser.** Playwright drives headless Chromium against `python3 -m http.server` on an ephemeral port. It renders **all 116 chapters** and asserts, for each one, that the article holds real content and not the loading placeholder, that `document.title` is the chapter's, that there is exactly one `<h1>` and no heading-level skips, and that nothing was logged to the console or failed on the wire. It then exercises search, deep links, the 375 px layout and the theme toggle on one chapter per course. The whole tier takes about fifteen seconds.
 
 The first run installs Playwright and downloads Chromium (~100 MB) into `tests/node_modules` and the shared Playwright cache; `./tests/run.sh tier2` does this for you.
 

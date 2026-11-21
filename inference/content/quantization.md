@@ -1,555 +1,628 @@
 # Quantization
 
-> **Goal of this chapter:** give you the *one* mental model that organizes the
-> whole alphabet soup — GGUF, GPTQ, AWQ, FP8, MXFP4, NVFP4 — so it stops being a
-> zoo and becomes a small set of choices. By the end you'll know why fewer bits
-> buys speed, what a floating-point format actually is, the three things you can
-> quantize and how hard each is, which silicon can run which format, and exactly
-> what each choice buys you in bytes, in critical batch size, and in decode
-> latency.
+> **The question:** a decode step costs the bytes it reads and the arithmetic it
+> does — how far can fewer bits per number shrink each, and what does each
+> format buy in speed and capacity, on which hardware?
+>
+> **You'll be able to:** read a format name or a checkpoint's
+> `quantization_config` and say what is stored, at what granularity, and what
+> stays in 16 bits; compute weight and KV sizes and the step time each format
+> buys at a given batch and context, with the course's one step model; choose
+> formats and a launch line for a deployment, and say what would change the
+> choice.
 
 <div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="runner,kv"></div>
 
-In [Inference Arithmetic](#/inference-arithmetic) you learned the single most
-useful fact about serving: a decode step is **bandwidth-bound**. To generate one
-token the GPU reads every weight once and moves it from memory, and the latency
-is almost exactly
+[Inference Arithmetic](#/inference-arithmetic) priced a decode step with one
+model, used everywhere in this course:
 
 ```text
-   decode latency per token  ≈  (weight bytes + KV bytes) / HBM bandwidth
+   step  ≈  max(t_w, t_c)  +  t_kv
+            t_w  = time to read the weights (once per step)
+            t_c  = arithmetic for every token in the step
+            t_kv = time to read every running sequence's KV cache
 ```
 
-The FLOPs barely matter; the *bytes* are the whole game. So the biggest lever in
-inference jumps out: **shrink the bytes.** A weight in 8 bits instead of 16 is
-half the bytes to move — half the bytes, roughly half the decode latency. That is
-quantization, and this chapter is how it works: the formats, the mechanics, the
-methods, and the silicon that does or does not accelerate them.
+Storing numbers in fewer bits — **quantization** — shrinks `t_w` and `t_kv`
+directly. Doing the arithmetic in fewer bits shrinks `t_c`, but only on chips
+that run the format natively. Read this chapter to choose a format, and
+[Did Quantization Break Your Model?](#/did-quantization-break-your-model)
+before you ship one.
 
-The other half — proving you did it without silently wrecking the model — is the
-next chapter, [Did Quantization Break Your Model?](#/did-quantization-break-your-model).
-Read this one for what to choose; read that one before you ship it.
+## What fewer bits buys
 
-## Why fewer bits is the biggest lever you have
-
-Take Llama-3-70B. In BF16 (16-bit, the training-precision baseline) its 70
-billion weights occupy **140 GB**. On an H100 (3.35 TB/s of memory bandwidth) a
-batch-1 decode step moves those 140 GB, so:
+On Halden's node each of the four GPUs reads its quarter of the weights every
+step. At the achievable ~2.85 TB/s (rung 2 of the decode ladder):
 
 ```text
-   BF16:  140 GB / 3.35 TB/s  ≈  42 ms/token   ≈  24 tokens/sec
-   FP8:    70 GB / 3.35 TB/s  ≈  21 ms/token   ≈  48 tokens/sec
-   FP4:    35 GB / 3.35 TB/s  ≈  10 ms/token   ≈  95 tokens/sec
+   BF16  (2 bytes):   140 GB  →  35 GB per GPU  →  12.3 ms of reading
+   FP8   (1 byte):     70 GB  →  17.5 GB        →   6.1 ms
+   4-bit (~0.5 byte):  40 GB  →  10 GB          →   3.5 ms
 ```
 
-Halving the bits roughly doubles the speed. But the same shrink pays off three
-more ways at once:
+Published files run a little larger: the FP8 Llama-3.3-70B Halden will use is
+72.7 GB and a popular AWQ 4-bit one 39.8 GB, because the embedding table and the
+LM head (1.05 B parameters each) stay in 16 bits. The course keeps the case's
+70 GB for FP8 and uses 40 GB for 4-bit. The same shrink pays three more ways:
 
-- **Capacity / throughput.** Below the critical batch size `B_crit` from
-  [Inference Arithmetic](#/inference-arithmetic), added requests are nearly free
-  because you re-read the same weights anyway. Halve the bytes per weight and
-  you can pack roughly twice the concurrent requests under the same bandwidth
-  ceiling.
-- **Fit bigger models.** 70B in FP4 is 35 GB — it fits on **one** 80-GB H100
-  with room to spare for the KV cache, instead of needing two GPUs in BF16. A
-  smaller footprint is fewer GPUs, less network, less cost.
-- **Faster compute, too.** Modern tensor cores (the GPU's matrix-multiply units)
-  run *low precision faster*: an H100 does FP8 matmuls at ~2× its BF16 FLOP/s, a
-  Blackwell B200 does FP4 at ~2× FP8 again. That barely helps bandwidth-bound
-  decode, but it directly speeds up compute-bound **prefill** and large batches.
+- **Capacity.** Smaller weights leave more memory for the KV cache, and a smaller
+  KV format makes each sequence cheaper. Both raise concurrency.
+- **Fit.** 70B at 4 bits fits on one 80 GB GPU; at 8 bits, on two. In BF16 it
+  needs four ([Inside a Forward Pass](#/inside-a-forward-pass) showed two GPUs
+  come up 4 GB short).
+- **Compute, on the right chip.** Tensor cores run lower precision faster: an
+  H100 does FP8 at about twice its BF16 rate, and Blackwell does FP4 at about
+  twice FP8. That shrinks `t_c` in prefill and in large decode batches.
 
-Four wins from one idea. Now the mechanics of how.
-
-> [!bridge] You already know this — from the Linux course
-> This is the zswap trade. Linux compresses cold anonymous pages in RAM rather
-> than paging them to disk, spending CPU cycles to avoid moving bytes across a
-> slow boundary — because on that machine the bytes were the expensive part.
-> Quantization is the same bargain against HBM: pay a little arithmetic to
-> unpack a smaller representation, and you move fewer bytes per decode step.
-> What differs is that the kernel's compression is exactly reversible and
-> quantization's is not, which is why this chapter has a sequel.
+> [!bridge] From the Linux course
+> This is the zswap trade: spend some arithmetic to unpack a smaller
+> representation so fewer bytes cross a slow boundary. What differs is
+> reversibility. The kernel's compression is lossless; quantization rounds, and
+> the rounding is permanent — which is why this chapter has a sequel about
+> measuring damage.
 > [→ Linux: Virtual Memory](../#/memory)
 
-## What a number format actually is
+## What a number format is
 
-You already know integers: `INT8` is a byte holding one of 256 evenly spaced
-whole numbers. Floating point is the other family, and the difference is the key
-to everything below. A float splits its bits into three fields:
+A floating-point format splits its bits into a sign, an **exponent** (which power
+of two the number lives near — its range) and a **mantissa** (the precision
+within that range):
 
 ```text
-   FP16   [S][ E E E E E ][ M M M M M M M M M M ]   1 sign, 5 exp, 10 mantissa
-   BF16   [S][ E E E E E E E E ][ M M M M M M M ]   1 sign, 8 exp,  7 mantissa
-   E4M3   [S][ E E E E ][ M M M ]                   1 sign, 4 exp,  3 mantissa  (an FP8)
-   E5M2   [S][ E E E E E ][ M M ]                    1 sign, 5 exp,  2 mantissa  (an FP8)
-   E2M1   [S][ E E ][ M ]                            1 sign, 2 exp,  1 mantissa  (FP4)
+   BF16   [S][E E E E E E E E][M M M M M M M]   8 exponent, 7 mantissa
+   E4M3   [S][E E E E][M M M]                   an FP8: 4 exponent, 3 mantissa
+   E5M2   [S][E E E E E][M M]                   an FP8: more range, less precision
+   E2M1   [S][E E][M]                           FP4
 ```
 
-- **Sign** picks positive or negative.
-- **Exponent** sets the *scale* — the power of two the number lives near. More
-  exponent bits = wider **dynamic range** (tiny and huge values both reachable).
-- **Mantissa** sets the *precision* within that scale. More mantissa bits = finer
-  steps.
+E4M3 is used for weights, activations and KV; E5M2, with its wider range, mostly
+for gradients in training. Decoding one byte by hand shows what 8 bits buy:
 
-So `E4M3` reads as "4 exponent bits, 3 mantissa bits." `E5M2` trades a mantissa
-bit for an exponent bit: wider range, coarser steps — which is why E5M2 is used
-for gradients and E4M3 for weights and activations.
+```python
+def e4m3(byte):  # OCP FP8 E4M3 ("e4m3fn"): 1 sign, 4 exponent (bias 7), 3 mantissa bits
+    sign = -1.0 if byte & 0x80 else 1.0
+    exp, man = (byte >> 3) & 0xF, byte & 0x7
+    if exp == 0xF and man == 0x7:
+        return float("nan")                    # the only NaN pattern; there is no infinity
+    if exp == 0:
+        return sign * man / 8 * 2.0 ** -6      # subnormal: no implicit leading 1
+    return sign * (1 + man / 8) * 2.0 ** (exp - 7)
 
-> **Common trap: "FP8 is just INT8 with extra steps."** No — they distribute
-> their 256 codes completely differently. INT8 spaces its values *uniformly* (the
-> gap 3→4 equals 200→201); FP8 spaces them *logarithmically* — dense near zero,
-> sparse far out. That matters because activations are long-tailed: mostly small
-> values with rare large **outliers**. INT8 must stretch its uniform grid to reach
-> the outliers, wasting resolution on the common small values; FP8's exponent
-> reaches them for free while keeping fine steps where the mass is. Same 8 bits,
-> FP8 usually wins on the distributions we actually have.
+for b in (0x01, 0x38, 0x39, 0x3A, 0x5A, 0x5B, 0x7E, 0x7F, 0xB8):
+    print(f"0x{b:02X} = {b:08b} -> {e4m3(b)}")
+
+grid = sorted({e4m3(b) for b in range(0x7F)})  # the 127 non-negative finite codes
+x = 0.3
+lo = max(v for v in grid if v <= x); hi = min(v for v in grid if v >= x)
+best = min((lo, hi), key=lambda v: abs(v - x))
+print(f"{len(grid)} values from 0 to {grid[-1]}; 0.3 lies between {lo} and {hi}")
+print(f"0.3 is stored as {best}: relative error {abs(best - x) / x:.1%}")
+
+# --- output of an actual run ---
+# 0x01 = 00000001 -> 0.001953125
+# 0x38 = 00111000 -> 1.0
+# 0x39 = 00111001 -> 1.125
+# 0x3A = 00111010 -> 1.25
+# 0x5A = 01011010 -> 20.0
+# 0x5B = 01011011 -> 22.0
+# 0x7E = 01111110 -> 448.0
+# 0x7F = 01111111 -> nan
+# 0xB8 = 10111000 -> -1.0
+# 127 values from 0 to 448.0; 0.3 lies between 0.28125 and 0.3125
+# 0.3 is stored as 0.3125: relative error 4.2%
+```
+
+*Runnable — Python 3 standard library only; the output shown in the comments is from an actual run. Encoding as in vLLM v0.34.0's FP8 docs: "values up to +/-448 and `nan`".*
+
+Look at the spacing, not the values. Next to 1.0 the step is 0.125; next to 20
+it is 2. The step is always an eighth of the power of two a value sits in, 6 to
+12% of the value, so rounding costs up to 3–6% — and nothing above 448 exists. Every FP8 tensor therefore
+needs a **scale** that maps its real range into ±448.
+
+> [!predict] Before you read on
+> Activations are long-tailed: most values are small, with rare large outliers.
+> `INT8` maps a range onto 256 evenly spaced integers through one scale. With the
+> same 8 bits, which represents such activations better — INT8 or FP8 (E4M3)?
+
+Usually FP8. INT8's codes are evenly spaced, so to reach a rare outlier its scale
+must stretch the grid, leaving coarse steps for the many small values. FP8's
+codes are spaced logarithmically — dense near zero, sparse far out — so its
+exponent reaches outliers while fine steps stay where most values are.
 
 ![Two number lines comparing 8-bit formats: INT8 spreads its 256 codes at a uniform step across minus 128 to 127, while FP8-E4M3 spaces its codes by exponent — packed tightly around zero and stretching out toward the extremes, so its finest resolution sits exactly where weight and activation values concentrate](assets/diagrams/float-spacing.svg)
 
-## The real design axis: a low-bit element plus a shared scale
+## Every low-bit format is an element plus a scale
 
-Here is the insight that collapses the whole zoo. A 4-bit number can encode only
-16 distinct values — the `E2M1` set is exactly `{0, ±0.5, ±1, ±1.5, ±2, ±3, ±4,
-±6}`. That is hopeless for a weight matrix whose values span many orders of
-magnitude. So **no one uses the low-bit element alone.** Every modern low-bit
-format is really two parts:
+A 4-bit float has 16 values; E2M1 is exactly `{0, ±0.5, ±1, ±1.5, ±2, ±3, ±4,
+±6}`. No weight matrix fits on that grid directly. So every practical low-bit
+format stores
 
 ```text
-   stored value  =  low-bit element  ×  a SCALE shared by a block of elements
+   value  =  low-bit element  ×  a scale shared by a block of elements
 ```
 
-You group, say, 32 weights into a block, find the largest magnitude in it, and
-store one higher-precision **scale** mapping the block's range onto the tiny
-element grid. Now the 16 FP4 codes are *relative* positions inside each block's
-own range. The two knobs that actually define a format are therefore **how big
-the block is** and **how precise the scale is**:
+The knobs that distinguish formats are **block size** and **scale precision**:
 
-| Format | Element | Block size | Scale type |
-|---|---|---|---|
-| INT4 (GPTQ/AWQ) | 4-bit int | group of 128 | FP16 per group |
-| **MXFP4** | E2M1 (FP4) | **32** | **E8M0** — power-of-two only |
-| **NVFP4** | E2M1 (FP4) | **16** | **E4M3** float + one FP32 global |
-
-MXFP4 (the open OCP "microscaling" standard) uses a big 32-element block and a
-*power-of-two* scale (E8M0 is 8 exponent bits, no mantissa) — cheap to store and
-portable, but coarse, so one outlier drags the whole block. NVFP4 (NVIDIA's
-Blackwell-native format) halves the block to 16 and uses a real FP8 scale plus a
-global FP32 factor — more metadata, markedly less error. That is the entire
-difference between them: **[consensus]** NVFP4 is more accurate at equal bits,
-MXFP4 is more portable.
-
-The scales are not free, and it is worth seeing how little they cost. MXFP4
-stores one 8-bit scale per 32 elements: `(32 × 4 + 8) / 32 = 4.25` bits per
-weight. NVFP4 stores one 8-bit scale per 16: `(16 × 4 + 8) / 16 = 4.5` bits per
-weight. So NVFP4's extra accuracy costs about 6% more memory than MXFP4's, and
-both are still comfortably under a quarter of BF16. When someone quotes "4-bit,"
-they mean 4.25 or 4.5 in the file.
-
-## The three things you can quantize
-
-Quantization targets three different tensors, in increasing order of difficulty.
-The shorthand is `W`eights / `A`ctivations / `KV` cache, each with a bit count —
-so `W4A16` means 4-bit weights, 16-bit activations.
-
-**1. Weights only (W4A16) — the easy win.** Weights are fixed after training, so
-you can quantize them offline, carefully, once. This is **PTQ** (post-training
-quantization — no retraining). Two methods dominate:
-
-- **GPTQ** rounds weights to the grid but *compensates as it goes*: after
-  rounding one weight, it nudges the not-yet-quantized weights in the same layer
-  to cancel the error just introduced (using second-order/Hessian information).
-  Error-correcting rounding.
-- **AWQ** (activation-aware weight quantization) starts from an observation:
-  roughly **1% of weight channels are "salient"** — they carry most of the
-  model's quality. AWQ measures which channels see the largest activations and
-  scales them up before quantizing so they survive with more precision. Protect
-  the vital 1%, quantize the rest hard.
-
-Both land near-lossless at 4 bits. In 2026, AWQ has become the common INT4
-weight-only default (simpler and robust, first-class in vLLM/SGLang), with GPTQ
-persisting through the HuggingFace back-catalog. **[directional — this ranking
-rests on secondary sources, not a head-to-head paper.]**
-
-**2. Weights + activations (W8A8) — harder, because activations move.** Weights
-are known offline; activations are computed live at every step and, worse, they
-have vicious outliers. **SmoothQuant** (2022) fixed this with a migration trick:
-divide the activations by a per-channel factor to tame their outliers, and
-multiply the corresponding weight columns by the same factor to keep the math
-identical. It *moves* the difficulty from the hard-to-quantize activations into
-the easy-to-quantize weights. That unlocked W8A8 in INT8.
-
-Today the W8A8 default is **FP8 (E4M3)**, native on Hopper and Blackwell and
-**near-lossless** — a COLM 2025 study found W8A8KV8 essentially lossless (under
-1 point) even on a 1.5B model. **[consensus]** FP8 end-to-end is the 2026 serving
-default for a reason: you get the bandwidth *and* the compute speedup with almost
-no quality cost.
-
-**3. KV cache (FP8/INT8 safe, INT4 for big models only).** The KV cache
-([PagedAttention & Prefix Caching](#/paged-kv-cache)) grows with every token and
-caps concurrency, so quantizing it frees memory for more requests. **FP8 KV** is
-~50% of BF16 with typically under 0.5-point loss — vLLM's `--kv-cache-dtype fp8`
-default; **INT8 KV** is the conservative equivalent. **INT4 KV** (KIVI, KVQuant)
-reaches 25% footprint — lossless on large models, but drops 1–2 points on small
-ones. Two-bit KV breaks consistently; do not go there.
-
-## PTQ and QAT: when to pay with training compute
-
-Everything above is **PTQ** — you take a finished model, run a few hundred
-calibration samples through it to observe the activation ranges, pick scales, and
-write out the quantized weights. It costs minutes to hours on one GPU, needs no
-labels, and it is what virtually all served quantization is.
-
-**QAT** (quantization-aware training) is the alternative: simulate the rounding
-*during* training or a fine-tune, so gradients flow through the quantization and
-the weights learn to land on grid points that survive it. The usual mechanism is
-the straight-through estimator — quantize in the forward pass, pretend the
-rounding was the identity in the backward pass.
-
-The trade is blunt. QAT costs real training compute and needs data you may not
-have; PTQ costs almost nothing. So the rule is a threshold, not a preference:
-
-- **At 8 bits, PTQ is enough.** FP8 and INT8 are near-lossless with calibration
-  alone; nobody spends a training run to recover a fraction of a point.
-- **At 4 bits weight-only, PTQ is still usually enough** — that is exactly the
-  gap GPTQ and AWQ were built to close.
-- **Below 4 bits, or 4-bit weights *and* activations on a small model**, PTQ
-  starts falling off a cliff and QAT is the only thing that reliably rescues it.
-  **[consensus]** That is also the regime where you should be asking whether a
-  smaller model at 8 bits would have been the better deal.
-
-Note where the cost lands: QAT is paid once, by whoever publishes the checkpoint,
-and everybody who serves it gets the benefit for free. If you are choosing rather
-than training, "is there a QAT release of this model?" is a better question than
-"should I run QAT?"
-
-## What the hardware actually supports
-
-A format only helps if the silicon has tensor cores for it. This table is the one
-people forget, and it produces the most confused benchmarks:
-
-| Precision | A100 | H100 (Hopper) | B200 (Blackwell) | AMD MI300X |
+| Format | Element | Block | Scale | Bits per weight |
 |---|---|---|---|---|
-| BF16 / FP16 | native | native | native | native |
-| INT8 | native | native | native | native |
-| **FP8** | **✗** | **native** | native | native |
-| FP6 | ✗ | ✗ | native | ✗ |
-| **FP4 (MX/NV)** | ✗ | ✗ | **native** | ✗ |
+| INT4 (GPTQ / AWQ) | 4-bit integer | 128 | FP16 per group (+ 4-bit zero point) | ~4.16 |
+| MXFP4 (OCP standard) | E2M1 | 32 | E8M0: a power of two | 4.25 |
+| NVFP4 (NVIDIA Blackwell) | E2M1 | 16 | E4M3, plus one FP32 per tensor | 4.5 |
+| `Q4_K` (llama.cpp) | 4-bit integer | 32, in super-blocks of 256 | 6-bit scale and min per block, FP16 per super-block | 4.5 |
 
-**Two rules to memorize. The A100 has no FP8 tensor cores** — quantize to FP8 on
-an A100 and you save memory but get *zero* compute speedup. **FP4 requires
-Blackwell.** So "running FP4 on an H100" is a memory trick, not a speed trick:
-35 GB instead of 140 GB is real, but the matmul still runs at FP8/BF16 rates.
-Match the format to the chip.
+Smaller blocks and finer scales track local ranges more closely, at the cost of
+more scale bytes. When someone says "4-bit", the file holds 4.1 to 4.5 bits per
+weight, before the layers left in 16 bits.
 
-> **GGUF, demystified in one paragraph.** GGUF is the file format llama.cpp uses
-> for local/CPU/Apple-silicon inference, paired with block-quant types named like
-> `Q4_K_M` (roughly "4-bit weights, K-quant scheme, medium size"). Despite the
-> different vocabulary it is the *same science* as everything above — a low-bit
-> element plus a per-block scale — a packaging choice for the local ecosystem, not
-> a rival theory of quantization.
+**GGUF names** add a mixing rule. `Q4_K_M` is not "everything in `Q4_K`": in
+llama.cpp v1.0.0's `llama-quant.cpp`, the value projections (`attn_v`) and MLP
+down-projections (`ffn_down`) of the first eighth, the last eighth and every
+third layer between get `Q6_K`, and the output matrix gets `Q6_K`; `Q4_K_S`
+mixes less. llama.cpp's own table puts Llama-3.1-8B in `Q4_K_M` at 4.89
+bits per weight. [Lab: Bits, Bytes and Drafts](#/lab-squeezing) runs these
+files on your own machine.
 
-## What each choice actually buys you
+For 8-bit formats the knob is **granularity**: one scale per tensor, per output
+channel, per token (activations), or per block (DeepSeek-V3 uses 128 × 128 blocks
+for weights and 1 × 128 tiles for activations), and whether a scale is fixed
+offline (**static**) or computed from each batch at runtime (**dynamic**). A
+checkpoint states its choices. Here is the FP8 Llama-3.3-70B Halden will use:
 
-Now put the format next to the arithmetic and read off the consequences. Three
-quantities move: the bytes, the critical batch size, and the decode latency.
+```json
+  "quantization_config": {
+    "config_groups": {
+      "group_0": {
+        "input_activations": {
+          …
+          "dynamic": true,
+          …
+          "num_bits": 8,
+          …
+          "strategy": "token",
+          "symmetric": true,
+          "type": "float"
+        },
+        …
+        "targets": [
+          "Linear"
+        ],
+        "weights": {
+          …
+          "dynamic": false,
+          …
+          "num_bits": 8,
+          "observer": "mse",
+          …
+          "strategy": "channel",
+          "symmetric": true,
+          "type": "float"
+        }
+      }
+    },
+    "format": "float-quantized",
+    …
+    "ignore": [
+      "lm_head"
+    ],
+    "kv_cache_scheme": null,
+    "quant_method": "compressed-tensors",
+```
 
-**Bytes, for Llama-3-70B on an 80-GB H100.** Weights are `P × bytes_per_weight`;
-KV is `2 × 80 layers × 8 kv_heads × 128 head_dim × bytes` = 328 KB/token in BF16,
-scaling linearly with the KV dtype.
+*Verbatim — trimmed; `config.json` of RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic, revision f50dbad2, checked 2026-11-21.*
 
-| Choice | Weights | KV per token | KV for one 128K seq | Decode step |
-|---|---|---|---|---|
-| BF16, BF16 KV | 140 GB | 328 KB | ~40 GB | ~42 ms |
-| FP8 W8A8, FP8 KV | 70 GB | 164 KB | ~20 GB | ~21 ms |
-| W4A16, FP8 KV | 35 GB | 164 KB | ~20 GB | ~10 ms |
-| NVFP4, FP8 KV | ~39 GB | 164 KB | ~20 GB | ~12 ms |
+Read it top to bottom: every `Linear` layer has FP8 weights with one static
+scale per output channel, and FP8 activations with a scale computed per token on
+every step. `lm_head` is excluded, and the embedding, not being a `Linear`, was
+never a target. `kv_cache_scheme: null` means the file says nothing about the
+cache: KV precision is a serving-time choice.
 
-(The NVFP4 row is 4.5 bits/weight including scales, hence slightly above the
-idealized 35 GB. Decode step is weights ÷ 3.35 TB/s, the batch-1 floor before
-KV traffic and kernel overhead are added.)
+## Three things to quantize
 
-Read the second column across and you get the number that decides your
-concurrency: going from BF16 KV to FP8 KV doubles how many 128K sequences fit in
-whatever HBM the weights left behind. On a single 80-GB H100 running W4A16, the
-weights take 35 GB and the remaining ~45 GB holds two 128K sequences in BF16 KV
-or four in FP8. That is not a latency win; it is a throughput win, and it is
-usually the larger one.
+The shorthand `W4A16` means 4-bit weights, 16-bit activations; `W8A8` means 8-bit
+both; a `KV8` suffix means an 8-bit cache.
 
-**Critical batch size.** `B_crit` is where decode stops being memory-bound, and
-it moves with the format — but not always in the direction people expect. Derive
-it. Intensity at batch `B` is FLOPs ÷ bytes = `2·P·B / (P × bytes_per_weight)`:
+**Weights only (W4A16, W8A16).** Weights are fixed after training, so they can be
+quantized once, offline, carefully — **post-training quantization (PTQ)**. Two
+methods dominate at 4 bits:
 
-- **W4A16** — weights at 0.5 bytes, matmul still at BF16 rates (you dequantize on
-  the way in). Intensity = `4B` against an unchanged H100 ridge of ~295, so
-  `B_crit ≈ 74`. Weight-only quantization **lowers the knee by 4×**: you reach
-  compute-bound much sooner, which is exactly why it is the low-latency,
-  low-concurrency choice.
-- **FP8 W8A8** — weights at 1 byte, but Hopper's FP8 tensor cores also do ~2× the
-  FLOP/s, so the ridge moves too: ~1,980 TFLOP/s ÷ 3.35 TB/s ≈ 590 FLOP/byte.
-  Intensity = `2B` against 590 → `B_crit ≈ 295`, essentially where it started.
-  The win here is not a lower knee; it is that **every point on the curve got
-  about twice as fast**.
+- **GPTQ** ([Frantar et al., 2022](https://arxiv.org/abs/2210.17323)) rounds
+  weights one at a time and adjusts the not-yet-rounded weights in the same layer
+  to cancel the error just introduced, using second-order information.
+- **AWQ** ([Lin et al., 2023](https://arxiv.org/abs/2306.00978)) observes that
+  about 1% of weights — those meeting the largest activations — matter most. It
+  multiplies those channels by a scale before rounding, so they keep more
+  precision, and divides the matching activations by the same scale, so the
+  product is unchanged. The scales come from activation statistics, with no
+  weight reconstruction.
 
-That distinction is worth holding: weight-only quantization moves you along the
-roofline, full low-precision execution raises the roofline. **[directional — the
-2× FP8 rate is the vendor dense figure; achieved speedups run lower.]**
+In the largest public sweep of quantized reasoning models
+([Liu et al., COLM 2025](https://arxiv.org/abs/2504.04823)), 4-bit weights cost
+0.4 points of average accuracy at 32B and 2.1 at 1.5B, and the authors recommend
+AWQ over GPTQ: comparable accuracy, faster to produce, and less sensitive to the
+calibration set.
 
-> [!trap] "4-bit weights will double my throughput"
-> Read the `B_crit ≈ 74` line again and see what it costs you. Below batch 74
-> W4A16 is wonderful — a quarter of the bytes on a bandwidth-bound step. Above
-> it you are compute-bound, the matmul still runs at BF16 rates because that is
-> the only rate the hardware has for it, and the dequantization is extra work
-> the BF16 path never had to do. Weight-only 4-bit is a **memory and
-> low-latency** choice; the throughput lever at high concurrency is FP8, which
-> raises the ceiling instead of moving you along it.
+**Weights and activations (W8A8).** Activations are computed live and have
+outliers, which made INT8 activations hard until **SmoothQuant**
+([Xiao et al., 2022](https://arxiv.org/abs/2211.10438)) applied the same
+divide-here, multiply-there trick to move the difficulty from activations into
+the weights. Today the W8A8 default on new GPUs is **FP8 (E4M3)**. In Liu et
+al.'s sweep the best W8A8KV8 method stayed within one point at every size from
+1.5B to 70B.
 
-## What frontier labs actually ship
+**KV cache.** Storing the cache in FP8 halves it. In vLLM v0.34 the flag is
+`--kv-cache-dtype fp8` (an alias of `fp8_e4m3`; `fp8_e5m2` also exists), and the
+docs state the pitfall: without a calibrated checkpoint, "all quantization
+scales are set to `1.0`", so any key or value beyond ±448 cannot be represented.
+The flag now accepts some twenty values, from NVFP4 to per-token-head INT4, and
+some models default to a quantized cache (DeepSeek-V3.2 to FP8; GLM-5.x to FP8
+on Blackwell since v0.32): read the startup configuration, never assume BF16.
+Below 8 bits, method matters as much as bit count. **KIVI**
+([Liu et al., ICML 2024](https://arxiv.org/abs/2402.02750)) reports near-baseline
+quality at *2 bits* by quantizing keys per channel and values per token. In the
+reasoning sweep, two 4-bit KV methods on the same 1.5B model scored 47.7 and 2.5
+against a baseline of 49.0, and the better 3-bit methods still cost 6 to 12
+points at 1.5B–7B and 2 to 3 at 14B–70B.
 
-- **DeepSeek-V3/R1 — FP8 end-to-end**, training and serving. Fine-grained
-  scaling (tile-wise 1×128 activations, block-wise 128×128 weights) plus a
-  **two-level accumulation** trick: H800 tensor cores accumulate FP8 products in a
-  limited (~14-bit) register, so every 128 elements DeepSeek promotes the partial
-  sum to a full FP32 accumulator in the CUDA cores. Relative error vs BF16 stayed
-  under 0.25%. (Kernels open-sourced as DeepGEMM.)
-- **OpenAI gpt-oss (120B/20B, 2025) — MXFP4 MoE weights**, letting 120B fit on a
-  single 80-GB H100. They chose the *open* OCP standard, not anything proprietary.
-- **Llama — official FP8 releases** as the efficient serving tier.
+**PTQ or QAT?** Everything above is PTQ, and FP8 with dynamic activations needs
+no calibration data at all. **Quantization-aware training (QAT)** simulates the
+rounding during training so the weights learn to survive it; below 4-bit
+weight-only, ask whether a QAT release exists. Calibration data matters
+unevenly: on a 1.5B model, switching it from generic text to math moved GPTQ by
+~10 points, AWQ by ~2, SmoothQuant and FlatQuant by under one (Liu et al.).
 
-The pattern: FP8 is the safe production floor; FP4 is the bleeding edge, reserved
-for weights that tolerate it (MoE experts) on hardware that has the cores.
+## What the hardware runs
 
-## Choosing, and then proving
+A format speeds up arithmetic only if the tensor cores support it:
 
-Put the whole chapter into one default. On Hopper or Blackwell, **FP8 W8A8 with
-FP8 KV** is the choice with the best ratio of win to risk: half the bytes, twice
-the tensor-core rate, twice the concurrency, and near-lossless on everything but
-the smallest models. Reach for **W4A16** when memory is the binding constraint
-and you want full activation precision — a 70B on one GPU instead of two. Reach
-for **FP4** only on Blackwell, only for weights, and only after the next chapter.
+| Precision | A100 | L40S / L4 | H100 | B200 | MI300X |
+|---|---|---|---|---|---|
+| BF16 / FP16 | native | native | native | native | native |
+| INT8 | native | native | native | native | native |
+| FP8 | **no** | native | native | native | native |
+| FP6 / FP4 | no | no | **no** | native | no |
 
-Because none of the above is a quality claim. Every number here is a byte count
-or a bandwidth division; not one of them tells you whether the model still gets
-the answer right. The evaluation half — why the standard metric for this is
-almost useless, and what to measure instead — is
-[Did Quantization Break Your Model?](#/did-quantization-break-your-model).
+Where a format is not native, the kernel **dequantizes** the small numbers
+before multiplying: the memory and bandwidth saving stays, the compute speedup
+does not. In vLLM, FP8 W8A8 needs compute capability 8.9 (Ada, Hopper,
+Blackwell); on Ampere an FP8 checkpoint runs as W8A16 through FP8 Marlin.
+W4A16 is a mixed-input matrix multiply — Marlin
+([Frantar et al., 2024](https://arxiv.org/abs/2408.11743)), Machete, and since
+vLLM v0.32 a kernel named Humming preferred on Hopper — and its advantage is
+largest at small batch. The startup log's `Selected <kernel> for <module>` lines
+tell you what runs.
 
-## What to remember
+## What each choice buys
 
-- Decode is bandwidth-bound, so **fewer bits ≈ proportionally faster** — plus
-  more concurrency, bigger models per GPU, and (on the right chip) faster compute.
-- A float is **sign + exponent (range) + mantissa (precision)**; `E4M3` = 4
-  exponent, 3 mantissa. **FP8 ≠ INT8**: log-spaced vs uniform steps, so FP8
-  handles outliers better at the same width.
-- Every low-bit format is **a tiny element + a per-block scale**; the real axes
-  are **block size** and **scale precision** — MXFP4 (32-elem, power-of-two,
-  4.25 bits/weight) vs NVFP4 (16-elem, FP8 scale, 4.5 bits/weight, more accurate).
-- Three targets, increasing difficulty: **W4A16** (GPTQ error-compensation, AWQ
-  protects the salient 1%) → **W8A8/FP8** (SmoothQuant migrates outliers; FP8 the
-  near-lossless default) → **KV cache** (FP8/INT8 safe, INT4 big-models-only).
-- **PTQ** — calibrate and round, minutes of compute — carries you to 8 bits and
-  usually to 4-bit weight-only. **QAT** is the rescue below that, and it is
-  someone else's training bill: look for a QAT checkpoint rather than running one.
-- **A100 has no FP8; FP4 needs Blackwell.** "FP4 on Hopper" is memory savings
-  only. **GGUF** is a local-inference file format, not different science.
-- The consequences, derived: FP8 halves weights (140 → 70 GB) and halves the
-  batch-1 decode step (42 → 21 ms); FP8 KV halves KV/token (328 → 164 KB) and
-  doubles long-context concurrency. **W4A16 cuts `B_crit` to ~74** (same ridge,
-  quarter the bytes); **FP8 W8A8 leaves `B_crit` near 295** but doubles the
-  ceiling itself.
+> [!predict] Before you read on
+> FP8 weights and an FP8 KV cache, 200 sequences of 3,000 tokens each decoding
+> together. Which is the bigger read per step: the weights or the cache?
+
+The cache. 70 GB of weights against 200 × 3,000 × 164 KB = 98 GB of KV. At high
+concurrency `t_kv` is the largest term, so any analysis that counts only weight
+bytes is wrong exactly where throughput matters.
+
+Where arithmetic catches up with the weight read — the critical batch — still
+depends on the format. [Inference Arithmetic](#/inference-arithmetic) derived
+the nameplate ~295 for BF16 on an H100. W4A16 cuts the bytes four times but
+keeps BF16 arithmetic: ~74. FP8 W8A8 halves the bytes *and* doubles the
+arithmetic rate: still ~295, not half. The effective knee on the case's node is
+lower (~160 in BF16, 14 ms ÷ 0.089 ms); measure it. The whole step model, for
+three formats:
+
+```python
+# The course's step model: step = max(t_w, t_c) + t_kv  (case.md), on 4 x H100, TP=4.
+BW, OVERHEAD = 2.85e12, 1.7e-3     # achievable bytes/s per GPU; all-reduce + launch (14 - 12.3 ms)
+T_C_BF16 = 0.089e-3                # s of arithmetic per token at the BF16 rate, 40% MFU
+
+formats = {  # weight GB on the node, KV bytes per token on the node, arithmetic rate vs BF16
+    "BF16 W, BF16 KV":   (140, 327_680, 1),
+    "FP8 W8A8, FP8 KV":  (70, 163_840, 2),
+    "W4A16, FP8 KV":     (40, 163_840, 1),   # 39.8 GB as published: lm_head stays 16-bit
+}
+ctx = 3_000
+print(f"{'':18}" + "".join(f"{f'batch {b}':>21}" for b in (1, 20, 200)) + "  knee")
+for name, (wgb, kv, speed) in formats.items():
+    t_w = wgb * 1e9 / 4 / BW + OVERHEAD
+    t_c = T_C_BF16 / speed
+    cells = []
+    for b in (1, 20, 200):
+        t_kv = b * ctx * (kv / 4) / BW
+        step = max(t_w, b * t_c) + t_kv
+        cells.append(f"{step * 1e3:5.1f} ms {b / step:6,.0f} tok/s")
+    print(f"{name:18}" + "".join(f"{c:>21}" for c in cells) + f"{t_w / t_c:7.0f}")
+
+# --- output of an actual run ---
+#                                 batch 1             batch 20            batch 200  knee
+# BF16 W, BF16 KV    14.1 ms     71 tok/s 15.7 ms  1,273 tok/s 35.0 ms  5,707 tok/s    157
+# FP8 W8A8, FP8 KV    7.9 ms    127 tok/s  8.7 ms  2,298 tok/s 17.5 ms 11,413 tok/s    176
+# W4A16, FP8 KV       5.3 ms    190 tok/s  6.1 ms  3,294 tok/s 26.4 ms  7,569 tok/s     59
+```
+
+*Runnable — Python 3 standard library only; the output shown in the comments is from an actual run. Estimates from the course's step model, not measurements; replace them with a `vllm bench serve` concurrency sweep.*
+
+The BF16 row reproduces the decode ladder: 14 ms at batch 1, ~16 ms at 20. At
+batch 1, W4A16 is fastest: only `t_w` matters. At batch 200 it loses to FP8: past
+its ~59-token knee, 200 tokens of BF16-rate arithmetic (17.8 ms) dominate, while
+FP8 sits near its knee; both pay the same 8.6 ms of cache reads. The model even
+flatters W4A16 by granting its kernels BF16's 40% of peak.
+
+> [!trap] "4-bit weights will double my throughput at high load"
+> Below its knee, W4A16 is excellent. Above it you are compute-bound at BF16
+> rates plus dequantization, and the KV read ignores the weight format. At high
+> concurrency the levers are FP8 arithmetic for `t_c` and a smaller KV format for
+> `t_kv`.
+
+## What labs ship
+
+- **DeepSeek-V3/R1: FP8 end to end**, training and serving. Hopper's FP8 matrix
+  multiplies accumulate with "around 14 bits", so partial sums are copied to
+  FP32 every 128 elements. Its "below 0.25%" is the *training loss* error
+  against BF16, not an accuracy score ([V3 report](https://arxiv.org/abs/2412.19437), §3.3).
+- **OpenAI gpt-oss: MXFP4 expert weights**, the rest in BF16 (Exercise 3).
+- **Llama:** Meta published FP8 Llama-3.1-405B and Llama 4 Maverick, but no FP8
+  Llama-3.3-70B.
+
+> [!dashboard] HBM bandwidth per step
+> **Utilisation:** `DCGM_FI_PROF_DRAM_UTIL_RATIO` (dcgm-exporter's default
+> counters): share of cycles the memory interface is busy; next to it,
+> `DCGM_FI_PROF_TENSOR_UTIL_RATIO` shows whether a format moved the step toward
+> compute. **Saturation:** `vllm:inter_token_latency_seconds` against the step
+> model's prediction at the observed `vllm:num_requests_running` and context.
+> **Errors:** none as a metric — quality damage is invisible here; the next
+> chapter builds the check.
+
+> [!case] The case: FP8 for Ask Halden
+> Halden's H100s run FP8 natively. The plan: FP8 weights and an FP8 KV cache.
+>
+> - **The checkpoint.** Meta publishes none, so the options are Red Hat's
+>   RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic (made with llm-compressor;
+>   validated by its publisher on vLLM 0.8.4, not on v0.34), the same data-free
+>   recipe run in-house, or vLLM's online `--quantization fp8_per_tensor`
+>   (coarser per-tensor scales). Halden pins the published file by revision:
+>   the recipe needs no calibration data, so producing it in-house buys nothing,
+>   and the evaluation gates that exact file.
+> - **The layout.** At 72.7 GB the model fits on two GPUs, so the node becomes
+>   two TP=2 replicas. Per replica: 35 GB of weights per GPU and FP8 arithmetic
+>   on two GPUs — the same `t_w` (~14 ms) and `t_c` as the BF16 node — and an FP8
+>   cache at 82 KB per token per GPU, the same `t_kv`. Each replica behaves like
+>   today's node, and there are two.
+> - **The pool.** 0.90 × 160 = 144 − 70 − 6 − 2 = **66 GB** per replica, ~400K
+>   FP8 tokens. Phase 2's peak needs ~61 GB across the node; if one replica fails,
+>   the survivor must hold it in 66.
+>
+> ```bash
+> vllm serve RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic \
+>   --revision f50dbad2c84590ca17dc51e207c34321b65ff14b \
+>   --device-ids 0,1 --port 8000 \
+>   --tensor-parallel-size 2 \
+>   --kv-cache-dtype fp8 \
+>   --max-model-len 16384 \
+>   --gpu-memory-utilization 0.90
+> # second replica: --device-ids 2,3 --port 8001
+> ```
+>
+> *Real format, illustrative values — flag names from vLLM v0.34.0 `vllm/engine/arg_utils.py`; values are the case's decisions, not a tested configuration.*
+>
+> **What this settles, and what could undo it:** FP8 ships only if the next
+> chapter's evaluation passes, one change at a time — weights first, then KV —
+> so a regression can be attributed. If FP8 weights fail, Halden stays on one
+> BF16 TP=4 replica with no redundancy. If only FP8 KV fails, the BF16 cache
+> doubles phase 2's need to ~122 GB of 132: it fits on paper, and a failed
+> replica can no longer be absorbed.
 
 ## Exercises
 
 <div class="exercise">
 
-**Exercise 1.** You are serving Llama-3-70B (70B parameters, 80 layers, 8 K/V
-heads, `head_dim` 128) on a node of **2× H100 80 GB = 160 GB** of HBM. The
-average request holds an **8,192-token** context. Ignore activations and
-workspace. Compute the weight bytes, the KV bytes per sequence, and how many
-concurrent 8K sequences fit, for three configurations: (a) BF16 weights with
-BF16 KV, (b) FP8 weights with FP8 KV, (c) INT4 weights with FP8 KV.
+**Exercise 1.** Serve Llama-3.3-70B on 2 × H100 (160 GB). Average live context is
+8,192 tokens. Ignoring overhead and the memory budget, how many concurrent
+sequences fit with (a) BF16 weights and KV, (b) FP8 weights and KV, (c) 4-bit
+weights (40 GB) and FP8 KV?
 
 <details>
 <summary>Reveal answer</summary>
 
-**Weights** are `70e9 × bytes_per_weight`:
+KV per 8K sequence: BF16 `327,680 × 8,192 ≈ 2.68 GB`; FP8 1.34 GB.
 
 ```text
-   BF16 (2 B):    140 GB
-   FP8  (1 B):     70 GB
-   INT4 (0.5 B):   35 GB
+   (a) 160 − 140 =  20 GB ÷ 2.68  →   7 sequences
+   (b) 160 −  70 =  90 GB ÷ 1.34  →  67 sequences
+   (c) 160 −  40 = 120 GB ÷ 1.34  →  89 sequences
 ```
 
-**KV per token** is `2 × 80 × 8 × 128 × bytes` = `163,840 × bytes`:
-
-```text
-   BF16 KV:  163,840 × 2 = 327,680 B  ≈ 328 KB/token
-   FP8  KV:  163,840 × 1 = 163,840 B  ≈ 164 KB/token
-```
-
-**KV per 8,192-token sequence** is that times 8,192:
-
-```text
-   BF16 KV:  327,680 × 8,192 = 2.68 GB per sequence
-   FP8  KV:  163,840 × 8,192 = 1.34 GB per sequence
-```
-
-**Concurrency** is the HBM left over after the weights, divided by the
-per-sequence KV:
-
-```text
-   (a) BF16 / BF16 KV:  160 − 140 =  20 GB ÷ 2.68 GB  →   7 sequences
-   (b) FP8  / FP8  KV:  160 −  70 =  90 GB ÷ 1.34 GB  →  67 sequences
-   (c) INT4 / FP8  KV:  160 −  35 = 125 GB ÷ 1.34 GB  →  93 sequences
-```
-
-**7 → 67 → 93 concurrent sequences: 9.6× and 13× more than BF16.** Notice where
-that came from. Halving the KV dtype only doubled the per-sequence cost; the
-enormous factor is that shrinking the weights *enlarged the pool the KV is
-divided into* — 20 GB became 90 GB, a 4.5× jump for a 2× shrink in weights. The
-two effects multiply, and the leverage is highest exactly when the weights are
-eating most of the HBM. That is why "how much room is left after the weights"
-is the number to compute first when concurrency is your binding constraint.
+From 7 to 67 is not 2×: shrinking the weights enlarged the pool the cache is
+divided into (20 → 90 GB, 4.5×), and FP8 KV halved each sequence (2×). The two
+effects multiply, and the leverage is greatest when weights fill most of the
+memory. With the case's 0.90 budget and overhead, (a) does not run at all.
 
 </details>
 
 </div>
 
-## Frequently asked
+<div class="exercise">
 
-<div class="faq">
+**Exercise 2 — diagnosis.** A team switches its 70B deployment on a 4 × H100 node
+from FP8 W8A8 to an AWQ W4A16 checkpoint "to go faster", keeping FP8 KV. Their
+concurrency sweep, 3,000-token contexts:
 
-<details>
-<summary>If FP4 is half the bytes of FP8, why isn't it simply twice as fast on an H100?</summary>
+| Concurrency | FP8: step | FP8: tokens/s | W4A16: step | W4A16: tokens/s |
+|---|---|---|---|---|
+| 1 | 7.9 ms | 127 | 5.3 ms | 190 |
+| 20 | 8.7 ms | 2,298 | 6.1 ms | 3,294 |
+| 200 | 17.5 ms | 11,413 | 26.4 ms | 7,569 |
 
-Because on an H100 the FP4 saving is only in *storage and traffic*, not in
-arithmetic. Hopper has no FP4 tensor cores, so the kernel loads 4-bit weights,
-dequantizes them into FP8 or BF16 registers, and runs the matmul at the higher
-precision. Batch-1 decode — which is pure bandwidth — does get most of the win.
-Prefill and large batches, which are compute-bound, get essentially none of it.
-On a B200, where FP4 is native, both halves land.
+*Illustrative values, computed from the course's step model above, not measured.*
 
-</details>
-
-<details>
-<summary>Does quantizing the KV cache speed up decode, or only save memory?</summary>
-
-Both, but the memory effect is much larger. Decode reads the whole KV cache of
-every sequence in the batch every step, so halving KV bytes does cut real traffic
-— the effect grows with context length and batch size, and at 128K it is
-substantial. But the reason people turn it on is capacity: 328 KB/token → 164
-KB/token doubles the number of concurrent sequences that fit in the HBM your
-weights left over, and concurrency is what sets throughput.
-
-</details>
+Explain both ends of the table. What would you check on the real system before
+deciding?
 
 <details>
-<summary>Everything here is per-weight. What about the activations and the scales — do they matter for memory?</summary>
+<summary>Reveal answer</summary>
 
-Not for capacity. Activations are transient: one layer's worth exists at a time
-and is reused as scratch, so their footprint is megabytes against tens of
-gigabytes of weights and KV. The scales are small too — one 8-bit value per 16 or
-32 weights is a 6–12% overhead on the quantized tensor, which is why "4-bit" in
-practice means 4.25 or 4.5 bits. The activation *dtype* still matters enormously,
-but for tensor-core throughput and for accuracy, not for how much fits.
+At concurrency 1 the step is `t_w`: 10 GB per GPU for W4A16 against 17.5 GB for
+FP8, so W4A16 is a third faster. At 200, `t_c` decides. W4A16 multiplies at the
+BF16 rate: 200 × 0.089 ms = 17.8 ms, far above its 5.2 ms weight read (its knee
+is ~59). FP8 multiplies at twice that rate: 8.9 ms, about its 7.8 ms weight read.
+Both add the same 8.6 ms of FP8 cache reads, which the weight format cannot
+touch. On a real node W4A16 likely does worse than this, because mixed-input
+kernels lose efficiency as the batch grows.
 
-</details>
-
-<details>
-<summary>Is a quantized checkpoint portable across GPU generations?</summary>
-
-The file always loads; what varies is whether the silicon executes it or the
-kernel has to unpack it first. A W4A16 checkpoint (GPTQ/AWQ) is the most
-portable, because dequantization to BF16 happens in software and every GPU can
-multiply in BF16 — you keep the memory win everywhere. An FP8 checkpoint runs
-natively on Hopper and Blackwell and merely as a memory saving on an A100. An
-FP4 checkpoint is a Blackwell artifact in performance terms. So pick the format
-for the oldest chip in the fleet you intend to serve on, not the newest one you
-benchmarked on.
-
-</details>
-
-<details>
-<summary>How much calibration data does PTQ need, and does its content matter?</summary>
-
-A few hundred sequences is the usual working range, and the content matters more
-than the count. Calibration exists to observe activation ranges, so the samples
-have to look like your traffic: calibrate a multilingual deployment on English
-web text and the scales are fitted to the wrong distribution, which shows up as
-clipped outliers on the languages you did not include. Same for long context —
-if you serve 128K, calibrate on long sequences, not on 512-token snippets. This
-is the cheapest place in the whole pipeline to make an expensive mistake.
-
-</details>
-
-<details>
-<summary>Should I quantize the weights and the KV cache in the same change?</summary>
-
-Separately, and measure between them. They fail for different reasons — weight
-quantization damages the matmul, KV quantization damages long-context attention
-— and if you flip both at once and quality drops, you have no way to attribute
-it without running the experiment again anyway. The usual order is FP8 weights
-first because it is the safest step, then FP8 KV because it is the one that buys
-concurrency, with a quality run in between. The next chapter is what "a quality
-run" has to contain.
+Check the startup log's `Selected <kernel>` lines and run your own sweep
+(`vllm bench serve` at concurrency 1, 20, 200) to place the real knee. Then
+choose by traffic: W4A16 for low concurrency, FP8 near peak load.
 
 </details>
 
 </div>
+
+<div class="exercise">
+
+**Exercise 3 — transfer.** gpt-oss-120b's `config.json` contains:
+
+```json
+  "quantization_config": {
+    "modules_to_not_convert": [
+      "model.layers.*.self_attn",
+      "model.layers.*.mlp.router",
+      "model.embed_tokens",
+      "lm_head"
+    ],
+    "quant_method": "mxfp4"
+  },
+```
+
+*Verbatim — `config.json` of openai/gpt-oss-120b on Hugging Face, checked 2026-11-21.*
+
+The Hugging Face API reports 116.8 B parameters, 2.17 B of them in BF16, and
+the weight files total 65.25 GB. What is stored in MXFP4, how many bits per
+weight do the files imply, and what does an H100 do with it?
+
+<details>
+<summary>Reveal answer</summary>
+
+Everything not excluded: the experts' MLP weights, 114.7 B parameters.
+Attention, router, embedding and LM head stay in BF16: 2.17 B × 2 = 4.33 GB.
+The rest, 65.25 − 4.33 = 60.9 GB, holds 114.7 B weights: 60.9 × 8 ÷ 114.7 =
+**4.25 bits** — a 4-bit E2M1 element plus one 8-bit E8M0 scale per 32, exactly
+MXFP4's table row. The whole model is 65 GB, so it fits one 80 GB GPU.
+
+An H100 has no FP4 tensor cores: the kernel dequantizes the experts and
+multiplies at a higher precision. You keep the memory and the bandwidth saving,
+which is what a bandwidth-bound decode needs; prefill gets no FP4 speedup. On a
+B200 the same file can run FP4 arithmetic.
+
+</details>
+
+</div>
+
+<div class="exercise">
+
+**Exercise 4 — find the flaw.** A colleague drafts Halden's FP8 rollout. Find
+the errors before you open the answer.
+
+```text
+FP8 rollout plan (draft)
+1. vllm serve meta-llama/Llama-3.3-70B-Instruct --quantization fp8 \
+     --kv-cache-dtype fp8 -tp 2   # vLLM converts the BF16 weights at load
+2. FP8 W8A8 halves the critical batch to ~148, so cap batches at 148.
+3. Each GPU holds 35 GB of weights, leaving 80 − 35 = 45 GB of KV per GPU.
+4. FP8 KV needs no calibration: vLLM uses scales of 1.0 and E4M3 reaches ±448.
+5. Embeddings and lm_head are FP8 too, so the checkpoint is exactly 70 GB.
+```
+
+<details>
+<summary>Reveal answer</summary>
+
+1. **Wrong for v0.34.** Since v0.31, online FP8 conversion is
+   `--quantization fp8_per_tensor`; `fp8` is for checkpoints that declare it.
+   Per-tensor online scales are not the per-channel published file either.
+2. **Wrong.** FP8 halves the bytes and doubles the arithmetic rate; the
+   nameplate critical batch stays ~295, and the effective knee is ~160 per
+   replica. Nothing about it requires a cap at 148.
+3. **Wrong.** The budget is a fraction of total memory: 0.90 × 80 = 72 − 35 − 3
+   (overhead) − 1 (activations) = 33 GB per GPU, 66 per replica.
+4. **Half right.** Scales do default to 1.0 and E4M3 stops at 448. Whether
+   Llama's keys and values stay in range is an empirical claim, for the
+   evaluation to check; the docs recommend calibrated scales.
+5. **Wrong.** `lm_head` is in the `ignore` list and the embedding is not a
+   `Linear`: the published file is 72.7 GB.
+
+</details>
+
+</div>
+
+## What to remember
+
+- One model prices every format: `step ≈ max(t_w, t_c) + t_kv`. Weight formats
+  shrink `t_w`, KV formats `t_kv`, native low-precision arithmetic `t_c`.
+- At high concurrency the KV read can exceed the weight read; a weight-only
+  analysis is wrong exactly where throughput matters.
+- Every low-bit format is an element plus a scale; read a checkpoint's
+  `quantization_config` for granularity, static or dynamic scales, and what is
+  left in 16 bits.
+- W4A16 cuts the nameplate critical batch to ~74 and wins at low concurrency;
+  FP8 W8A8 keeps it at ~295 and wins near peak load.
+- Non-native formats save memory and bandwidth, not compute: FP8 needs Ada,
+  Hopper or Blackwell; FP4 arithmetic needs Blackwell.
+- FP8 KV scales default to 1.0 without calibration; check the engine's KV dtype
+  for your model rather than assuming BF16.
 
 ```quiz
 [
   {
-    "q": "Why does halving the bits per weight roughly halve batch-1 decode latency?",
+    "q": "Llama-3.1-8B (131 KB of BF16 KV per token) is served with FP8 weights (8 GB) and an FP8 cache, at 64 sequences of 8,192 tokens. The team considers 4-bit weights to speed up decode. How much can that help?",
     "choices": [
-      "Fewer bits means fewer FLOPs, and decode is compute-bound",
-      "Decode is bandwidth-bound: latency ≈ bytes moved / HBM bandwidth, and half the bits is half the bytes to read",
-      "Smaller weights fit in the GPU's L2 cache, eliminating memory reads entirely",
-      "The tensor cores automatically run twice as fast on any smaller format"
+      "About 2× faster steps, since the weights are halved again",
+      "Little: the 34 GB cache read is four times the weight read",
+      "Nothing at all, since an 8B model is compute-bound at batch 64",
+      "About 4× faster, since 4-bit arithmetic quadruples the FLOP rate"
     ],
     "answer": 1,
-    "explain": "A decode step reads every weight from HBM once; its latency is set by bytes/bandwidth, not FLOPs. Halve the bytes per weight and you halve the bytes moved, so the step is roughly twice as fast — independent of any compute speedup (which an A100 in FP8, for instance, doesn't even get)."
+    "explain": "FP8 KV is 65.5 KB per token: 64 × 8,192 × 65,536 ≈ 34 GB read per step against 8 GB of weights. Halving the weights to 4 GB trims about 4 GB of 42, roughly 10%. W4A16 does not add FP4 arithmetic, and at 64 tokens per step an 8B model is not compute-bound."
   },
   {
-    "q": "At the same 8-bit width, why does FP8 (E4M3) typically handle activation outliers better than INT8?",
+    "q": "A checkpoint's quantization_config lists weights with strategy channel, dynamic false, and input_activations with strategy token, dynamic true. What is computed while serving?",
     "choices": [
-      "FP8 has more total codes than INT8",
-      "INT8 is signed while FP8 is unsigned, giving FP8 more range",
-      "FP8 spaces its values logarithmically (dense near zero, sparse far out), so its exponent reaches outliers while keeping fine steps where most values live; INT8's grid is uniform",
-      "FP8 stores a separate scale per element and INT8 does not"
+      "Weight scales for each channel, refreshed on every decode step",
+      "Nothing: all scales were calibrated offline and stored in the file",
+      "One activation scale per token on each step; weight scales are stored",
+      "One scale for the whole activation tensor, fixed after the first request"
     ],
     "answer": 2,
-    "explain": "Both have 256 codes, but INT8 spaces them uniformly and FP8 spaces them by exponent. Activations are long-tailed — mostly small with rare large outliers — so FP8's log spacing covers the outliers for free while preserving precision near zero, where the mass is."
+    "explain": "dynamic: false means the per-channel weight scales were fixed offline and stored. dynamic: true with strategy token means each token's activation scale is computed from that token's values at runtime, which is why FP8-dynamic needs no calibration data. A per-tensor static activation scale would say strategy tensor, dynamic false."
   },
   {
-    "q": "What is the single biggest difference between MXFP4 and NVFP4?",
+    "q": "A team deploys an FP8 checkpoint on A100s, which lack FP8 tensor cores. What do they get, per vLLM's documentation?",
     "choices": [
-      "MXFP4 uses 4-bit elements and NVFP4 uses 6-bit elements",
-      "They use different block sizes and scale precisions: MXFP4 shares a power-of-two scale over 32 elements, NVFP4 shares a finer FP8 scale over 16",
-      "MXFP4 is for weights and NVFP4 is only for the KV cache",
-      "NVFP4 runs on any GPU while MXFP4 needs Blackwell"
+      "An error at load, because FP8 needs compute capability 8.9",
+      "FP8 arithmetic in software, as fast as BF16 on the same GPU",
+      "Prefill gets faster from FP8, but decode stays at the BF16 speed",
+      "W8A16 through FP8 Marlin: half the weight bytes, BF16 arithmetic"
     ],
-    "answer": 1,
-    "explain": "Both use the same E2M1 4-bit element. A low-bit format is really 'element + shared block scale,' and that's where they diverge: MXFP4's coarse power-of-two scale over 32 elements is portable but outlier-sensitive; NVFP4's finer FP8 scale over 16 elements is more accurate at equal bits. In bits per weight that is 4.25 vs 4.5."
+    "answer": 3,
+    "explain": "On Ampere vLLM runs FP8 checkpoints weight-only through the FP8 Marlin kernel: the weights are dequantized and multiplied at BF16 rate. Bandwidth-bound decode benefits from the smaller reads; compute-bound prefill does not. The checkpoint loads; it does not run FP8 arithmetic."
   },
   {
-    "q": "You quantize a 70B model to FP8 and deploy it on an A100. What do you actually get?",
+    "q": "FP8 KV is enabled with no calibrated scales. One attention head's keys reach a magnitude of about 600 on some inputs. What happens to those values?",
     "choices": [
-      "Half the weight bytes and roughly 2× the matmul rate, as on an H100",
-      "Half the weight bytes — so faster batch-1 decode and more room for KV — but zero compute speedup, because the A100 has no FP8 tensor cores",
-      "Nothing at all: FP8 weights cannot be loaded on Ampere",
-      "Full FP8 compute, but the KV cache must stay in BF16"
+      "They cannot be represented: E4M3's largest finite value is 448",
+      "They are stored exactly, since FP8 has an exponent for large values",
+      "They round to the nearest step of about 4, since FP8 is log-spaced",
+      "They are stored as infinity and the attention output becomes NaN"
     ],
-    "answer": 1,
-    "explain": "The A100 has no FP8 tensor cores. The bandwidth win is real — 70 GB instead of 140 GB to stream per decode step, plus HBM freed for concurrency — but the kernel must dequantize to BF16 to multiply, so compute-bound prefill and large batches see no speedup. The same logic makes 'FP4 on Hopper' a memory trick, not a speed trick."
+    "answer": 0,
+    "explain": "With the scale at 1.0 the stored value is the raw value, and E4M3 stops at 448 (0x7E); there is no infinity in E4M3, so a value of 600 cannot be stored as itself. A calibrated scale would map the head's range into ±448. Near 448 the step between codes is 32, not 4."
   },
   {
-    "q": "Weight-only W4A16 quantization on an H100 changes B_crit from ~295 to ~74, while FP8 W8A8 leaves it near ~295. Why the difference?",
+    "q": "A 70B GGUF file named Q4_K_M is about 43 GB, more than 70e9 × 4.5 bits ≈ 39 GB. Where does the difference come from?",
     "choices": [
-      "W4A16 uses a smaller block size, which raises arithmetic intensity",
-      "W4A16 quarters the weight bytes but the matmul still runs at BF16 rates, so the ridge is unchanged and the knee moves down 4×; FP8 halves the bytes but also roughly doubles peak FLOP/s, so the ridge moves with it and the knee stays put",
-      "FP8 KV cache reads dominate and cancel the change",
-      "B_crit is a property of the model, not the hardware or format"
+      "GGUF stores every tensor twice, once per supported backend",
+      "Q4_K_M uses 5-bit elements throughout, despite the name",
+      "Some attn_v and ffn_down tensors and the output matrix are Q6_K",
+      "The K-quant super-blocks keep a full FP32 copy of every block scale"
     ],
-    "answer": 1,
-    "explain": "B_crit is the batch where intensity reaches the ridge. W4A16: intensity = 4B against an unchanged ridge of ~295 → B_crit ≈ 74. FP8 W8A8: intensity = 2B, but Hopper's FP8 peak is ~1,980 TFLOP/s, so the ridge rises to ~590 → B_crit ≈ 295. Weight-only quantization moves you along the roofline; full low-precision execution raises the roofline."
+    "answer": 2,
+    "explain": "Q4_K itself is 4.5 bits per weight (144 bytes per 256 weights). The _M mix gives Q6_K to the value and down projections of the first and last eighth of the layers and every third layer between, and to the output matrix; llama.cpp's table lists Llama-3.1-70B Q4_K_M at 43.1 GB. Scales are 6-bit and FP16, not FP32."
   }
 ]
 ```

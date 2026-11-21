@@ -1,336 +1,378 @@
 # Sizing a Deployment
 
-> **Goal of this chapter:** turn the arithmetic of Module 1 into an answer to
-> the only two questions anyone actually asks you — *will it fit, and how many
-> users can it serve at once?* By the end you can write down a deployment's
-> whole memory budget from a model card and a GPU spec sheet, invert it to get
-> a concurrency number, and rank the levers that move that number. Nothing here
-> is asserted; every figure is derived on the page.
+> **The question:** given a model, a node and a traffic forecast, how many requests
+> can the deployment hold at once — and can it still keep its latency promises with
+> that many?
+>
+> **You'll be able to:** write a deployment's memory budget the way the engine
+> computes it, and predict the two lines it prints at startup; check a concurrency
+> against the step-time model, Little's law, its p95 and the loss of a replica; size
+> Ask Halden's node from the brief, phase 1 and phase 2, and say what breaks first.
 
 <div class="inf-widget inf-stackmap" data-widget="stackmap" data-highlight="kv,runner"></div>
 
-You know the pieces. [Inference Arithmetic](#/inference-arithmetic) gave you
-`2 × layers × kv_heads × head_dim × bytes` per token and the critical batch
-size. [PagedAttention](#/paged-kv-cache) gave you the block pool. [Continuous
-Batching](#/continuous-batching) gave you the scheduler that spends it. What
-nobody has yet made you do is add them up.
+The addition fails in a specific way: the deployment *starts*. Weights load, a test
+request comes back beautifully — and under real traffic it serves a handful of people
+and preempts constantly, because only the weights were checked.
 
-That addition fails in a specific, humiliating way: the deployment *starts*.
-The weights load, the health check passes, a single test request comes back
-beautifully — and then under real traffic it serves three people and preempts
-constantly. It looked like it fit because you only checked the weights.
+## The method
 
-## The budget, as one equation
+Three steps: the **budget** (the KV pool's memory), the **capacity** (sequences it
+holds), the **service** (promises kept at that concurrency, even with a replica dead).
+Most errors stop after the second.
 
-Every byte of a GPU's HBM is spoken for by one of five things:
+### Step 1: the budget, as the engine computes it
+
+In vLLM v0.34 the worker does this subtraction at startup, per GPU
+(`vllm/v1/worker/utils.py`, `gpu_worker.py`):
 
 ```text
-HBM_total  =  weights
-            + KV cache pool
-            + activations (transient, per forward pass)
-            + framework & CUDA overhead
-            + headroom
+   requested  =  gpu_memory_utilization × total HBM
+   KV pool    =  requested − weights − peak activations − non-torch memory − CUDA-graph memory
+   headroom   =  total HBM − requested          (the engine never touches it)
 ```
 
-Take them one at a time, honestly, because each has a trap in it.
+- **Weights** = parameters × bytes, divided by the tensor-parallel degree: 140 GB in
+  BF16 for Llama-3.3-70B, 70 GB in FP8. A mixture-of-experts model allocates its
+  *total* parameters.
+- **Activations**: the peak of a profiling forward pass at `--max-num-batched-tokens`
+  tokens; the course budgets 1 GB per GPU. A larger token budget spends pool.
+- **Overhead**: CUDA context, tensor-parallel buffers, workspaces, CUDA-graph pools; the
+  course budgets 3 GB per GPU (the engine measures it).
+- **Headroom** is `(1 − f) × HBM`, a fraction of the *whole* GPU — not a factor applied
+  to what is left after the weights. At `0.90` on an 80 GB GPU, 8 GB per GPU stay
+  outside the engine for fragmentation, other processes and whatever the profile missed.
 
-**Weights** `= P × bytes_per_param`. Llama-3-70B in BF16 is
-`70e9 × 2 = 140 GB`. In FP8, 70 GB. In INT4, 35 GB. This is the only term most
-people compute, and it is the only one that is genuinely simple.
+> **State of play (November 2026):** vLLM v0.34.0 turned the extensible KV cache on by
+> default: unset, `gpu_memory_utilization` is 1.0 and the pool is sized from memory
+> actually free after warm-up. The release notes recommend dropping the flag and report a
+> TPOT cost of 6–18% on some H200 models. The case keeps an explicit `0.90` for a
+> predictable pool and step time.
 
-> [!trap] MoE: total parameters, not active
-> [Inference Arithmetic](#/inference-arithmetic) told you to use *active*
-> parameters for FLOPs. For **memory you use total**, always. DeepSeek-V3 is
-> 37B active and 671B total: it computes like a 37B model and *occupies* like a
-> 671B one, because any expert might be routed to on the next token and so must
-> be resident. In FP8 that is ~671 GB of weights — a multi-node deployment
-> before you have stored a single KV block. Sizing an MoE off its active
-> parameter count is off by 18× here, in the direction that does not start.
-
-**KV cache pool** `= kv_bytes_per_token × context × concurrency`. For
-Llama-3-70B in BF16, `2 × 80 × 8 × 128 × 2 = 327,680` bytes per token — 320 KiB,
-which is the 328 KB you have seen quoted; same number, different unit
-convention. This is the term that grows with your traffic, and it is the term
-that decides your concurrency.
-
-**Activations** are the transient tensors of one forward pass. For **decode**
-they are small and easy to forget about safely: a batch of 64 sequences through
-a `d_model = 8192` model carries `64 × 8192 × 2 = 1 MB` per hidden state, and
-even the widest MLP intermediate (~3.5× `d_model` for SwiGLU) is under 4 MB. A
-rounding error.
-
-For **prefill** it is not a rounding error, and this catches people. A chunked
-prefill chunk of 8,192 tokens through the same model carries
-`8192 × 8192 × 2 = 134 MB` per hidden state and `8192 × 28672 × 2 ≈ 470 MB` for
-the MLP intermediate, with several such tensors live at once inside a layer.
-Call it **1–2 GB per GPU** for a large chunk [directional]. The chunk size you
-tuned in [Continuous Batching](#/continuous-batching) to smooth out ITL is
-also a memory knob; doubling it doubles this term.
-
-**Framework and CUDA overhead** is the part no formula on the internet
-includes. The CUDA context alone is several hundred megabytes. PyTorch's
-allocator, cuBLAS and cuDNN workspaces, the NCCL communication buffers that
-tensor parallelism needs, and the memory pools that CUDA graph capture pins
-down all sit on top. Budget **2–4 GB per GPU** [directional], toward the upper
-end when you are running tensor parallelism and CUDA graphs, which in
-production you are.
-
-**Headroom** is not optional and not superstition. A pool sized to 100% of what
-is left preempts — the scheduler admits a batch, a sequence grows one token
-past the last free block, and something gets evicted and recomputed. Engines
-expose this directly: vLLM's `gpu_memory_utilization` defaults to **0.90**, and
-that 10% is exactly this term. Treat 5–10% as the floor, more if your context
-lengths are heavy-tailed.
-
-> [!bridge] You already know this — from the Linux course
-> Linux lets you allocate far more address space than you have RAM because it
-> only commits pages when they are touched, and when the bet goes wrong there is
-> swap, reclaim and ultimately the OOM killer behind it. HBM has none of that:
-> no swap device sits behind the block pool and no reclaim path will find you a
-> spare gigabyte, so the whole five-term budget has to be right *before* the
-> process starts. That is why `gpu_memory_utilization` is a headroom knob and
-> not an overcommit ratio.
+> [!bridge] From the Linux course
+> Linux overcommits address space and backs the bet with demand paging, reclaim and
+> the OOM killer. The engine overcommits nothing; the budget is fixed before the first
+> request. What differs is the KV pool: it *can* sit in front of a lower tier — the CPU
+> offload of [The KV Fabric](#/the-kv-fabric) — but only through an explicit policy
+> that moves whole blocks, never a transparent page fault.
 > [→ Linux: Virtual Memory](../#/memory)
 
-## Inverting it
-
-Now the move that makes the equation useful. You do not usually want to know
-whether a *given* concurrency fits; you want to know the largest concurrency
-that does. Solve for it:
+### Step 2: capacity
 
 ```text
-                        HBM_total − weights − overhead − activations − headroom
-max_concurrency  =  ─────────────────────────────────────────────────────────────
-                              kv_bytes_per_token × context
+                      KV pool − shared-prefix KV (stored once)
+   max_concurrency =  ────────────────────────────────────────────
+                      kv_bytes_per_token × unique live context
 ```
 
-The numerator is your **KV pool**: everything left after the fixed costs. The
-denominator is what one sequence costs. Two notes on reading it correctly.
+Live context is prompt plus output so far, at your p95 from logs — not `max_model_len`:
+a paged pool holds blocks for tokens a sequence has.
 
-First, `context` here is the **working context** — the number of tokens a
-typical live sequence actually holds — not `max_model_len`. Because the pool is
-paged, a sequence occupies blocks for the tokens it has, not the tokens it is
-permitted to have. Sizing at the maximum is the single most expensive mistake
-in this chapter; we return to it under the traps.
+### Step 3: service
 
-Second, notice what is *not* in the denominator: anything about FLOPs. Fit is a
-capacity question and only a capacity question. Whether the concurrency you
-compute here is *also* a good idea is a separate question, answered by
-`B_crit`, and we ask it at the end.
+Price the step at that concurrency with the case's one model ([Inference
+Arithmetic](#/inference-arithmetic)): `step ≈ max(t_w, t_c) + t_kv`, at rung 4 of the
+decode ladder — `t_w` ≈ 14 ms for 35 GB of weights per GPU, `t_c` ≈ 0.089 ms per token
+in the step, and `t_kv` ≈ 29 ns per context token per sequence on a GPU holding 82 KB
+of KV per token. Two consequences:
 
-## Worked: Llama-3-70B on two H100s
+- **A full pool costs a fixed amount per step.** Every decoding sequence's KV is read
+  every step: a full pool adds `pool per GPU ÷ 2.85 TB/s`, 33 GB → 11.6 ms. A shared
+  prefix is still read once *per sequence* (vLLM v0.32 removed cascade attention, which
+  read it once per batch).
+- **The worst gap is the hybrid step.** A step carrying a 512-token prefill chunk costs
+  `512 × 0.089 ≈ 45 ms` of arithmetic, ~50 ms with KV reads, and every stream waits.
 
-Here is the configuration people reach for first, because 140 GB of weights
-"obviously" fits in 160 GB of HBM. Watch it fail.
+Then demand. Little's law gives the *average* in the system, `L = λW`. With independent
+arrivals and no queue the count is Poisson with mean `L`, so its p95 is roughly
+`L + 1.65√L`: a mean of 6.5 exceeds 11 5% of the time. Correlated bursts need headroom
+on top. Then repeat every check with one replica gone (N+1).
 
-The inputs: 2 × H100 80GB = **160 GB** HBM, NVLink-connected, TP=2. Llama-3-70B
-— 80 layers, 8 KV heads, head_dim 128, 70B params — in BF16. A 32K context
-window.
+## Worked: a long-document service on two H100s
 
-```text
-  HBM_total                   160 GB
-− weights   70e9 × 2 bytes  = 140 GB     (70 GB per GPU under TP=2)
-− overhead  ~3 GB × 2 GPUs  =   6 GB
-− activations ~1 GB × 2     =   2 GB
-                              ───────
-  raw KV pool                  12 GB
-× 0.90 headroom             ≈  10.8 GB usable
-```
+A team wants Llama-3.3-70B for contract review — 32K-token documents — on two H100s
+(TP=2).
 
-And one sequence at full context:
+> [!predict] Before you read on
+> In BF16 (140 GB of weights) the model fits in the pair's 160 GB. How many concurrent
+> 32K-token sequences does the pool hold?
 
-```text
-  328 KB/token × 32,768 tokens = 10.75 GB
-```
+None: the engine refuses to start. It may use 0.90 × 160 = 144 GB; weights, overhead and
+activations take 148. The weights fit the GPUs and not the budget. Now pull the levers
+one at a time:
 
-**One sequence.** The KV pool holds exactly one 32K conversation, and only if
-you shave the headroom. This deployment will serve a demo and collapse the
-moment a second user arrives — it will admit them, run out of blocks, and spend
-its life preempting and recomputing. It is not a tight deployment; it is a
-broken one. Note too that "80 GB" is 80 GiB in some datasheets and 80 × 10⁹
-bytes in others, a ~7% swing that on this budget is your entire margin.
-
-Now fix it, one lever at a time, and watch what each one actually buys.
-
-**Lever 1 — FP8 weights.** Halving `bytes_per_param` takes weights to 70 GB and
-returns the whole 70 GB to the pool:
-
-```text
-160 − 70 − 6 − 2 = 82 GB raw  →  ×0.90 ≈ 74 GB pool
-74 / 10.75 ≈ 6.9  →  6 concurrent 32K sequences
-```
-
-From 1 to 6. [Quantization](#/quantization) argues FP8 is near-lossless for
-weights and activations; here is what that costs and buys in bytes.
-
-**Lever 2 — FP8 KV cache on top.** The denominator halves too:
-`2 × 80 × 8 × 128 × 1 = 164 KB/token`, so 5.37 GB per 32K sequence.
-
-```text
-74 / 5.37 ≈ 13.8  →  13 concurrent sequences
-```
-
-**Lever 3 — four H100s instead of two.** TP=4 gives you 320 GB. At BF16
-weights: `320 − 140 − 12 − 4 = 164 GB` raw, ≈148 GB pool, `148 / 10.75 ≈ 13`.
-Doubling your hardware bill buys **exactly what the two quantization flags
-bought for free**. Do both and the pool is ~210 GB, giving `210 / 5.37 ≈ 39`.
-
-**Lever 4 — size for the real context, not the window.** Your model supports
-32K. Your p95 request is not 32K. Suppose the p95 live sequence is 8K tokens.
-On two H100s with FP8 weights and FP8 KV, one sequence costs
-`164 KB × 8192 = 1.34 GB`:
-
-```text
-74 / 1.34 ≈ 55 concurrent sequences
-```
-
-Fifty-five, from the same two GPUs, by changing a number in your head rather
-than anything on the machine.
-
-**Lever 5 — prefix caching.** Now suppose those 8K tokens are 5K of shared
-system prompt and tool definitions plus 3K of per-user content — the shape of
-essentially all agent traffic ([The Agentic Era](#/agentic-serving)). The
-shared 5K is stored **once** in the block pool and pointed at by every block
-table. The marginal cost of a sequence drops to `164 KB × 3072 ≈ 0.50 GB`:
-
-```text
-(74 − 0.82 shared) / 0.50 ≈ 145 concurrent sequences   [directional]
-```
-
-The ladder, ranked:
-
-| # | Config | Weights | KV pool | KV/seq | Max concurrency |
+| # | Configuration | Pool | KV per sequence | Fits | Decode step, pool full |
 |---|---|---|---|---|---|
-| 1 | 2×H100, BF16 W, BF16 KV, 32K | 140 GB | 11 GB | 10.75 GB | **1** |
-| 2 | + FP8 weights | 70 GB | 74 GB | 10.75 GB | **6** |
-| 3 | + FP8 KV | 70 GB | 74 GB | 5.37 GB | **13** |
-| 4 | 4×H100, BF16 W, BF16 KV, 32K | 140 GB | 148 GB | 10.75 GB | **13** |
-| 5 | 4×H100, FP8 W, FP8 KV, 32K | 70 GB | 210 GB | 5.37 GB | **39** |
-| 6 | 2×H100, FP8 W+KV, 8K working ctx | 70 GB | 74 GB | 1.34 GB | **55** |
-| 7 | row 6 + 5K shared prefix | 70 GB | 74 GB | 0.50 GB | **~145** |
+| 1 | 2 × H100, BF16 weights + KV, 32K | −4 GB | 10.7 GB | does not start | — |
+| 2 | + FP8 weights | 66 GB | 10.7 GB | 6 | 14 + 11.6 ≈ 26 ms |
+| 3 | + FP8 KV | 66 GB | 5.4 GB | 12 | ≈ 26 ms |
+| 4 | 4 × H100, BF16 weights + KV, 32K | 132 GB | 10.7 GB | 12 | ≈ 26 ms |
+| 5 | 4 × H100, FP8 weights + KV, 32K | 202 GB | 5.4 GB | 37 | ~8 + 17.7 ≈ 26 ms |
+| 6 | row 3, but **8K live** context | 66 GB | 1.34 GB | 49 | ≈ 26 ms |
+| 7 | row 6, 5K of the 8K a **shared prefix** | 66 GB | 0.50 GB + 0.84 once | 129 | 14 + 30.5 ≈ 45 ms |
 
-Read rows 3 and 4 together: **the free levers and the expensive lever bought
-the same thing.** Then read row 6 and 7: the two biggest wins on the whole
-table cost no hardware and no accuracy at all. They are facts about your
-traffic that you were free to measure at any time. Sizing is mostly the
-discipline of measuring your traffic before you buy silicon for it.
+> [!predict] Before you read on
+> Which moved concurrency more: doubling the GPUs (row 3 → row 5), or two facts about the
+> traffic that cost no hardware (rows 6 and 7)?
+
+The facts, by far: doubling the GPUs took 12 to 37; measuring the real context and
+sharing the common prefix took 12 to 129. (Rows 3 and 4: two FP8 flags buy what
+doubling the GPUs buys, with an accuracy risk.) Row 6 is not a setting — lowering
+`--max-model-len` changes nothing, since the pool never reserved 32K. It is the traffic,
+measured.
+
+The last column is the service check. In rows 2–6 a full pool costs the same ~12 ms per
+step. Row 7 pays for its capacity: 129 sequences each read the shared prefix every step,
+30 ms of KV reads; add a hybrid step and the worst gap is ~75 ms. The best capacity in
+the table is the first to break a 60 ms TPOT promise.
+
+When row 3 starts, it prints the budget:
+
+```plaintext
+INFO … Available KV cache memory: 30.73 GiB
+INFO … GPU KV cache size: 402,816 tokens, Maximum concurrency for 32,768 tokens per request: 12.29x
+```
+
+*Real format, illustrative values — message formats from vLLM v0.34.0 `vllm/v1/worker/gpu_worker.py` and `vllm/v1/core/kv_cache_utils.py`, logger prefix trimmed; numbers computed from the 80 × 10⁹-byte budget above, not measured.*
+
+Reproduce both. The first is per GPU, in GiB: 33 × 10⁹ ÷ 2³⁰ = 30.73. The
+second divides by one token's cost *on one GPU* — 164 KB of FP8 KV split by KV head
+across two GPUs, 81,920 bytes: 402,832, rounded down to whole 64-token blocks. The
+concurrency is that over `max_model_len`, 12.29: "how many requests of `max_model_len`
+fit", the right question only for row 3. A real engine starts from the total the driver
+reports, not 80 × 10⁹: redo the arithmetic from your own line.
 
 <div class="inf-widget" data-widget="kv-calculator">
 <p class="inf-widget-fallback">Interactive KV-cache and memory-fit calculator — needs JavaScript enabled.</p>
 </div>
 
-## Worked: Llama-3-8B on one H100
+## Which wall first?
 
-The disaster case teaches the arithmetic; a normal case teaches what healthy
-looks like. Llama-3-8B — 32 layers, 8 KV heads, head_dim 128 — in BF16 on one
-H100.
+The first limit met as load rises:
 
-```text
-  HBM                            80 GB
-− weights  8e9 × 2            =  16 GB
-− overhead                    ≈   3 GB
-− activations                 ≈   1 GB
-                                ──────
-  raw pool                       60 GB   →  ×0.90 ≈ 54 GB
+- **Weight wall:** no pool (row 1). Quantize, add GPUs, or shrink the model.
+- **KV wall:** the pool fills before the batch reaches the knee — ~160 tokens per step
+  on the case's node (nameplate B_crit ~295; measure it). Every 70B row above: decode
+  stays memory-bound. Levers: FP8 KV, real contexts, prefix sharing, offload.
+- **Compute wall:** the batch reaches the knee first — Llama-3.1-8B in FP8 on one H100
+  at 1K-token contexts holds ~900 sequences against the same ~160 knee. Cap the batch
+  near the knee.
+- **Latency wall:** what fits is too slow (row 7).
+- **No wall:** demand sits far below all four; something else — a data rule,
+  redundancy — sized the deployment.
+
+## Ask Halden: your sizing
+
+Every chapter recorded a decision for Ask Halden; now they must add up, and the sizing
+is yours. You inherit:
+
+- **Model and format:** Llama-3.3-70B-Instruct, FP8 weights and FP8 KV, gated on the
+  evaluation of [Did Quantization Break Your Model?](#/did-quantization-break-your-model);
+  fallback BF16 on one TP=4 replica.
+- **Layout:** two TP=2 replicas on the four-GPU node, routed by conversation
+  ([Parallelism for Inference](#/parallelism-for-inference)).
+- **Engine** ([Anatomy of an Engine](#/anatomy-of-an-engine), [Continuous
+  Batching](#/continuous-batching)): `--max-num-seqs 64`, a 512-token budget, prefix
+  caching on with the 800-token system prompt shared; `--max-model-len` above ~21K once
+  agents arrive.
+- **Memory** ([Beyond Chat](#/beyond-chat)): in phase 1 the embedding model and reranker
+  share GPU 0, so the LLM runs at `--gpu-memory-utilization 0.80`; in phase 2 they move
+  off the node and it returns to `0.90`.
+- **Phase 2:** CPU-memory KV offload ([The KV Fabric](#/the-kv-fabric)), no
+  disaggregation. Speculation is a separate bet (Stage 4).
+- **Traffic** ([The Agentic Era](#/agentic-serving)): phase 1 at 1.5 req/s, 3,000 tokens
+  in (2,200 after the cache) and 250 out, `W` ≈ 4.3 s. Phase 2: 1.0 Q&A req/s plus 0.5
+  agent req/s, ~80 s sessions, contexts averaging 11K of which 3K is a shared preamble,
+  ~17K prefill tokens per agent request with caching (47K without), ~850 output tokens
+  per agent request (three tool calls of ~200 and a 250-token answer).
+
+<div class="exercise">
+
+**Exercise 1 — the capstone.** Fill in the table for one replica, then open the stages
+one at a time.
+
+| per replica (FP8, TP=2) | Phase 1 | Phase 2 |
+|---|---|---|
+| KV pool, and the two startup lines | | |
+| Live at peak: mean and p95 | | |
+| KV needed, shared prefixes once | | |
+| Prefill load, share of capacity | | |
+| Decode step, hybrid step, mean TPOT | | |
+| With the other replica down | | |
+
+<details>
+<summary>Stage 1 — the budget</summary>
+
+Phase 2: 0.90 × 160 = 144 GB requested, minus 70 of weights, 6 of overhead and 2 of
+activations: **66 GB** per replica, 33 GB per GPU, 132 GB on the node. Phase 1, with the
+retrieval models on GPU 0: 0.80 × 160 − 78 = **50 GB** per replica, 100 GB on the node.
+With `--max-model-len 24576` each phase-2 replica prints:
+
+```plaintext
+INFO … Available KV cache memory: 30.73 GiB
+INFO … GPU KV cache size: 402,816 tokens, Maximum concurrency for 24,576 tokens per request: 16.39x
 ```
 
-KV per token is `2 × 32 × 8 × 128 × 2 = 131 KB`. At an 8K working context that
-is 1.07 GB per sequence, so `54 / 1.07 ≈ 50` concurrent sequences. Switch the
-weights and KV to FP8 and you get a 61 GB pool against 0.54 GB per sequence:
-**~113 concurrent**.
+*Real format, illustrative values — message formats from vLLM v0.34.0 `vllm/v1/worker/gpu_worker.py` and `vllm/v1/core/kv_cache_utils.py`; computed from the case's budget, not measured.*
 
-The difference in character is worth naming. On the 70B, weights ate 87% of the
-machine and the pool was the leftovers. On the 8B, weights are 20% and **the
-GPU is essentially one large KV pool** — which is exactly why small models
-serve so much more cheaply than their parameter ratio suggests. You are not
-buying 8.75× fewer FLOPs; you are buying a machine that is mostly cache.
+At 0.80 the first line would read 23.28 GiB. If you wrote 74 GB, you applied 0.90 to
+what was left after the weights.
 
-## The sanity check: which wall are you against?
+</details>
 
-A concurrency number is not yet a verdict. Compare it to `B_crit` — ~295 on an
-H100 in BF16, and roughly **half that (~148) once weights are FP8**, since
-halving the bytes per weight halves the ratio that defines the ridge. Three
-regimes:
+<details>
+<summary>Stage 2 — concurrency against capacity</summary>
 
-**Weight-bound.** Weights are more than ~60–70% of HBM and the pool is a
-sliver. Row 1 above. Symptoms: tiny max batch, constant preemption, terrible
-throughput at acceptable latency. Fixes, in order of cost: quantize the weights;
-raise tensor parallelism to spread weights over more cards (TP=4 on a 70B leaves
-35 GB per card free instead of 10 — see [Parallelism for
-Inference](#/parallelism-for-inference)); or serve a smaller model.
+**Phase 1.** `L` = 1.5 × 4.3 ≈ 6.5 on the node, p95 ≈ 11; the case plans 20, ten per
+replica. Each request holds 2,450 unique tokens × 164 KB ≈ 0.40 GB, plus the system
+prompt once (0.13 GB): ten take ~4.1 GB, **8%** of the 50 GB pool. `--max-num-seqs 64` is
+affordable: 64 × 3,250 × 164 KB ≈ 34 GB, so no phase-1 admission can preempt.
 
-**KV-bound.** The pool exists but `max_concurrency` lands well below `B_crit`.
-Rows 2–5. You are memory-bound *and* you cannot batch your way up to the ridge,
-so you are paying for FLOPs you can never reach. Fixes: FP8 KV, right-size the
-working context, turn on prefix caching, pick an architecture with a cheaper
-cache ([Attention Architectures](#/attention-for-serving) — MLA's ~70 KB/token
-against GQA's 328 KB is a 4.7× concurrency multiplier for free), or offload cold
-blocks to DRAM ([Disaggregated Serving](#/disaggregation)).
+**Phase 2.** 0.5 × 80 ≈ 40 agent sessions on the node (p95 ≈ 51), twenty per replica.
+Each holds 8K unique tokens (1.31 GB) behind the 3K preamble stored once (0.49 GB):
+20 × 1.31 + 0.49 + ten Q&A requests (4.1 GB) ≈ **31 GB, 47%**; ~61 GB on the node,
+~41 GB per replica at the p95 of sessions. Counting the preamble per session — row 7's
+lesson ignored — gives 83 GB on the node. The cap of 64 no longer protects (64 agent
+calls at 20K need 210 GB): the pool and offload tier do, and `vllm:num_preemptions` is
+the alarm.
 
-**Compute-bound.** `max_concurrency` comfortably exceeds `B_crit`, like row 7.
-Congratulations — you have a well-shaped deployment. Now stop chasing KV
-capacity: cap the running batch near the ridge, and spend the surplus HBM on a
-larger prefix cache rather than a larger batch, because past `B_crit` extra
-sequences buy throughput at a linear cost in everyone's TPOT.
+</details>
 
-The healthy target is a `max_concurrency` in the same neighbourhood as
-`B_crit`. Far below it and your FLOPs are decoration; far above and your KV
-pool is.
+<details>
+<summary>Stage 3 — step time at that concurrency</summary>
 
-> [!bridge] You already know this — from the distributed course
-> Sharding taught you that aggregate capacity is not capacity: a cluster sized
-> correctly in total still falls over when one partition takes the hot keys, so
-> you size the *unit* first and the fleet second. A replica here is that unit,
-> and the number you have just computed is its capacity. What differs is that
-> the hot key is a shared prefix — which, unlike a hot partition, you *want*
-> concentrated on one replica, because that is what makes the cache hit.
-> [→ Distributed: Partitioning & Sharding](../distributed/#/partitioning)
+**Phase 1.** Prefill load: 0.75 req/s × 2,200 tokens ≈ 1,650 tokens/s against ~11,300
+(1 ÷ 0.089 ms): **15%**. A decode step with ten sequences of ~3.1K: 14 + 10 × 3,100 ×
+29 ns ≈ **15 ms**. A hybrid step: 512 × 0.089 ≈ 45 ms + 1 ≈ **46–50 ms**. About 3.3
+hybrids per second among ~60 steps (5.5%): mean TPOT ≈ 17 ms, worst gaps ~50 ms, TTFT
+≈ 0.25 s (five chunks).
 
-## Five traps
+**Phase 2.** Prefill: 0.25 × 17K + 0.5 × 2.2K ≈ 5,350 tokens/s per replica, **47%**.
+Decode-only steps, ~8 sequences decoding at ~8K: 14 + 8 × 8,000 × 29 ns ≈ **16 ms**
+(~21 ms if every live item decoded at once: 250K tokens × 29 ns = 7 ms). Hybrids
+(~48 ms) run ~11 times a second and fill half of it: 27% of ~40 steps/s, mean TPOT ≈
+**25 ms**. The worst gaps sit at ~50 ms — but a chunk deep in a 20K context does
+attention work of its own, 4 × 8,192 × 80 × 17,000 ≈ 4.5 × 10¹⁰ FLOPs per token at 17K,
+~32% on top of 1.4 × 10¹¹: that step is **~63 ms**.
 
-1. **Sizing at `max_model_len`.** If you compute the pool as
-   `concurrency × max_context`, you have re-invented the pre-PagedAttention
-   world of reserving for a worst case that never arrives. Size on the p95
-   *live* context from your logs; use `max_model_len` only for the admission
-   check on a single request.
-2. **Forgetting the pool holds the whole batch.** The denominator is one
-   sequence; the pool must hold all of them simultaneously. "10.75 GB fits in
-   12 GB" is a true statement about one user and a false statement about a
-   service.
-3. **Forgetting the prefill chunk.** Activations are negligible for decode and
-   are not for a big chunk. If you raised `max_num_batched_tokens` to speed up
-   prefill, you spent HBM the KV pool was counting on.
-4. **MoE active-vs-total.** Compute with active, allocate with total. Every
-   time.
-5. **"TP=8 gives me 8× the KV room."** It does — that is real and it is the
-   most underrated capacity lever there is. But it also costs **two all-reduces
-   per layer, per token**, which measure at 20–30% of end-to-end latency even on
-   NVLink and become catastrophic the moment the TP group crosses a node
-   boundary onto ~50 GB/s InfiniBand. TP is a capacity knob *and* a latency
-   knob, pulling in opposite directions;
-   [Parallelism for Inference](#/parallelism-for-inference) is where you learn
-   to price it.
+</details>
+
+<details>
+<summary>Stage 4 — the verdict and the launch line</summary>
+
+Phase 1 meets no wall: 8% of the pool, 15% of prefill. The node is sized by the data
+rule and by redundancy, which [Hardware & Economics](#/hardware-and-economics) turns
+into a cost. Phase 2 fits with margin on memory (47%) and prefill (47%); the per-request
+TPOT promise holds; the worst single gaps touch 60 ms. Each replica:
+
+```bash
+# replica B: --device-ids 2,3 --port 8002
+vllm serve RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic \
+  --device-ids 0,1 --port 8001 \
+  --tensor-parallel-size 2 --kv-cache-dtype fp8 \
+  --gpu-memory-utilization 0.90 --max-model-len 24576 \
+  --max-num-seqs 64 --max-num-batched-tokens 512 \
+  --kv-offloading-size 128 --kv-offloading-backend native \
+  --enable-auto-tool-choice --tool-call-parser llama3_json
+```
+
+*Real format, illustrative values — flag names from vLLM v0.34.0 `vllm/engine/arg_utils.py`, `vllm/config/cache.py` (`kv_offloading_size` is GiB summed across the TP ranks) and `vllm/entrypoints/common/cli_args.py`; values are the case's decisions, not a tested configuration.*
+
+`--max-model-len 24576` (384 blocks of 64) admits the longest agent call — 20K tokens
+of context plus its ~200 output tokens; anatomy's 16,384 would reject it.
+128 GiB of host memory per replica holds ~840K FP8 tokens, about a hundred parked
+sessions. Pin the engine version that carries the FP8-attention fix
+([FlashAttention](#/flashattention)), and admit traffic only after the warm-up of
+[Kernels and Compilation](#/kernels-and-compilation).
+
+Speculation is not in the line: the EAGLE-3 head of [Speculative
+Decoding](#/speculative-decoding) is a bet layered on this plan, on only if acceptance
+reaches 1.5 tokens per round and an A/B at concurrency 20 wins. Then decode-only gaps
+fall from ~16 to ~7 ms (α 0.7); hybrid steps, the worst gaps, do not move. The budget
+leaves it out: each replica's 4.9 GB head would come out of its pool — in phase 2,
+nearly all of the survivor's ~5 GB margin.
+
+</details>
+
+<details>
+<summary>Stage 5 — what breaks first</summary>
+
+Lose one replica at the phase-2 peak. Memory: the survivor needs ~61 GB of its 66 at the
+mean, ~75 GB at the p95 of sessions, so parked sessions spill to its host tier and come
+back in tens of milliseconds instead of a ~0.7 s recompute — what the offload tier is
+for. Prefill breaks: the dead replica's sessions arrive with their cache lost, and with
+parked sessions evicted the survivor faces ≈ 19.7K tokens/s of prefill against 11.3K —
+174% of capacity, settling to 94% only once those sessions end. A queue in front of a
+server at 94% is already long (`ρ ÷ 2(1 − ρ)` ≈ 8 service times of ~0.4 s); above 100%
+it grows without bound. **TTFT breaks first**, then TPOT, as nearly every step becomes
+hybrid. Degraded mode queues agent requests before it sheds chat, because a ticket can
+wait and a person reading a screen should not ([When It Breaks](#/when-it-breaks)
+writes the runbook).
+
+The BF16 fallback is worse: one TP=4 replica with a 132 GB pool needs ~122 GB in phase 2
+— 93%, any burst preempts — and has no redundancy at all. That trade is the strongest
+argument for getting the FP8 evaluation right.
+
+</details>
+
+</div>
+
+> [!case] The case: the plan, and its first failure
+> Your table is the plan: two FP8 replicas carry phase 1 at 8% of their 50 GB
+> pools and 15% of their prefill, phase 2 at about half of 66 GB and of prefill. The decision that
+> could have gone the other way is the failure mode: one replica down at the phase-2
+> peak leaves the survivor ~19.7K tokens/s of prefill against 11.3K, and TTFT p95
+> breaks before memory.
+> Halden accepts that risk for a two-hour window rather than rent a second node,
+> queues agent work before it sheds chat, and pages on `vllm:num_requests_waiting`.
+
+## Estimates against measurement
+
+Every number in your table rests on constants — 40% MFU, 85% of nameplate bandwidth,
+3 GB of overhead — nobody has measured on Halden's node. The plan is accepted when
+[Load Testing](#/load-testing) replaces them: an open-loop sweep with the real prompt
+shape to 1.5 req/s and beyond, TTFT p95 and TPOT p95 at each rate, the measured knee
+next to the predicted ~3.3 req/s per replica. Little gave an average; the sweep shows the p95, and
+running it with one replica stopped is the N+1 test.
+
+> [!dashboard] Capacity against the plan
+> **Utilisation:** `vllm:num_requests_running` per replica against the planned ten
+> (twenty-plus in phase 2), and `vllm:kv_cache_usage_perc` against the 8% and 47%
+> above. **Saturation:** `vllm:num_requests_waiting` and
+> `vllm:request_queue_time_seconds` — the stage-5 failure shows here first.
+> **Errors:** none as a metric — derive SLO misses from the buckets of
+> `vllm:time_to_first_token_seconds` above 1.5 s and of
+> `vllm:request_time_per_output_token_seconds` above 0.06 s; `vllm:num_preemptions`
+> counts the admissions the pool could not honour.
 
 ## Exercises
 
 <div class="exercise">
 
-**Exercise 1.** You have one H100 80GB and want to serve Llama-3-8B in BF16
-with a 128K context window, where requests really do use the full window. How
-many concurrent sequences fit, and what is the first thing you change?
+**Exercise 2 — find the flaw.** A colleague sizes a second service, Ask HR, on its own
+two H100s: Llama-3.3-70B, FP8 weights and KV, TP=2. Prompts are 6,000 tokens, of which
+2,000 are a fixed policy preamble; answers 300 tokens; 0.5 req/s at peak; `W` ≈ 5 s.
+Find the errors before you open the answer.
+
+```text
+Ask HR: capacity memo (draft)
+1. Pool = (160 − 70 − 6 − 2) × 0.90 = 73.8 GB.
+2. KV per request = 6,300 tokens × 164 KB = 1.03 GB.
+3. In flight at peak (Little): 0.5 × 5 = 2.5, so p95 concurrency is 3.
+4. Capacity = 73.8 / 1.03 ≈ 71 requests: 24× the p95. Approve.
+5. Decode step at that load: 14 ms + 3 × 6,300 × 29 ns ≈ 14.5 ms.
+```
 
 <details>
 <summary>Reveal answer</summary>
 
-Pool: `80 − 16 (weights) − 3 (overhead) − 1 (activations) = 60 GB`, ×0.90 ≈
-**54 GB**. One sequence: `131 KB × 131,072 = 17.2 GB`. So
-`54 / 17.2 ≈ 3` concurrent sequences.
-
-Three. The model is small and the *cache* is the whole problem — at 128K,
-one sequence's KV is larger than the weights. First change: **FP8 KV cache**,
-which takes the per-sequence cost to 8.6 GB and concurrency to 6. Second:
-check whether your p95 request is genuinely 128K, because it almost certainly
-is not.
+1. **Wrong.** 0.90 applies to the whole GPU: 144 − 78 = **66 GB**.
+2. **Wrong.** The 2,000-token preamble is stored once: 4,300 × 164 KB ≈ 0.70 GB per
+   request plus 0.33 GB shared.
+3. **Wrong.** Little gives the mean; the Poisson p95 of 2.5 is **5** — and an
+   all-staff policy e-mail is not Poisson.
+4. Recomputed: (66 − 0.33) ÷ 0.70 ≈ 93. The verdict survives — at this traffic.
+5. Right in method, but use the p95 count: 14 + 5 × 6,300 × 29 ns ≈ 15 ms.
 
 </details>
 
@@ -338,24 +380,27 @@ is not.
 
 <div class="exercise">
 
-**Exercise 2.** DeepSeek-V3 (671B total, 37B active, 61 layers, MLA latent 576
-→ ~70 KB/token) in FP8, on a node of 8 × H100. Does it fit, and what is the
-concurrency at a 32K working context?
+**Exercise 3 — diagnosis.** Row 6's replica (~49 sequences of capacity) switches to a
+reasoning variant of its model; arrivals are unchanged. Stats lines before and after:
+
+```plaintext
+INFO … Engine 000: Avg prompt throughput: 6000.0 tokens/s, Avg generation throughput: 1236.0 tokens/s, Running: 22 reqs, Waiting: 0 reqs, GPU KV cache usage: 32.8%, Prefix cache hit rate: 0.0%
+INFO … Engine 000: Avg prompt throughput: 5150.0 tokens/s, Avg generation throughput: 661.0 tokens/s, Running: 17 reqs, Waiting: 49 reqs, Preemptions: 3, GPU KV cache usage: 99.2%, Prefix cache hit rate: 0.0%
+```
+
+*Real format, illustrative values — log format from vLLM v0.34.0 `vllm/v1/metrics/loggers.py`, logger prefix trimmed; values computed from the step-time model and Little's law (2 req/s, 3,000-token prompts), not measured.*
+
+What is binding, why did generation throughput fall, and what is the shortfall?
 
 <details>
 <summary>Reveal answer</summary>
 
-HBM: `8 × 80 = 640 GB`. Weights at FP8: `671e9 × 1 = 671 GB`. **It does not
-fit** — you are 31 GB over before a single KV block, and that is with zero
-pool. One node is not enough; this is a two-node (or NVL72-domain) deployment,
-which is exactly why MoE serving is a [rack-scale problem](#/moe-serving).
-
-On two nodes (1,280 GB): `1280 − 671 − 24 (overhead) − 8 = 577 GB` raw, ≈519 GB
-pool. MLA costs `70 KB × 32,768 = 2.29 GB` per sequence, so
-`519 / 2.29 ≈ 226` concurrent sequences. Note the shape: the weights are
-brutal and the *cache is nearly free* — MLA is why a 671B model can hold
-hundreds of long conversations. Compare with GQA-70B's 328 KB/token, which
-would have given 69.
+KV: usage at 99%, a growing queue, preemptions — and Running *fell*. Reasoning output
+grows live contexts to ~24K, 3.9 GB each: the pool holds ~17. Demand rose too: each
+request lives ~3× longer, `L` = 2 × 33 s ≈ 66 against 17, a 4× shortfall, and the queue
+grows without bound. Each step now reads 17 × 24K tokens of KV, 14 + 11.7 ≈ 26 ms for
+17 tokens. (Prompt throughput includes recomputed preemptions.) A model change that
+triples output length is a capacity event.
 
 </details>
 
@@ -363,144 +408,21 @@ would have given 69.
 
 <div class="exercise">
 
-**Exercise 3.** On the row-6 configuration (2 × H100, FP8 weights, FP8 KV, 8K
-working context, ~55 concurrent), your traffic shifts to a reasoning model
-whose average live sequence grows from 8K to 24K tokens. Request rate is
-unchanged. What happens?
+**Exercise 4 — transfer.** DeepSeek-V3 in FP8: 684.5 B parameters on the hub (~688 GB
+with its BF16 parts); `config.json` has 61 layers, `kv_lora_rank` 512 and
+`qk_rope_head_dim` 64 — one 576-wide latent per token per layer (MLA). (a) Does it fit on one 8 × H100 node at 0.90? (b) On two nodes
+with TP=16, how many 32K-token sequences fit?
 
 <details>
 <summary>Reveal answer</summary>
 
-Per-sequence KV triples: `164 KB × 24,576 ≈ 4.03 GB`. Concurrency falls to
-`74 / 4.03 ≈ 18`.
-
-But the request rate did not change and each request now *lives ~3× longer*
-(it emits ~3× more tokens at roughly the same TPOT). By Little's law the
-concurrency you **need** rose ~3× at the same time your capacity fell ~3× — a
-~9× shortfall. The queue does not degrade gracefully; it explodes. This is why
-"we switched to a reasoning model" is an infrastructure event and not a
-prompt change.
-
-</details>
-
-</div>
-
-<div class="exercise">
-
-**Exercise 4.** A different card and a different model card. Qwen3-32B — 64
-layers, 8 KV heads, head_dim 128, ~32B parameters — on **2 × L40S 48GB**,
-PCIe-connected, TP=2. Work the five-term budget in BF16 at a 32K context, then
-apply the levers, then say whether the deployment is any good.
-
-<details>
-<summary>Reveal answer</summary>
-
-**Term by term, BF16, 32K context.**
-
-```text
-  HBM_total   2 × 48 GB       =  96 GB
-− weights     32e9 × 2 bytes  =  64 GB     (32 GB per GPU under TP=2)
-− overhead    ~3 GB × 2 GPUs  =   6 GB
-− activations ~1 GB × 2       =   2 GB
-                                ───────
-  raw KV pool                     24 GB
-× 0.90 headroom               ≈  21.6 GB usable
-```
-
-KV per token: `2 × 64 × 8 × 128 × 2 = 262,144` bytes — **262 KB/token**,
-noticeably worse than the 70B's 328 KB relative to model size, because Qwen3-32B
-carries 64 layers of GQA-8 on a much smaller parameter count. One 32K sequence
-therefore costs `262 KB × 32,768 = 8.59 GB`, and
-
-```text
-21.6 / 8.59 ≈ 2.5   →   2 concurrent 32K sequences
-```
-
-**Two.** Same shape of failure as the 70B-on-2×H100 case: the weights "fit" in
-96 GB and the pool is the crumbs.
-
-**The levers.** The L40S is Ada, so it *does* have FP8 tensor cores (unlike the
-A100). FP8 weights take the weights to 32 GB:
-
-```text
-96 − 32 − 6 − 2 = 56 GB raw  →  ×0.90 ≈ 50.4 GB pool
-```
-
-FP8 KV halves the denominator to 131 KB/token, or 4.29 GB per 32K sequence:
-
-```text
-50.4 / 4.29 ≈ 11.7   →   11 concurrent
-```
-
-And right-sizing to a measured 8K p95 live context — `131 KB × 8192 = 1.07 GB`:
-
-```text
-50.4 / 1.07 ≈ 47 concurrent
-```
-
-**The verdict, which is the point of the exercise.** Compare 47 against this
-card's `B_crit`. The L40S ridge is `362 TF ÷ 0.86 TB/s ≈ 421` FLOP/byte, so
-`B_crit` is ~421 in BF16 and **~210 with FP8 weights**. You land at 47 against
-210: comprehensively **KV-bound**, paying for compute you can never batch your
-way up to — which is the L40S trap from
-[Choosing: Model, GPU, Framework](#/choosing-model-gpu-framework) arriving
-through the memory budget rather than the spec sheet.
-
-Then the fabric. TP=2 here is two all-reduces per layer across **64 layers**
-over PCIe, not NVLink — one to two orders of magnitude less bandwidth than the
-900 GB/s the 20–30% all-reduce estimate assumed. The capacity arithmetic above
-is real; the latency you get for it is not comparable.
-
-For contrast, run the same model on **one H100 80GB** in FP8:
-`80 − 32 − 3 − 1 = 44 GB` raw, ≈39.6 GB pool, `39.6 / 1.07 ≈ 37` concurrent —
-slightly *fewer* slots than the two L40S, on one card, with **no all-reduce at
-all** and 3.9× the memory bandwidth feeding every one of those slots. Capacity
-was never the interesting difference.
-
-</details>
-
-</div>
-
-## Frequently asked
-
-<div class="faq">
-
-<details>
-<summary>Why not just set gpu_memory_utilization to 0.98 and take the extra 8%?</summary>
-
-Because the terms you did not budget for live there. Fragmentation at the
-allocator level, CUDA graph pools captured after startup, a transient spike in
-activation memory when a large prefill chunk coincides with a full decode
-batch, and the difference between the vendor's GB and the driver's GiB. At 0.98
-these do not produce a graceful slowdown — they produce an out-of-memory abort
-in the middle of a forward pass, taking every in-flight request with it. The
-10% buys you the right to be a few percent wrong about the other four terms.
-
-</details>
-
-<details>
-<summary>My model fits on one GPU. Is there ever a reason to use two anyway?</summary>
-
-Yes, two. **Capacity:** TP=2 halves the weight bytes on each card, and every
-gigabyte freed goes to the KV pool — often more than doubling concurrency,
-since the pool is what is left after a large fixed cost. **Latency:** decode is
-bandwidth-bound, so splitting the weights across two memory systems roughly
-halves the bytes each GPU must stream per token. You pay two all-reduces per
-layer for both benefits, which is a good trade on NVLink and a bad one over
-PCIe.
-
-</details>
-
-<details>
-<summary>Should I size for peak traffic or mean traffic?</summary>
-
-Neither, exactly. Size a *replica* for the concurrency at which it hits your
-TTFT and TPOT SLOs — that is a physics question with one answer. Then size the
-*fleet* so that peak arrival rate divided by per-replica concurrency is
-covered, which is a queueing question. Conflating the two produces the classic
-failure of a fleet that is correctly sized in aggregate and made of replicas
-that each thrash. [Operating It](#/operating-it) is where the fleet half of
-this lives.
+(a) 8 × 72 = 576 GB requested, below 688 of weights: **no**.
+(b) 1,152 − 688 − 64 ≈ 400 GB of pool, 25 GB per GPU; KV per token in BF16 is 576 × 61
+× 2 B = 70,272 B. The trap: a latent has no heads to divide, so vLLM v0.34 declares
+MLA's cache with one KV head and no TP sharding (`mla_attention.py`) — every GPU holds
+all 70 KB for every sequence. 25 GB ÷ (70,272 × 32,768) ≈ **10** sequences, not the
+~170 that 400 GB suggests. The fix is data-parallel attention, which vLLM's docs
+recommend for MLA models: each GPU keeps KV only for its own sequences.
 
 </details>
 
@@ -508,84 +430,70 @@ this lives.
 
 ## What to remember
 
-- **The budget is five terms:** weights + KV pool + activations + framework and
-  CUDA overhead + headroom. Most sizing errors are the last three being assumed
-  to be zero.
-- **Overhead is 2–4 GB per GPU** [directional] and headroom is a real 5–10%,
-  exposed as `gpu_memory_utilization`. A pool sized to 100% preempts.
-- **Invert the budget:**
-  `max_concurrency = (HBM − weights − overhead − activations − headroom) ÷ (kv_bytes_per_token × context)`,
-  where `context` is the **p95 live context**, never `max_model_len`.
-- **The worked case:** 70B BF16 on 2×H100 leaves ~11 GB of pool against 10.75 GB
-  per 32K sequence — **one** concurrent user. FP8 weights → 6, FP8 KV → 13,
-  4 GPUs → 13, real 8K context → 55, prefix caching → ~145.
-- **The free levers beat the expensive one.** Right-sizing the context and
-  turning on prefix caching moved concurrency further than doubling the GPU
-  count, at zero hardware cost and zero accuracy cost.
-- **Then sanity-check against `B_crit`** (~295 BF16, ~148 with FP8 weights on an
-  H100): far below it means KV-bound and your FLOPs are decoration; far above
-  means compute-bound and more pool buys nothing.
-- **Traps:** sizing at max context; sizing for one sequence instead of the whole
-  batch; forgetting the prefill chunk's activations; MoE total-vs-active; and
-  treating TP purely as a capacity knob when it is also two all-reduces per
-  layer.
+- Pool = `f × HBM − weights − activations − overhead`; headroom is `(1 − f)` of the
+  whole GPU; vLLM prints the pool per GPU, in GiB.
+- `max_concurrency = (pool − shared prefix) ÷ (kv_bytes_per_token × unique live
+  context)` — never `max_model_len`.
+- What fits must also be served: a full pool adds `pool per GPU ÷ bandwidth` to every
+  step, a shared prefix is read once per sequence, and a hybrid step is the worst gap.
+- Little's law gives a mean; plan on its p95, on bursts beyond Poisson and on N+1.
 
 ```quiz
 [
   {
-    "q": "Llama-3-70B in BF16 (140 GB of weights) on two H100 80GB cards. Why is 'it fits in 160 GB' the wrong conclusion?",
+    "q": "A 40 GB FP8 model runs on one H200 (141 GB) with --gpu-memory-utilization 0.85, 2 GB of overhead and 1 GB of activations. How large is the KV pool?",
     "choices": [
-      "The weights are actually 160 GB once you count the embedding table",
-      "After ~6 GB of framework/CUDA overhead, ~2 GB of activations and 10% headroom, only ~11 GB of KV pool remains — and one 32K sequence costs 10.75 GB, so the deployment serves one concurrent user",
-      "Tensor parallelism requires an exact power-of-two split that 140 GB does not satisfy",
-      "BF16 weights cannot be split across two GPUs without a copy on each"
+      "About 83 GB: 85% of what is left after weights and overhead",
+      "About 98 GB: everything left after weights and overhead",
+      "About 77 GB: 85% of the GPU, minus weights and overhead",
+      "About 80 GB: 85% of the GPU, minus the weights alone"
     ],
-    "answer": 1,
-    "explain": "Fit is a five-term budget, not a two-term one. Weights (140) + overhead (~3 GB/GPU) + activations (~1 GB/GPU) + 10% headroom leave ~11 GB of block pool, and at 328 KB/token a single 32K sequence needs 10.75 GB. The deployment starts, passes its health check, and then preempts constantly under any real load."
+    "answer": 2,
+    "explain": "requested = 0.85 × 141 ≈ 119.9 GB; minus 40 + 2 + 1 = 76.9 GB. Applying 0.85 to the remainder (141 − 43 = 98 → 83 GB) is the classic error: the fraction is of the whole GPU, and the other 15% is headroom the engine never touches."
   },
   {
-    "q": "You are sizing an MoE model with 37B active and 671B total parameters. Which numbers go where?",
+    "q": "You raise --max-num-batched-tokens from 512 to 8,192 on a replica and restart it. Which startup line changes, and which way?",
     "choices": [
-      "671B for FLOPs and for memory — the whole model participates",
-      "37B for FLOPs (2·P per token) and 671B for HBM capacity, because any expert may be routed to and so must stay resident",
-      "37B for both; the unrouted experts can be paged in from host RAM on demand",
-      "671B for FLOPs and 37B for memory"
+      "Available KV cache memory falls: the profiling pass is larger",
+      "GPU KV cache size rises: larger chunks fill blocks more completely",
+      "Maximum concurrency rises: requests now prefill in fewer steps",
+      "Neither: the token budget only affects scheduling, not memory"
     ],
-    "answer": 1,
-    "explain": "Only routed experts do arithmetic, so compute is 2 × 37B. But routing is decided per token at runtime, so every expert weight must already be in HBM — capacity needs all 671B. Sizing off the active count understates memory 18×, which is the difference between a deployment that starts and one that does not."
+    "answer": 0,
+    "explain": "The engine sizes the pool after a profiling forward pass at max_num_batched_tokens; a 16× larger step has a larger activation peak, and that comes out of the pool. Chunk size does not change block packing, and the concurrency line is just tokens ÷ max_model_len."
   },
   {
-    "q": "On 2×H100 with FP8 weights and FP8 KV, moving from a 32K assumed context to a measured 8K p95 working context raised concurrency from 13 to 55. Why is this legitimate rather than a trick?",
+    "q": "A replica's metrics: vllm:num_requests_running flat at 64, vllm:num_requests_waiting rising, vllm:kv_cache_usage_perc at 0.41, no preemptions. What is binding?",
     "choices": [
-      "Because FP8 KV compresses long contexts more efficiently than short ones",
-      "Because the block pool is paged: a sequence occupies blocks for the tokens it actually holds, not for the tokens max_model_len permits, so the pool should be sized on real live context",
-      "Because the scheduler truncates any request longer than the p95",
-      "Because prefix caching automatically shortens every request to 8K"
+      "The KV pool, which is about to start preempting requests",
+      "Prefill compute, which is queueing the long prompts",
+      "The --max-num-seqs cap of 64, with memory to spare",
+      "The HTTP server, which is dropping requests before admission"
     ],
-    "answer": 1,
-    "explain": "PagedAttention removed max-length reservation: allocation is on demand, one block at a time. So pool sizing is driven by the distribution of live context lengths, not the window. Sizing at max_model_len re-introduces exactly the worst-case reservation that paging was invented to eliminate — and it is the most expensive single error in deployment sizing."
+    "answer": 2,
+    "explain": "Running pinned at a round number while KV usage sits at 41% and nothing is preempted says an admission cap binds, not memory. A KV wall shows usage near 1 and preemptions; a prefill bottleneck shows long prefill times with running below the cap."
   },
   {
-    "q": "Your sizing math gives max_concurrency = 20 on a GPU whose B_crit is ~148 (FP8 weights). What does that tell you?",
+    "q": "Requests arrive independently at 0.8 per second and spend 10 s in the system. Roughly how many are in flight at the 95th percentile?",
     "choices": [
-      "The deployment is compute-bound; buy a GPU with more FLOPs",
-      "The deployment is KV-bound: you can never batch up to the ridge, so you are paying for FLOPs you cannot reach — spend effort on KV quantization, working context, prefix caching or a cheaper attention architecture",
-      "Nothing — B_crit and concurrency are unrelated quantities",
-      "The headroom is set too high; lower it to 0.99 and concurrency will reach B_crit"
+      "8, since Little's law gives the in-flight count directly",
+      "13, the Poisson p95 around a mean of 8",
+      "16, twice the mean as a standard burst allowance",
+      "24, three times the mean to be safe"
     ],
     "answer": 1,
-    "explain": "max_concurrency is a capacity limit; B_crit is where decode would stop being memory-bound. Landing far below B_crit means the KV pool caps your batch long before compute does, so every added FLOP is wasted money. The productive levers all shrink the denominator (bytes per token, tokens per sequence, sequences that share a prefix) rather than adding compute."
+    "explain": "Little gives the mean, L = 0.8 × 10 = 8. With independent arrivals and no queueing the count is Poisson(8), whose 95th percentile is 13 (≈ 8 + 1.65 × √8). Doubling or tripling is a policy for correlated bursts, not the p95 of this traffic."
   },
   {
-    "q": "A deployment sized for an 8K average live context is switched to a reasoning model that averages 24K, at an unchanged request rate. Why is the damage worse than 3×?",
+    "q": "A 70B FP8 replica on one Rubin GPU (19.2 TB/s nameplate, ~85% achievable) has a 200 GB KV pool. When the pool is full, how much do KV reads add to each decode step?",
     "choices": [
-      "Reasoning models have three times as many parameters",
-      "Per-sequence KV triples so capacity falls ~3×, while each request also lives ~3× longer (3× the output tokens at the same TPOT), so by Little's law the required concurrency rises ~3× at the same time — roughly a 9× shortfall",
-      "The attention kernel becomes quadratic above 16K tokens",
-      "FP8 KV cache becomes numerically unstable past 16K tokens"
+      "About 10.4 ms, the pool divided by nameplate bandwidth",
+      "About 1.2 ms, since KV is read only for the newest token",
+      "Nothing, since KV reads overlap with the weight read",
+      "About 12.3 ms, the pool divided by achievable bandwidth"
     ],
-    "answer": 1,
-    "explain": "Two independent multipliers compound. Capacity: concurrency = pool ÷ (bytes/token × context), so 3× context is 3× less concurrency. Demand: Little's law says concurrency needed = arrival rate × holding time, and holding time scales with output length, so 3× more generated tokens needs 3× more slots. Supply down 3× and demand up 3× is a 9× gap, which is why adopting a reasoning model is a capacity-planning event."
+    "answer": 3,
+    "explain": "Every decoding sequence's KV is read every step: 200 GB ÷ (19.2 × 0.85 ≈ 16.3 TB/s) ≈ 12.3 ms. Nameplate gives the 10.4 ms floor, which no streaming read reaches. Attention reads the whole context, not one token, and the bytes add to the weight bytes rather than hiding behind them."
   }
 ]
 ```

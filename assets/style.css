@@ -1,115 +1,166 @@
 /* ============================================================
-   The Linux Deep Dive — warm dark, quiet by discipline.
-   One accent (amber), reserved for links, the active item and
-   the brand. Everything structural recedes; the reading column
-   is the only place that carries contrast. Serif body, no neon,
-   no grain, no ornament that isn't information.
+   How Systems Really Work — the shared reading shell.
+
+   A calm, neutral reading instrument. Both themes are cool greys
+   (a blue-graphite "Terminal" and a near-white "Paper"); colour is
+   kept for meaning only:
+     --accent          links, the active item, focus, primary actions
+     --c-green/amber/red/teal
+                       level dots and callout roles (core / mechanism /
+                       internals / dashboard), each with a --*-soft tint
+                       it stays legible on (≥ 4.5:1, computed).
+   Text and interface are set in Atkinson Hyperlegible Next, drawn so
+   0/O and 1/l/I never collide in prose full of numbers and
+   identifiers; code and ASCII diagrams in JetBrains Mono. Both are
+   vendored under assets/vendor/fonts/ (OFL). Labels are sentence
+   case at normal tracking; monospace is for code, keys and figures
+   in widgets, never for chrome. No italic blocks, no shadows except
+   on overlays, small radii on containers only.
+
+   Two measures, one left edge. Prose (paragraphs, lists, headings,
+   blockquotes and callouts) is held to --prose, about 76 characters;
+   wide evidence (code and diagrams, tables, figures, widgets, the
+   quiz, exercises) uses --wide, enough for 80 columns of 13.4px mono.
+   Both start at the same left edge; the wide blocks simply run on to
+   the right. Below the width where --wide fits, both collapse to the
+   column and wide content scrolls inside its own block, never the page.
    ============================================================ */
 
+/* ---------- fonts (vendored, OFL — see assets/vendor/README.md) ---------- */
+
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("vendor/fonts/AtkinsonHyperlegibleNext-wght.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("vendor/fonts/AtkinsonHyperlegibleNext-Italic-wght.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("vendor/fonts/JetBrainsMono-wght.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- Terminal (dark) — the default ---------- */
+
 :root {
-  /* surfaces — the rails sit almost on top of the page so they recede */
-  --bg:          #1a1714;   /* warm near-black */
-  --bg-raised:   #1e1b16;   /* sidebar / panels — a hair lighter, no more */
-  --bg-code:     #14110d;
-  --bg-inline:   #262019;
+  /* surfaces */
+  --bg:          #13161b;   /* page */
+  --bg-raised:   #181c22;   /* panels, cards, widgets */
+  --bg-chrome:   #101318;   /* sidebar — one step *below* the page, so it recedes */
+  --bg-code:     #0e1115;
+  --bg-inline:   #222832;
 
   /* ink — hierarchy comes from these, not from the accent.
-     Every tier clears 4.5:1 on both surfaces: the recessive layer carries
-     the whole orientation system (chapter numbers, breadcrumbs, the
-     on-this-page rail, the meta line) and reading it is not optional. */
-  --ink:         #f0e8d8;   /* headings: bright warm cream   14.7:1 */
-  --text:        #d4cbb7;   /* body                          11.1:1 */
-  --text-dim:    #a39785;   /* secondary text                 6.2:1 */
-  --text-faint:  #8c8271;   /* nav labels, meta, recessive    4.7:1 */
+     Contrast on --bg / --bg-raised: */
+  --ink:         #f1f3f6;   /* headings, strong      16.3 / 15.4 */
+  --text:        #d2d7de;   /* body                  12.5 / 11.8 */
+  --text-dim:    #9aa3af;   /* secondary, labels      7.1 /  6.7 */
+  --text-faint:  #87909c;   /* meta, numbers          5.6 /  5.3 */
 
-  /* the single accent. --accent-dim is one notch toward the page in both
-     themes (it used to invert polarity, which made every label built on it
-     fail contrast on paper). */
-  --accent:      #d9a05b;   /* amber — links, active state, brand */
-  --accent-dim:  #c49456;
-  --accent-soft: rgba(217, 160, 91, 0.09);
+  --accent:      #8fb1ff;   /* links, active, focus   8.6 /  8.1 */
+  --accent-dim:  #6f8fd6;   /* hover borders, quieter accent text (5.9) */
+  --accent-soft: #1f2632;   /* active / hover ground; accent on it 7.2 */
+  --accent-line: #4b5c82;   /* link underline at rest */
+  --on-accent:   #0e1115;   /* text on an accent-filled button   8.9 */
 
-  /* structure — three weights, because one hairline cannot serve a table
-     rule, a card edge and a form control all at once. */
-  --rule:        #2c2720;   /* hairlines: tables, dividers */
-  --rule-mid:    #423a31;   /* card and panel edges */
-  --rule-strong: #736a5a;   /* form controls & state indicators — 3:1 */
-  --rule-soft:   #231f19;
+  /* structure */
+  --rule-soft:   #1d2128;
+  --rule:        #232830;   /* hairlines: table rows, dividers */
+  --rule-mid:    #2f353f;   /* card and panel edges */
+  --rule-strong: #636c78;   /* form controls, state indicators — 3.4:1 */
 
-  /* level dots */
-  --lvl-core:      #9fbf7f;
-  --lvl-mechanism: #d9a05b;
-  --lvl-internals: #d98a7a;
+  /* role colours, each with the tint it is legible on (own-tint ratio) */
+  --c-green:     #7ccf98;   --c-green-soft: #1e2928;   /* 8.0 */
+  --c-amber:     #e5b562;   --c-amber-soft: #282622;   /* 8.0 */
+  --c-red:       #ff8f87;   --c-red-soft:   #2b2226;   /* 7.0 */
+  --c-teal:      #5fc6c4;   --c-teal-soft:  #1b282c;   /* 7.5 */
 
+  /* level dots — the names the rest of the site already uses */
+  --lvl-core:      var(--c-green);
+  --lvl-mechanism: var(--c-amber);
+  --lvl-internals: var(--c-red);
+
+  --sans:  "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* kept for anything that wants a book face; nothing in the shell does */
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --mono:  "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
-  /* One place to tune the reading column, and one column for everything in
-     it. --measure is the *outer* width (text plus gutters); every block a
-     chapter can contain — prose, code, tables, figures, widgets, the pager,
-     the footer — is laid out inside it and shares its two edges.
+  /* type scale (root is 16px) */
+  --fs-body:  1.09375rem;   /* 17.5px */
+  --lh-body:  1.65;
+  --fs-small: 0.86rem;
+  --fs-code:  0.84rem;      /* 13.4px: 80 columns fit --wide, see below */
 
-     760px minus two 2.75rem gutters leaves 672px of content, which is where
-     the two things this book sets both come out right: ~80 characters of
-     17px serif, and exactly 80 columns of the 13.1px mono. Wider prose stops
-     being comfortable; narrower code starts wrapping shell output that was
-     written to fit a terminal. */
-  --measure: 760px;
+  /* The two measures (see the header). --prose: 608px of 17.5px Atkinson
+     Hyperlegible Next is about 76 characters a line. --wide: 80 columns of
+     13.4px JetBrains Mono are 645px, plus a code block's padding and border
+     675px, so shell output written for a terminal does not wrap.
+     --measure is the *outer* width of the column (the wide box plus its
+     gutters): the article, the pager and the footer all use it, so the
+     pager's two links sit on the prose's left edge and the code's right one. */
+  --prose:   608px;
+  --wide:    680px;
   --gutter:  2.75rem;
+  --measure: calc(var(--wide) + 2 * var(--gutter));
 
-  --selection: rgba(217, 160, 91, 0.22);
-  --code-ink:  #e3c79a;
-  --scrim:     rgba(12, 10, 8, 0.72);
-  /* shadows were the only colour declarations that bypassed the token
-     layer, so they stayed pure black on ivory stock */
-  --shadow:    rgba(0, 0, 0, 0.45);
+  --radius:    6px;
+  --selection: rgba(143, 177, 255, 0.28);
+  --code-ink:  #e6e9ee;
+  --scrim:     rgba(6, 8, 11, 0.66);
+  --shadow:    rgba(0, 0, 0, 0.5);
 
   /* Height of the sticky bar the reader is currently under. Zero on wide
-     screens, set by the drawer breakpoint. One number now drives the
-     anchor offset, the scroll-spy line and heading scroll-margin, which
-     used to be three unrelated constants. */
+     screens, set by the drawer breakpoint. One number drives the anchor
+     offset, the scroll-spy line and heading scroll-margin. */
   --sticky-h: 0px;
 
   color-scheme: dark;
 }
 
-/* ------------------------------------------------------------
-   Paper theme — the same book as a printed research paper:
-   warm ivory stock, near-black ink, the amber turned down to
-   a deep ochre so links stay legible on light ground.
-   ------------------------------------------------------------ */
+/* ---------- Paper (light) ---------- */
 
 html[data-theme="paper"] {
-  --bg:          #f6f1e6;
-  --bg-raised:   #f1ebdd;
-  --bg-code:     #efe9d9;
-  --bg-inline:   #eae2cf;
+  --bg:          #f7f8fa;
+  --bg-raised:   #ffffff;
+  --bg-chrome:   #eef0f3;
+  --bg-code:     #f0f2f5;
+  --bg-inline:   #e9ecf1;
 
-  --ink:         #221c12;
-  --text:        #383022;
-  --text-dim:    #5f5745;
-  --text-faint:  #726852;
+  --ink:         #14171c;   /* 16.9 / 18.0 */
+  --text:        #262b33;   /* 13.4 / 14.2 */
+  --text-dim:    #555d68;   /*  6.3 /  6.7 */
+  --text-faint:  #626a75;   /*  5.2 /  5.5 */
 
-  /* a touch deeper than the original #8f5d1a: the active TOC / theme /
-     course-chip states set accent text on accent-soft, which landed at
-     4.27:1 and is now 4.51:1 */
-  --accent:      #8a5917;
-  --accent-dim:  #7d5016;
-  --accent-soft: rgba(143, 93, 26, 0.08);
+  --accent:      #2747c9;   /*  7.0 /  7.4 */
+  --accent-dim:  #3d58c4;
+  --accent-soft: #e2e6f5;   /* accent on it 6.0 */
+  --accent-line: #99a8e4;
+  --on-accent:   #ffffff;   /* 7.4 */
 
-  --rule:        #ddd3bd;
-  --rule-mid:    #cec1a6;
-  --rule-strong: #8a7d61;
-  --rule-soft:   #e7dfcc;
+  --rule-soft:   #eceef2;
+  --rule:        #e3e6eb;
+  --rule-mid:    #d3d8df;
+  --rule-strong: #7f8793;   /* 3.4:1 on the page, 3.2 on the sidebar */
 
-  --lvl-core:      #416b20;
-  --lvl-mechanism: #8f5d1a;
-  --lvl-internals: #9f412a;
+  --c-green:     #1a7040;   --c-green-soft: #e1eae7;   /* 5.0 */
+  --c-amber:     #8d5400;   --c-amber-soft: #ece8e1;   /* 5.1 */
+  --c-red:       #b42318;   --c-red-soft:   #f0e3e3;   /* 5.3 */
+  --c-teal:      #0b6e75;   --c-teal-soft:  #dfeaed;   /* 4.9 */
 
-  --selection: rgba(143, 93, 26, 0.18);
-  --code-ink:  #6d4a10;
-  --scrim:     rgba(52, 44, 30, 0.4);
-  --shadow:    rgba(52, 44, 30, 0.22);
+  --selection: rgba(39, 71, 201, 0.16);
+  --code-ink:  #1d2230;
+  --scrim:     rgba(20, 23, 28, 0.32);
+  --shadow:    rgba(20, 23, 28, 0.18);
 
   color-scheme: light;
 }
@@ -129,13 +180,9 @@ button, input {
   font: inherit;
   color: inherit;
 }
-/* …but a checkbox, a radio and a slider ARE their native appearance. The
-   rule above stripped all three: checkboxes were rendering 0x0, so the
-   simulator's four switches ("chunked prefill", "prefix caching",
-   "speculative decoding", "inject a 10K prompt") had no box and no tick
-   and the reader flipped them blind. accent-color only works on a control
-   that still has an appearance, which is why the earlier accent-color
-   lines looked correct and did nothing. */
+/* …but a checkbox, a radio and a slider ARE their native appearance:
+   accent-color only works on a control that still has one, and an
+   appearance-stripped checkbox renders 0x0. */
 input[type="checkbox"],
 input[type="radio"],
 input[type="range"] {
@@ -143,49 +190,51 @@ input[type="range"] {
   appearance: auto;
   accent-color: var(--accent);
 }
-/* thumb-sized on touch, and never a hairline on WebKit, which draws an
-   appearance-stripped range as nothing at all */
+/* thumb-sized on touch, and never a hairline on WebKit */
 input[type="range"] { height: 24px; cursor: pointer; }
+select, textarea { font: inherit; }
 
-/* a link is amber everywhere, not only inside .article — the guided-course
-   home pages were rendering browser-default #0000EE */
 a { color: var(--accent); }
 
 ::placeholder { color: var(--text-faint); opacity: 1; }
-
 ::selection { background: var(--selection); color: var(--ink); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+::-webkit-scrollbar-thumb { background: var(--rule-mid); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--rule-strong); }
 
 html { scroll-behavior: smooth; }
 
 /* nothing may push the page sideways. `clip` rather than `hidden` so the
-   sticky sidebar and on-this-page rail keep working (hidden would turn the
-   root into a scroll container and break them). */
+   sticky sidebar and on-this-page rail keep working. */
 html, body { overflow-x: clip; max-width: 100%; }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--serif);
-  font-size: 17px;
-  line-height: 1.7;
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-variant-numeric: lining-nums;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 0.78em;
 }
 
 *:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 3px;
-  border-radius: 2px;
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
-/* Skip link — the article used to sit 64 tab stops behind the sidebar, and
-   that toll was paid again on every navigation. */
+/* Skip link — the article used to sit 64 tab stops behind the sidebar. */
 .skip-link {
   position: absolute;
   left: 0.5rem;
@@ -194,22 +243,19 @@ body {
   padding: 0.6rem 1rem;
   background: var(--bg-raised);
   border: 1px solid var(--accent);
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 var(--radius) var(--radius);
   color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-small);
+  font-weight: 600;
   text-decoration: none;
   transition: top 0.15s ease;
 }
 .skip-link:focus { top: 0; }
 
-/* The article is focused programmatically after every navigation so the
-   next Tab starts at the content, not at stop #1. That focus is a
-   bookkeeping move, not a request for a ring around the whole chapter. */
+/* The article is focused programmatically after every navigation; that is
+   bookkeeping, not a request for a ring around the whole chapter. */
 .content:focus, .article:focus, #view:focus, [tabindex="-1"]:focus { outline: none; }
 
-/* Live-region announcements ("Chapter loaded", search result counts) are
-   for assistive tech only. */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -223,7 +269,7 @@ body {
   border: 0;
 }
 
-/* reading-progress hairline — echoes the one amber gesture per page */
+/* reading-progress hairline */
 #progress-bar {
   position: fixed;
   top: env(safe-area-inset-top, 0px);
@@ -231,15 +277,14 @@ body {
   height: 2px;
   width: 0;
   background: var(--accent);
-  /* above the page, below the drawer and the scrim it used to paint over */
   z-index: 50;
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.article.fade-in { animation: fadeIn 0.35s ease-out; }
+.article.fade-in { animation: fadeIn 0.25s ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -257,65 +302,79 @@ html.theme-switching * {
 .layout { display: flex; min-height: 100vh; min-height: 100dvh; }
 
 /* ============================================================
-   Sidebar — recedes. Same warmth as the page, one hairline,
-   faint labels. The only coloured thing here is the active item.
+   Sidebar — chrome. A ground one step below the page, smaller
+   type, dim ink; the only coloured thing is the active item.
    ============================================================ */
 
 .sidebar {
-  width: 288px;
-  flex-shrink: 0;
-  background: var(--bg-raised);
-  border-right: 1px solid var(--rule-soft);
-  padding: 2.25rem 1.25rem 2rem 1.75rem;
   position: sticky;
   top: 0;
+  width: 280px;
   height: 100vh;
+  height: 100dvh;
+  flex-shrink: 0;
   overflow-y: auto;
+  padding: 1.5rem 1.15rem 2rem 1.4rem;
+  background: var(--bg-chrome);
+  border-right: 1px solid var(--rule);
+  font-size: 0.9rem;
+  line-height: 1.45;
   scrollbar-width: thin;
-  scrollbar-color: var(--rule) transparent;
+  scrollbar-color: var(--rule-mid) transparent;
 }
 
-.site-title { padding-bottom: 1.1rem; }
+/* the title row shares its line with the collapse button (absolutely
+   placed top-right), so it keeps that corner free */
+.site-title { padding: 0 2.4rem 0.9rem 0; }
 
 .site-title a {
-  font-size: 1.4rem;
-  line-height: 1.15;
+  color: var(--ink);
+  font-size: 1.08rem;
   font-weight: 700;
-  color: var(--accent);
+  line-height: 1.25;
+  letter-spacing: -0.005em;
   text-decoration: none;
-  letter-spacing: 0.01em;
 }
+.site-title a:hover { color: var(--accent); }
 
 .site-subtitle {
+  margin: 0.2rem 0 0;
   color: var(--text-faint);
-  font-style: italic;
   font-size: 0.82rem;
-  margin: 0.4rem 0 0;
 }
 
-#toc { margin-top: 0.5rem; }
+#toc { margin-top: 0.25rem; }
 
 /* Shown only on the platform landing page, where the chapter list below is
    one course's and the rail title no longer says which. */
 .toc-label {
-  margin: 1.35rem 0 0;
-  padding-top: 1.05rem;
-  border-top: 1px solid var(--rule-soft);
+  margin: 1.1rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--rule);
   color: var(--text-faint);
-  font-size: 0.76rem;
-  font-style: italic;
+  font-size: 0.82rem;
 }
-.toc-label a { color: var(--text-dim); text-decoration: none; }
+.toc-label a { color: var(--text-dim); }
 .toc-label a:hover { color: var(--accent); }
 .toc-label[hidden] { display: none; }
 
+/* A part / module heading in the outline: its name, with the number in
+   front of it as a quieter coordinate — no capitals, no dash. */
 .toc-part {
-  margin: 1.6rem 0 0.5rem;
-  font-size: 0.66rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 1.35rem 0 0.35rem;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.toc-part-num {
+  flex-shrink: 0;
   color: var(--text-faint);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .toc-list { list-style: none; margin: 0; padding: 0; }
@@ -324,139 +383,108 @@ html.theme-switching * {
   display: flex;
   align-items: baseline;
   gap: 0;
-  padding: 0.26rem 0.6rem;
   margin-left: -0.6rem;
-  color: var(--text-dim);
-  text-decoration: none;
-  font-size: 0.9rem;
-  line-height: 1.4;
-  border-radius: 4px;
+  padding: 0.24rem 0.6rem 0.24rem calc(0.6rem - 2px);
   border-left: 2px solid transparent;
-  transition: color 0.15s ease;
+  border-radius: 0 4px 4px 0;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  line-height: 1.38;
+  text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
-.toc-list a:hover { color: var(--ink); }
+.toc-list a:hover { color: var(--ink); background: var(--rule-soft); }
 
 .toc-list a.active {
-  color: var(--accent);
   border-left-color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 0 4px 4px 0;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .toc-num {
   display: inline-block;
-  width: 1.7em;
+  width: 1.8em;
   flex-shrink: 0;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
+.toc-list a.active .toc-num { color: var(--accent); }
 
 .toc-title { flex: 1; }
 
 .toc-check {
-  color: var(--lvl-core);
-  font-size: 0.7rem;
-  opacity: 0;
   margin-left: 0.4rem;
+  color: var(--c-green);
+  font-size: 0.75rem;
+  opacity: 0;
 }
-.toc-list a.read .toc-check { opacity: 0.7; }
+.toc-list a.read .toc-check { opacity: 1; }
 .toc-list a.read .toc-title { color: var(--text-faint); }
 .toc-list a.read:hover .toc-title { color: var(--ink); }
+.toc-list a.read.active .toc-title { color: var(--accent); }
 
 /* ------------------------------------------------------------
-   Cross-course switcher.
-
-   Three courses now share this shell, so the way between them
-   cannot sit under an injected table of contents two viewports
-   down — it lives directly above the outline, in the same place
-   on every page, with the same three entries in the same order.
+   Cross-course switcher: one compact row of course names above
+   the outline, the current one marked. The descriptions stay in
+   the markup for assistive tech (and the chapter-count tests) but
+   are not drawn: they pushed the chapter list half a screen down.
    ------------------------------------------------------------ */
 
 .course-switch {
-  margin: 1.25rem 0 0.4rem;
-  padding-top: 1.05rem;
-  border-top: 1px solid var(--rule-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.85rem 0 0.4rem;
+  padding: 0.85rem 0 0.1rem;
+  border-top: 1px solid var(--rule);
 }
-.course-switch-title {
-  margin: 0 0 0.5rem;
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--text-faint);
-}
-.course-chip {
-  display: block;
-  padding: 0.38rem 0.6rem;
-  /* left only: a symmetric negative margin pushed the chip 9px into the
-     sidebar's right padding, one value away from a horizontal scrollbar,
-     and left the chip and TOC highlights with different right edges */
-  margin: 0 0 0 -0.6rem;
-  border-left: 2px solid transparent;
-  border-radius: 4px;
-  text-decoration: none;
-  transition: background 0.15s ease;
-}
-a.course-chip:hover { background: var(--accent-soft); }
-a.course-chip:hover .chip-title { color: var(--accent); }
-.course-chip.current {
-  border-left-color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 0 4px 4px 0;
-}
-.chip-title {
-  display: block;
-  color: var(--text-dim);
-  font-size: 0.88rem;
-  font-weight: 700;
-  line-height: 1.35;
-  transition: color 0.15s ease;
-}
-a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
-.course-chip.current .chip-title { color: var(--accent); }
-.chip-desc {
-  display: block;
-  margin-top: 0.1rem;
-  color: var(--text-faint);
-  font-size: 0.72rem;
-  font-style: italic;
-  line-height: 1.45;
-}
+.course-switch-title { display: none; }
 
-/* The track is not a fourth course — it is a route through the three above
-   it, and every shell listed it in the same shape as them with no style of
-   its own to say otherwise. A rule to separate it from the list it draws
-   from, and a label naming what kind of thing it is. */
-.course-chip.chip-track {
-  margin-top: 0.5rem;
-  padding-top: 0.62rem;
-  border-top: 1px solid var(--rule-soft);
-  border-top-left-radius: 0;
+.course-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.85rem;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
 }
-.chip-track .chip-title::before {
-  content: "Track";
-  display: block;
-  margin-bottom: 0.15rem;
-  color: var(--accent-dim);
-  font-family: var(--mono);
-  font-size: 0.56rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+a.course-chip:hover { color: var(--ink); border-color: var(--rule-strong); }
+.course-chip.current {
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
 }
-.chip-track.current .chip-title::before { color: var(--accent); }
+.chip-title { display: inline; }
+.chip-desc {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .sidebar-footer {
-  margin-top: 2rem;
-  padding-top: 1.1rem;
-  border-top: 1px solid var(--rule-soft);
+  margin-top: 1.8rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
   color: var(--text-faint);
-  font-size: 0.74rem;
-  font-style: italic;
+  font-size: 0.8rem;
   line-height: 1.5;
 }
+.sidebar-footer p { margin: 0 0 0.6rem; }
 
 .topbar { display: none; }
 #sidebar-toggle { display: none; }
@@ -464,22 +492,21 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 
 /* ----- collapse control: hide the sidebar on wide screens ----- */
 .sidebar-collapse {
+  position: absolute;
+  top: 1.3rem;
+  right: 0.9rem;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  margin: 0 0 0.4rem auto;          /* pin to the top-right corner of the rail */
-  width: 1.85rem;
-  height: 1.85rem;
-  flex-shrink: 0;
-  background: var(--bg-raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: 6px;
-  color: var(--text-faint);
-  font-family: var(--serif);
-  font-size: 1.05rem;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
@@ -495,21 +522,21 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   z-index: 40;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.42rem 0.72rem;
+  padding: 0.42rem 0.75rem;
   background: var(--bg-raised);
   border: 1px solid var(--rule-strong);
-  border-radius: 8px;
-  color: var(--accent);
-  font-family: var(--serif);
-  font-size: 0.9rem;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-small);
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 3px 12px var(--shadow);
+  box-shadow: 0 4px 14px var(--shadow);
   transition: color 0.15s ease, border-color 0.15s ease;
 }
-.sidebar-show:hover { border-color: var(--accent-dim); color: var(--ink); }
+.sidebar-show:hover { border-color: var(--accent-dim); color: var(--accent); }
 
 /* ============================================================
-   Sidebar search button — quiet
+   Sidebar search button and theme switch
    ============================================================ */
 
 .search-open {
@@ -517,56 +544,57 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  margin: 1.1rem 0 0.25rem;
-  padding: 0.45rem 0.7rem;
-  min-height: 2.4rem;
-  background: transparent;
-  border: 1px solid var(--rule-strong);
-  border-radius: 6px;
-  color: var(--text-faint);
-  font-family: var(--serif);
+  margin: 0.2rem 0 0;
+  padding: 0.35rem 0.6rem;
+  min-height: 2.25rem;
+  background: var(--bg);
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  color: var(--text-dim);
   font-size: 0.86rem;
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
-.search-open:hover { border-color: var(--accent-dim); color: var(--text); }
-.search-open-icon { font-size: 1rem; color: var(--text-faint); }
+.search-open:hover { border-color: var(--rule-strong); color: var(--text); }
+.search-open-icon { font-size: 1rem; line-height: 1; color: var(--text-faint); }
 .search-kbd {
   margin-left: auto;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  border: 1px solid var(--rule-strong);
-  border-radius: 4px;
+  min-width: 1.35rem;
   padding: 0.05rem 0.35rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: 4px;
   color: var(--text-faint);
+  font-size: 0.72rem;
+  text-align: center;
 }
 
-/* ----- theme switch: terminal / paper ----- */
 .theme-switch {
   display: flex;
-  margin: 0.6rem 0 0;
-  border: 1px solid var(--rule-strong);
-  border-radius: 6px;
-  overflow: hidden;
+  margin: 0.45rem 0 0;
+  padding: 2px;
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  background: var(--bg);
 }
 .theme-btn {
   flex: 1;
+  min-height: 1.9rem;
+  padding: 0.2rem 0;
   background: transparent;
   border: none;
-  min-height: 2.4rem;
-  padding: 0.42rem 0;
+  border-radius: 4px;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  font-size: 0.8rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
-.theme-btn + .theme-btn { border-left: 1px solid var(--rule-strong); }
 .theme-btn:hover { color: var(--text); }
-.theme-btn.active { color: var(--accent); background: var(--accent-soft); }
+.theme-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
 
 /* ============================================================
    Article
@@ -577,190 +605,205 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 .article {
   max-width: var(--measure);
   margin: 0 auto;
-  padding: 3.25rem var(--gutter) 2rem;
+  padding: 3rem var(--gutter) 2rem;
   overflow-wrap: break-word;   /* long tokens / URLs wrap instead of overflowing */
 }
 
-.loading { color: var(--text-faint); font-style: italic; }
+.loading { color: var(--text-faint); }
 
-/* long unbroken tokens in a heading (paths, identifiers) must not widen the page */
+/* long unbroken tokens in a heading must not widen the page */
 .article h1, .article h2, .article h3, .article h4 { overflow-wrap: break-word; }
 
 .article h1 {
-  font-size: 2rem;
-  line-height: 1.18;
+  margin: 0 0 0.5rem;
   color: var(--ink);
-  margin: 0 0 0.4rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-/* the one amber gesture per page — a short tick, echoing the progress bar */
-.article h1::after {
-  content: "";
-  display: block;
-  width: 2.5rem;
-  height: 2px;
-  margin-top: 1.1rem;
-  background: var(--accent);
-  border-radius: 2px;
+  font-size: 2.2rem;
+  font-weight: 750;
+  line-height: 1.14;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
 }
 
 .article h2 {
-  font-size: 1.4rem;
-  line-height: 1.3;
+  margin: 2.9rem 0 0.8rem;
   color: var(--ink);
-  margin: 2.8rem 0 0.9rem;
-  padding-bottom: 0.35rem;
-  border-bottom: 1px solid var(--rule);
+  font-size: 1.45rem;
   font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: -0.014em;
 }
 
-/* h3 used to be 5% larger than the paragraph under it and h4 was
-   *smaller* than the body at every width above 600px (1rem against an
-   18px body on tablets), so the bottom two levels of the scale carried no
-   size signal at all — only weight. h3 now steps clearly above the body;
-   h4 stops competing on size and becomes a mono eyebrow instead, which
-   reads as a different rank rather than a failed one. */
 .article h3 {
-  font-size: 1.26rem;
-  line-height: 1.35;
+  margin: 2.2rem 0 0.55rem;
   color: var(--ink);
-  margin: 2.3rem 0 0.6rem;
-  font-weight: 700;
-  letter-spacing: -0.005em;
+  font-size: 1.18rem;
+  font-weight: 680;
+  line-height: 1.35;
+  letter-spacing: -0.006em;
 }
 
 .article h4 {
-  font-size: 0.78rem;
+  margin: 1.8rem 0 0.45rem;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 680;
   line-height: 1.4;
-  color: var(--text-dim);
-  margin: 1.8rem 0 0.5rem;
-  font-family: var(--mono);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.11em;
 }
 
-/* Deep links used to land the target heading 33px behind the sticky
-   "Contents" bar on every phone and tablet. One token drives it now. */
+/* Deep links land clear of the sticky bar; one token drives it. */
 .article h1, .article h2, .article h3, .article h4,
 .article-body h1, .article-body h2, .article-body h3, .article-body h4 {
   scroll-margin-top: calc(var(--sticky-h) + 1rem);
 }
 
-.article p { margin: 0 0 1.15rem; }
+.article p { margin: 0 0 1.1rem; }
 
-/* A link carried colour alone (1.43:1 against the body text in dark,
-   2.32:1 on paper) with an underline that only arrived on hover, so a
-   colour-blind reader could not see which words were links and a keyboard
-   reader never got the cue at all. The rule is now always drawn, faint,
-   and firms up on hover or focus — the printed-book treatment rather than
-   the animated one. */
+/* A link is always underlined (colour alone fails for colour-blind and
+   keyboard readers); the rule is quiet at rest and firms up on hover. */
 .article a {
   color: var(--accent);
   text-decoration: underline;
-  text-decoration-color: var(--accent-dim);
+  text-decoration-color: var(--accent-line);
   text-decoration-thickness: 1px;
-  text-underline-offset: 0.16em;
+  text-underline-offset: 0.18em;
   transition: text-decoration-color 0.15s ease;
 }
 .article a:hover,
 .article a:focus-visible { text-decoration-color: var(--accent); }
 
 .article strong { color: var(--ink); font-weight: 700; }
-.article em { color: var(--text); }
+.article em { color: inherit; }
 
-.article ul, .article ol { padding-left: 1.5rem; margin: 0 0 1.15rem; }
-.article li { margin-bottom: 0.35rem; }
+.article ul, .article ol { padding-left: 1.4rem; margin: 0 0 1.1rem; }
+.article li { margin-bottom: 0.3rem; }
 .article li::marker { color: var(--text-faint); }
 
+/* A plain blockquote ("State of play", quoted sources) stays quiet and
+   upright: a rule and the dim ink, never a slab of italic. */
 .article blockquote {
   margin: 1.5rem 0;
-  padding: 0.2rem 0 0.2rem 1.3rem;
-  border-left: 2px solid var(--rule);
+  padding: 0.1rem 0 0.1rem 1.1rem;
+  border-left: 3px solid var(--rule-mid);
   color: var(--text-dim);
-  font-style: italic;
+  font-style: normal;
 }
 .article blockquote p:last-child { margin-bottom: 0; }
 
-/* callout boxes: Simplified model & Important nuance */
+/* The chapter's goal box — the blockquote straight under the title of a
+   guided-course chapter (course.js tags it .goal-box). The question is the
+   one loud element on the page: upright, larger, full ink, an accent edge.
+   What you will be able to do sits under it as an ordinary paragraph. */
+.article blockquote.goal-box {
+  margin: 1.4rem 0 2rem;
+  padding: 0.15rem 0 0.15rem 1.15rem;
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+}
+.article blockquote.goal-box > p.goal-question {
+  margin-bottom: 0.85rem;
+  color: var(--ink);
+  font-size: 1.22rem;
+  font-weight: 450;
+  line-height: 1.48;
+  letter-spacing: -0.006em;
+}
+.article blockquote.goal-box > p.goal-question > strong:first-child {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--accent);
+  font-size: var(--fs-small);
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.article blockquote.goal-box > p:not(.goal-question) { color: var(--text-dim); }
+.article blockquote.goal-box > p:not(.goal-question) > strong:first-child { color: var(--text); }
+.article blockquote.goal-box em { font-style: italic; }
+
+/* callout boxes: Simplified model & Important nuance (Linux course) */
 .article blockquote.callout-simple,
 .article blockquote.callout-nuance {
-  padding: 0.9rem 1.2rem;
-  border-left: 2px solid var(--accent-dim);
+  padding: 0.85rem 1.1rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--accent-soft);
   color: var(--text);
-  font-style: normal;
-  border-radius: 0 6px 6px 0;
+}
+.article blockquote.callout-nuance {
+  border-left-color: var(--c-amber);
+  background: var(--c-amber-soft);
 }
 .article blockquote.callout-simple::before,
 .article blockquote.callout-nuance::before {
   display: block;
-  font-size: 0.66rem;
+  margin-bottom: 0.3rem;
+  color: var(--accent);
+  font-size: var(--fs-small);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--accent-dim);
-  margin-bottom: 0.45rem;
-  font-family: var(--mono);
 }
 .article blockquote.callout-simple::before { content: "Simplified model"; }
-.article blockquote.callout-nuance::before  { content: "Important nuance"; color: var(--accent); }
+.article blockquote.callout-nuance::before  { content: "Important nuance"; color: var(--c-amber); }
 
 .article hr {
-  border: none;
-  border-top: 1px solid var(--rule);
-  margin: 2.75rem auto;
   width: 100%;
+  margin: 2.6rem auto;
+  border: none;
+  border-top: 1px solid var(--rule-mid);
 }
 
 /* code */
 .article code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--bg-inline);
+  color: var(--code-ink);
   font-family: var(--mono);
   font-size: 0.84em;
-  background: var(--bg-inline);
-  padding: 0.12em 0.4em;
-  border-radius: 4px;
-  color: var(--code-ink);
+  font-variant-ligatures: none;
 }
 
 .article pre {
-  background: var(--bg-code);
-  border: 1px solid var(--rule-mid);
-  border-radius: 6px;
-  padding: 1rem 1.2rem;
-  overflow-x: auto;
   max-width: 100%;
   margin: 0 0 1.4rem;
-  line-height: 1.55;
+  padding: 0.9rem 0.85rem;
+  overflow-x: auto;
+  background: var(--bg-code);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  /* 1.42, not more: box-drawing verticals span the face's own height, and
+     a looser leading breaks every │ in a diagram into dashes */
+  line-height: 1.42;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
 }
 
+/* Box-drawing and block characters must come from the same face as the
+   rest of the line or a diagram loses its columns; the mono stack is
+   ordered so JetBrains Mono (which covers every box, block, arrow and
+   geometric glyph the courses use) answers first. Ligatures off: `->`,
+   `!=` and `==` are typed characters here, not symbols. */
 .article pre code {
+  padding: 0;
   background: none;
-  padding: 0;
   color: var(--text);
-  font-size: 0.82rem;
+  font-size: var(--fs-code);
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0;
 }
-/* highlight.js's stylesheet sets `display:block; overflow-x:auto` on
-   .hljs, which quietly moved the scroll container from the <pre> we
-   style and label to the <code> inside it — so the block scrolled with
-   no border, no focus ring and no "there is more" marker. Give the frame
-   back to the <pre>. */
+/* highlight.js sets `display:block; overflow-x:auto` on .hljs, which moved
+   the scroll container from the <pre> we style and label to the <code>
+   inside it. Give the frame back to the <pre>. */
 .article pre code.hljs {
-  background: transparent;
-  padding: 0;
   display: block;
+  padding: 0;
   overflow-x: visible;
+  background: transparent;
 }
 
 /* tables — wrapped by JS in .table-scroll so wide tables scroll on touch */
 .table-scroll {
-  overflow-x: auto;
   max-width: 100%;
   margin: 0 0 1.4rem;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
@@ -769,57 +812,40 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 .table-scroll table { margin-bottom: 0; }
 
 /* ------------------------------------------------------------
-   Scrollable evidence.
-
-   The widest table in the book is 6.4 screens across on a phone and the
-   arithmetic blocks are routinely cut mid-token, with nothing to say so.
-   Worse, none of these containers was reachable by keyboard at all: a
-   reader without a mouse simply could not see the right-hand columns.
-
-   Every overflowing block is now a labelled, focusable region carrying a
-   quiet mono marker that names the direction. The marker is set by JS
-   (`data-overflow`) only on blocks that actually overflow, and only where
-   a scrollbar is not already doing the job.
+   Scrollable evidence. Every overflowing block is a labelled,
+   focusable region (reader-ui.js sets data-overflow) with a quiet
+   marker naming the direction.
    ------------------------------------------------------------ */
 
 .scroll-x { position: relative; }
 
 .scroll-x[data-overflow="1"]::after {
-  content: "scroll →";
+  content: "Scroll sideways";
   position: absolute;
   right: 0.15rem;
-  bottom: -1.05rem;
+  bottom: -1.3rem;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 0.75rem;
   pointer-events: none;
 }
-.scroll-x[data-overflow="1"] { margin-bottom: 2.3rem; }
-/* a figure already carries "open full size" on the right of the same
+.scroll-x[data-overflow="1"] { margin-bottom: 2.4rem; }
+/* a figure already carries "Open full size" on the right of the same
    line, so its scroll marker goes left rather than on top of it */
 .figure-scroll[data-overflow="1"]::after { left: 0.15rem; right: auto; }
-/* once the reader has moved it, stop saying so */
-.scroll-x[data-overflow="1"][data-scrolled="1"]::after { content: "◂ scroll ▸"; }
+.scroll-x[data-overflow="1"][data-scrolled="1"]::after { content: "Scrolled sideways"; }
 
-/* the focus ring belongs on the frame, not 3px outside it */
+/* the focus ring belongs on the frame, not outside it */
 .scroll-x:focus-visible { outline-offset: 1px; }
 
 /* ------------------------------------------------------------
-   Figures.
-
-   A phone rendered the 880px-wide inference diagrams at 0.37 scale and
-   Mermaid at 0.28, so 9-14px labels landed at 3-4 CSS px: not a degraded
-   diagram, an absent one. Rather than shrink to fit, a figure now holds a
-   legible minimum width and scrolls inside its own frame, which is the
-   same contract the code blocks and tables already had.
+   Figures hold a legible minimum width and scroll inside their
+   own frame, like code blocks and tables.
    ------------------------------------------------------------ */
 
 .figure-scroll {
-  overflow-x: auto;
   max-width: 100%;
   margin: 1.9rem 0;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
@@ -827,64 +853,60 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 }
 .figure-scroll img { display: block; margin: 0 auto; }
 
-/* Full size in a new tab: a diagram whose smallest label is 9px deserves
-   an escape hatch, and an <a> is the whole implementation. */
 .figure-full {
   display: block;
-  margin: 0.35rem 0 0;
+  margin: 0.4rem 0 0;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.06em;
+  font-size: 0.78rem;
   text-align: right;
   text-decoration: none;
 }
-.figure-full:hover, .figure-full:focus-visible { color: var(--accent); }
+.figure-full:hover, .figure-full:focus-visible { color: var(--accent); text-decoration: underline; }
 
+/* tables: a clear header row, figures that line up in columns */
 .article table {
-  border-collapse: collapse;
-  margin: 0 0 1.4rem;
   width: 100%;
+  margin: 0 0 1.4rem;
+  border-collapse: collapse;
   font-size: 0.92rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 .article th, .article td {
+  padding: 0.5rem 0.8rem;
   border-bottom: 1px solid var(--rule);
-  padding: 0.5rem 0.85rem;
   text-align: left;
+  vertical-align: top;
 }
 .article th {
-  color: var(--text-dim);
-  font-weight: 700;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  border-bottom-color: var(--rule);
+  border-bottom: 1px solid var(--rule-strong);
+  background: var(--bg-code);
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 650;
+  vertical-align: bottom;
 }
 .article tbody tr:last-child td { border-bottom: none; }
 
 .article img { max-width: 100%; height: auto; }
-/* anything else that can arrive with intrinsic pixel dimensions */
 .article svg, .article canvas, .article video, .article iframe, .article embed, .article object {
   max-width: 100%;
 }
 .article iframe, .article video { height: auto; }
 
 /* ============================================================
-   Chapter meta — a single quiet line of context.
-   A small coloured dot replaces the loud pill.
+   Chapter meta — one quiet line of context
    ============================================================ */
 
-/* Breadcrumb — where this chapter sits, and how far in it is. The guided
-   courses had this from the start; the 56-chapter course had nothing. */
+/* Breadcrumb — where this chapter sits, and how far in it is. */
 .chapter-crumb {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0.15rem 0.5rem;
-  margin: 1.1rem 0 0.2rem;
-  font-family: var(--mono);
-  font-size: 0.72rem;
+  margin: 1rem 0 0.2rem;
   color: var(--text-faint);
+  font-size: var(--fs-small);
 }
 .crumb-count {
   margin-left: auto;
@@ -896,30 +918,23 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.4rem 1.1rem;
-  margin: 1.2rem 0 0.5rem;
-  font-family: var(--mono);
-  font-size: 0.72rem;
+  gap: 0.3rem 1rem;
+  margin: 0.9rem 0 0.4rem;
   color: var(--text-faint);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
 }
 
 .meta-level {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: 0;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-size: 0.66rem;
+  gap: 0.4rem;
+  font-weight: 650;
 }
 .meta-level::before {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: currentColor;
 }
@@ -931,75 +946,80 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
 
 .meta-read-btn {
   margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
   min-height: 2.2rem;
-  padding: 0.5rem 0;
+  padding: 0.3rem 0.7rem;
+  background: none;
+  border: 1px solid var(--rule-mid);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 500;
   cursor: pointer;
-  border-bottom: 1px solid transparent;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
-.meta-read-btn:hover { color: var(--accent); border-bottom-color: var(--accent-dim); }
-.meta-read-btn.is-read { color: var(--lvl-core); }
+.meta-read-btn:hover { color: var(--accent); border-color: var(--accent-dim); }
+.meta-read-btn.is-read { color: var(--c-green); border-color: color-mix(in srgb, var(--c-green) 45%, var(--rule-mid)); }
 /* the write was refused (private mode / quota): say so instead of ticking */
-.meta-read-btn.save-failed { color: var(--lvl-internals); cursor: default; }
+.meta-read-btn.save-failed { color: var(--c-red); cursor: default; }
 
 .meta-prereqs {
-  font-size: 0.82rem;
-  color: var(--text-faint);
-  font-style: italic;
   margin: 0 0 1.5rem;
+  color: var(--text-faint);
+  font-size: var(--fs-small);
 }
 .meta-prereqs a { color: var(--text-dim); }
 
-/* ----- primary action button (course CTAs, retry controls) ----- */
+/* ----- primary action button (course CTAs, quiz submit, retry) ----- */
 .btn-primary {
-  display: inline-block;
-  padding: 0.62rem 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.6rem;
+  padding: 0.5rem 1.15rem;
   border: 1px solid var(--accent);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--accent);
-  color: var(--bg);
-  font-weight: 700;
+  color: var(--on-accent);
+  font-weight: 650;
+  font-size: 0.95rem;
+  line-height: 1.3;
   text-decoration: none;
   cursor: pointer;
+  transition: filter 0.15s ease;
 }
 .btn-primary:hover { filter: brightness(1.08); }
+.article a.btn-primary, .home a.btn-primary { color: var(--on-accent); text-decoration: none; }
 
 /* ----- error panel: a failed load must not be a dead end ----- */
 .error-actions {
   display: flex;
   align-items: center;
-  gap: 1.1rem;
   flex-wrap: wrap;
+  gap: 1.1rem;
   margin: 1.4rem 0 1.6rem;
 }
 .error-home { color: var(--accent); font-size: 0.92rem; }
 
 /* ============================================================
-   Quizzes & collapsible answers
+   Collapsible answers (Linux course)
    ============================================================ */
 
 .article details {
   margin: 0.4rem 0 1.1rem;
   border: 1px solid var(--rule-mid);
-  border-radius: 6px;
-  background: var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
 }
 .article details summary {
-  cursor: pointer;
   padding: 0.55rem 0.9rem;
-  color: var(--text-dim);
-  font-size: 0.84rem;
-  font-family: var(--mono);
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
   user-select: none;
   list-style-position: inside;
 }
 .article details summary:hover { color: var(--accent); }
+.article details summary::marker { color: var(--accent); }
 .article details[open] summary { border-bottom: 1px solid var(--rule); }
 .article details > *:not(summary) { padding: 0 1.1rem; }
 .article details > p:first-of-type { padding-top: 0.8rem; }
@@ -1010,48 +1030,45 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
    ============================================================ */
 
 .pager {
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding: 1.25rem var(--gutter) 0;
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  border-top: 1px solid var(--rule);
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 1.25rem var(--gutter) 0;
+  border-top: 1px solid var(--rule-mid);
 }
 
 .pager a {
   display: block;
   max-width: 46%;
+  padding: 0.75rem 0;
   color: var(--text-dim);
   text-decoration: none;
-  padding: 0.85rem 0;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
 }
-.pager a:hover .pager-title { color: var(--accent); }
+.pager a:hover .pager-title { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 0.18em; }
 
 .pager .pager-label {
   display: block;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  margin-bottom: 0.15rem;
   color: var(--text-faint);
-  font-family: var(--mono);
-  margin-bottom: 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 500;
 }
-.pager .pager-title { color: var(--text); transition: color 0.15s ease; }
-.pager .next { text-align: right; margin-left: auto; }
+.pager .pager-title { color: var(--accent); font-weight: 600; line-height: 1.35; transition: color 0.15s ease; }
+.pager .next { margin-left: auto; text-align: right; }
 
 .page-footer {
   max-width: var(--measure);
   margin: 0 auto;
   padding: 1.5rem var(--gutter) 3rem;
   color: var(--text-faint);
-  font-size: 0.78rem;
-  font-style: italic;
+  font-size: 0.82rem;
 }
 
 /* ============================================================
-   Search modal
+   Search modal — an overlay, so it alone gets a shadow
    ============================================================ */
 
 .search-modal {
@@ -1060,150 +1077,138 @@ a.course-chip .chip-title::after { content: " →"; color: var(--text-faint); }
   inset: 0;
   z-index: 10000;
   background: var(--scrim);
-  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 .search-modal.open { display: block; }
-/* `hidden` is what assistive tech reads; keep the two in step so a closed
-   dialog is closed for everyone */
 .search-modal[hidden] { display: none; }
 body.modal-open { overflow: hidden; }
 .search-box {
-  max-width: 600px;
+  max-width: 620px;
   margin: 12vh auto 0;
-  background: var(--bg-raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: 10px;
-  box-shadow: 0 20px 60px var(--shadow);
   overflow: hidden;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule-mid);
+  border-radius: 8px;
+  box-shadow: 0 24px 64px var(--shadow);
 }
 #search-input {
   width: 100%;
+  padding: 0.95rem 1.15rem;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--rule-strong);
-  /* `outline: none` here was the only one in the codebase, and it beat the
-     global *:focus-visible on ID specificity — the sole control inside the
-     search dialog had no focus indicator at all. */
+  border-bottom: 1px solid var(--rule-mid);
   outline-offset: -3px;
-  padding: 1rem 1.15rem;
   color: var(--ink);
-  font-family: var(--serif);
   font-size: 1.05rem;
 }
 #search-results {
-  list-style: none;
+  max-height: 55vh;
   margin: 0;
   padding: 0.4rem;
-  max-height: 55vh;
   overflow-y: auto;
+  list-style: none;
 }
 .search-result {
-  padding: 0.55rem 0.7rem;
-  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius);
   cursor: pointer;
 }
-.search-result:hover { background: var(--accent-soft); }
-/* The tint alone measured 1.17:1 (dark) and 1.10:1 (paper) — below the
-   threshold of perception, and it was the only signal for which of twelve
-   results Enter would open. */
+.search-result:hover { background: var(--rule-soft); }
 .search-result.selected {
   background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
-.sr-title { display: block; color: var(--accent); font-weight: 700; font-size: 0.94rem; }
+.sr-title { display: block; color: var(--ink); font-weight: 650; font-size: 0.96rem; }
+.search-result.selected .sr-title { color: var(--accent); }
+.search-result.selected .sr-part { color: var(--text-dim); }
 /* which part or module the hit lives in — orientation, not decoration */
 .sr-part {
   display: block;
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-size: 0.78rem;
 }
-.sr-snippet { display: block; color: var(--text-dim); font-size: 0.82rem; line-height: 1.45; margin-top: 0.15rem; }
-.sr-snippet mark { background: var(--selection); color: var(--ink); border-radius: 2px; padding: 0 0.1em; }
-.search-hint { padding: 0.8rem; color: var(--text-faint); font-style: italic; font-size: 0.86rem; list-style: none; }
+.sr-snippet { display: block; margin-top: 0.15rem; color: var(--text-dim); font-size: 0.86rem; line-height: 1.45; }
+.sr-snippet mark { padding: 0 0.1em; border-radius: 2px; background: var(--selection); color: var(--ink); }
+.search-hint { padding: 0.8rem; color: var(--text-faint); font-size: 0.88rem; list-style: none; }
 .search-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1rem;
   margin: 0;
   padding: 0.55rem 1.15rem;
   border-top: 1px solid var(--rule);
   color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 0.66rem;
+  font-size: 0.78rem;
+}
+.search-footer kbd {
+  margin-right: 0.25rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule-mid);
+  border-radius: 4px;
+  color: var(--text-dim);
 }
 
 /* ============================================================
-   On-this-page rail — the quietest thing on the screen
+   On-this-page rail
    ============================================================ */
 
 .page-toc {
-  width: 220px;
-  flex-shrink: 0;
   position: sticky;
   top: 0;
+  width: 232px;
   height: 100vh;
   height: 100dvh;
+  flex-shrink: 0;
   overflow-y: auto;
-  padding: 3.4rem 1.5rem 2rem 0.5rem;
+  padding: 3.2rem 1.4rem 2rem 0.4rem;
+  font-size: 0.84rem;
   scrollbar-width: thin;
   scrollbar-color: var(--rule) transparent;
 }
 .page-toc-title {
-  font-size: 0.64rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--text-faint);
-  margin: 0 0 0.7rem;
-  font-family: var(--mono);
+  margin: 0 0 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  font-weight: 650;
 }
-.page-toc ul { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--rule-soft); }
-.page-toc li.lvl-3 a { padding-left: 1.7rem; }
+.page-toc ul { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--rule-mid); }
+.page-toc li.lvl-3 a { padding-left: 1.6rem; }
 .page-toc a {
   display: block;
-  padding: 0.42rem 0 0.42rem 0.9rem;
   margin-left: -1px;
+  padding: 0.32rem 0 0.32rem 0.85rem;
+  border-left: 2px solid transparent;
   color: var(--text-faint);
-  text-decoration: none;
-  font-size: 0.79rem;
+  font-size: 0.84rem;
   line-height: 1.4;
-  border-left: 1px solid transparent;
+  text-decoration: none;
   transition: color 0.15s ease;
 }
-.page-toc a:hover { color: var(--text-dim); }
-.page-toc a.active { color: var(--accent); border-left-color: var(--accent); }
+.page-toc a:hover { color: var(--text); }
+.page-toc a.active { border-left-color: var(--accent); color: var(--accent); font-weight: 600; }
 
 @media (max-width: 1279.98px) { .page-toc { display: none; } }
 
-/* ------------------------------------------------------------
-   …and the same outline, inline, for everyone under 1280px.
-
-   The rail was built on every render and then hidden from every phone,
-   every tablet in both orientations and any laptop window under 1280px —
-   so a 5,900-word chapter with 25 headings had no in-chapter navigation
-   at all. Same data, collapsed, above the text.
-   ------------------------------------------------------------ */
+/* …and the same outline, inline, for everyone under 1280px. */
 
 .page-toc-inline {
-  margin: 1.6rem 0 2rem;
+  margin: 1.4rem 0 2rem;
   border: 1px solid var(--rule-mid);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
 }
 @media (min-width: 1280px) { .page-toc-inline { display: none; } }
 
 .page-toc-inline > summary {
-  cursor: pointer;
-  padding: 0.7rem 1rem;
-  min-height: 2.75rem;
   display: flex;
   align-items: center;
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
   color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
   list-style: none;
 }
 .page-toc-inline > summary::-webkit-details-marker { display: none; }
@@ -1212,47 +1217,43 @@ body.modal-open { overflow: hidden; }
   content: "›";
   margin-left: auto;
   color: var(--accent);
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   transition: transform 0.15s ease;
 }
 .page-toc-inline[open] > summary::after { transform: rotate(90deg); }
 .page-toc-inline > summary:hover { color: var(--accent); }
 
 .page-toc-inline ul {
-  list-style: none;
   margin: 0;
   padding: 0.2rem 1rem 0.9rem;
   border-top: 1px solid var(--rule);
+  list-style: none;
 }
-.page-toc-inline li.lvl-3 a { padding-left: 1.4rem; }
+.page-toc-inline li.lvl-3 a { padding-left: 1.3rem; }
 .page-toc-inline a {
   display: block;
-  padding: 0.42rem 0;
+  padding: 0.4rem 0;
   color: var(--text-dim);
-  text-decoration: none;
-  font-size: 0.88rem;
+  font-size: 0.92rem;
   line-height: 1.35;
+  text-decoration: none;
 }
 .page-toc-inline a:hover, .page-toc-inline a:focus-visible { color: var(--accent); }
 
 /* ============================================================
-   Heading anchors
+   Heading anchors — reveal on hover and focus, always visible
+   where hover does not exist
    ============================================================ */
 
-/* The section anchor was an 8x16 target at opacity 0 in --rule (1.21:1
-   even when revealed), which made it an invisible tab stop on a desktop
-   and completely unreachable on a touch device — so section-level
-   sharing, a first-class feature of the #/slug@heading URL scheme, did
-   not exist on phones. It now has a real hit area, reveals on focus as
-   well as hover, and stays visible wherever hover is not available. */
 .article .hlink {
   display: inline-block;
   margin-left: 0.3rem;
   padding: 0 0.35rem;
+  background: none;
   color: var(--text-faint);
   font-size: 0.8em;
+  font-weight: 400;
   text-decoration: none;
-  background: none;
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease;
 }
@@ -1270,20 +1271,20 @@ body.modal-open { overflow: hidden; }
    Reading-progress summary (sidebar footer)
    ============================================================ */
 
-#progress-summary { margin-bottom: 0.9rem; font-style: normal; }
+#progress-summary { margin-bottom: 0.9rem; }
 .progress-count {
   display: block;
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  color: var(--text-faint);
   margin-bottom: 0.4rem;
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
 }
 .progress-track {
   display: block;
-  height: 3px;
-  background: var(--rule);
-  border-radius: 2px;
+  height: 4px;
   overflow: hidden;
+  background: var(--rule-mid);
+  border-radius: 2px;
 }
 .progress-fill {
   display: block;
@@ -1297,20 +1298,19 @@ body.modal-open { overflow: hidden; }
    ============================================================ */
 
 .article pre.mermaid {
-  background: var(--bg-code);
-  border: 1px solid var(--rule-mid);
-  border-radius: 6px;
   padding: 1.1rem;
-  text-align: center;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  text-align: center;
   scrollbar-width: thin;
   scrollbar-color: var(--rule-strong) transparent;
 }
-/* Mermaid bakes width/max-width onto the SVG it emits, so `max-width:100%`
-   used to squeeze a 1100px flowchart into 310px on a phone — scale 0.28,
-   14px labels at 3.9px. Hold a legible floor and let the frame scroll
-   instead; on a wide screen `max-width` still keeps it in the column. */
+/* Hold a legible floor on narrow screens and let the frame scroll; on a
+   wide screen `max-width` keeps the diagram in the column. */
 .article pre.mermaid svg {
   max-width: 100% !important;
   height: auto;
@@ -1323,65 +1323,56 @@ body.modal-open { overflow: hidden; }
 }
 
 /* ============================================================
-   One column, one pair of edges.
+   Two measures, one left edge.
 
-   Code, tables and figures used to step *outside* the measure on wide
-   screens — 200px past it on both sides at 1800px. The intent was to give a
-   wide comparison table room, but the cost was paid on every block on the
-   page: nothing shared an edge with the prose any more, and a reader saw
-   evidence sticking out of the text rather than belonging to it.
-
-   The room is bought inside the column now (see --measure), not outside it,
-   and everything the column contains is bound to the same two edges. When a
-   block is genuinely wider than 672px it scrolls in its own frame — the
-   contract it already had on every screen under 1400px, with the labelled,
-   focusable "scroll →" marker that goes with it.
-
-   Nothing here sets a width: the point is that these boxes inherit the
-   column's. What the rule does is stop the ones that ship an intrinsic
-   size (SVG, canvas, embedded media) from pushing it wider.
+   Everything in a chapter is prose-wide by default; the blocks that are
+   evidence rather than sentences take the wide box. Neither can push the
+   column wider: max-width also stops anything that ships an intrinsic size
+   (SVG, canvas, media). A code block nested in a list stays with its list
+   (8 of ~1,550 fences) and scrolls inside itself.
    ============================================================ */
 
 .article > *,
 .article-body > * {
+  max-width: min(100%, var(--prose));
+}
+
+.article > :is(.article-body, pre, table, .table-scroll, .figure-scroll, .figure-full, figure, .quiz, .exercise, .inf-widget, .glossary, .sim-topline),
+.article-body > :is(pre, table, .table-scroll, .figure-scroll, .figure-full, figure, .quiz, .exercise, .inf-widget, .glossary, .sim-topline) {
   max-width: 100%;
 }
 
-/* The gutter is a token so the pieces of the column cannot drift apart: the
-   article, the pager and the footer are three separate elements stacked in
-   one shell, and between 901px and 1279px the article alone was being
-   indented 3rem while the other two stayed at 2.75rem. `padding-inline`
-   overrides only the sides of the `padding` shorthands set above, so each
-   keeps its own vertical rhythm. */
 .article, .pager, .page-footer {
   padding-inline: max(var(--gutter), env(safe-area-inset-left))
                   max(var(--gutter), env(safe-area-inset-right));
 }
 
 /* ============================================================
-   Responsive — tuned around the reading column and touch.
+   Responsive
 
      ≥ 1280px      three columns (sidebar · text · on-this-page)
-     901–1279px    sidebar + text            (iPad landscape)
+     901–1279px    sidebar + text
      ≤ 900px       text only; sidebar → slide-over drawer
-     601–900px     readability bump          (iPad / tablet portrait)
+     601–900px     tablet portrait
      ≤ 600px       phone
      ≤ 420px       small phone
    ============================================================ */
 
-/* ---- collapsed sidebar (applies on every screen wider than the drawer) ---- */
 @media (min-width: 900.02px) {
   .nav-collapsed .sidebar { display: none; }
   .nav-collapsed .sidebar-show { display: inline-flex; }
 }
 
-/* ---- iPad landscape & mid widths: give the reading column room ----
-   The measure used to *shrink* as the window grew across 900→901 (a 264px
-   sidebar eating the width before the full measure could be reached).
-   Holding 46rem into this band keeps the reading column monotonic: it only
-   ever grows as the window does. */
+/* 1280–1439px: sidebar, column and rail share 1,280–1,439px; slimmer
+   gutters keep the wide box whole even with a classic 15px scrollbar */
+@media (min-width: 1280px) and (max-width: 1439.98px) {
+  :root { --gutter: 2.25rem; }
+}
+
+/* 901–1279px: the rail is gone; at 1024px the column is exactly
+   680 + 2 × 40px next to a 264px sidebar */
 @media (min-width: 900.02px) and (max-width: 1279.98px) {
-  :root { --measure: 46rem; --gutter: 3rem; }
+  :root { --gutter: 2.5rem; }
   .sidebar { width: 264px; padding-right: 1rem; }
 }
 
@@ -1389,37 +1380,25 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
 
-  /* --sticky-h is the height of the sticky bar, so anchors and the
-     scroll-spy agree with the thing that is actually covering the text.
-     --gutter is the one value the shared padding-inline rule hands to the
-     article, the pager and the footer together. */
   :root { --sticky-h: 3.25rem; --gutter: 1.75rem; }
 
-  /* ------------------------------------------------------------
-     The mobile top bar.
-
-     It used to be a single button reading "☰ Contents" — the only chrome
-     a phone reader had once scrolled, and it never said which chapter
-     they were in. The button keeps its job; the bar now also carries the
-     chapter title, which is the one piece of orientation a long scroll
-     destroys.
-     ------------------------------------------------------------ */
+  /* The mobile top bar: the drawer button plus the chapter title, the
+     one piece of orientation a long scroll destroys. */
   .topbar {
-    display: flex;
-    align-items: center;
-    gap: 0.1rem;
     position: sticky;
     top: 0;
     z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
     width: 100%;
     min-height: 3.25rem;
-    background: var(--bg-raised);
-    border-bottom: 1px solid var(--rule-mid);
     padding-top: env(safe-area-inset-top);
+    background: var(--bg-chrome);
+    border-bottom: 1px solid var(--rule-mid);
     transition: transform 0.3s ease;
     will-change: transform;
   }
-  /* slides up out of view on scroll-down, back on scroll-up (wired in JS) */
   .topbar.hide { transform: translateY(-100%); }
 
   #sidebar-toggle {
@@ -1428,13 +1407,13 @@ body.modal-open { overflow: hidden; }
     gap: 0.55rem;
     flex-shrink: 0;
     min-height: 3.25rem;
-    text-align: left;
+    padding: 0.8rem 0.9rem 0.8rem max(1.15rem, env(safe-area-inset-left));
     background: transparent;
-    color: var(--accent);
     border: none;
-    padding: 0.9rem 0.9rem 0.9rem max(1.15rem, env(safe-area-inset-left));
-    font-family: var(--serif);
-    font-size: 1.02rem;
+    color: var(--accent);
+    font-size: 0.98rem;
+    font-weight: 600;
+    text-align: left;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
@@ -1442,15 +1421,15 @@ body.modal-open { overflow: hidden; }
   #sidebar-toggle:active { background: var(--accent-soft); }
 
   .topbar-title {
-    min-width: 0;
     flex: 1;
+    min-width: 0;
     padding-right: max(1.15rem, env(safe-area-inset-right));
-    color: var(--text-dim);
-    font-size: 0.86rem;
-    line-height: 1.25;
-    white-space: nowrap;
     overflow: hidden;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    line-height: 1.25;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .topbar-title:empty { display: none; }
 
@@ -1459,24 +1438,21 @@ body.modal-open { overflow: hidden; }
     position: fixed;
     top: 0;
     left: 0;
+    z-index: 80;
     width: min(86vw, 340px);
     height: 100%;
     height: 100dvh;
     max-height: none;
-    /* Closed, the drawer kept 63 focusable links in the tab order: a
-       keyboard or switch user tabbing past "Contents" fell into 56
-       invisible chapter links. `visibility` is animatable, so the slide
-       still works. */
+    /* closed, the drawer must not keep its links in the tab order */
     visibility: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    z-index: 80;
-    border-right: 1px solid var(--rule);
-    border-bottom: none;
-    padding: calc(1.5rem + env(safe-area-inset-top)) 1.25rem
+    padding: calc(1.25rem + env(safe-area-inset-top)) 1.15rem
              calc(2rem + env(safe-area-inset-bottom))
-             max(1.5rem, env(safe-area-inset-left));
+             max(1.35rem, env(safe-area-inset-left));
+    border-right: 1px solid var(--rule-mid);
+    border-bottom: none;
     transform: translateX(-100%);
     transition: transform 0.28s ease, visibility 0s linear 0.28s;
   }
@@ -1487,12 +1463,11 @@ body.modal-open { overflow: hidden; }
     transition: transform 0.28s ease, visibility 0s;
   }
 
-  /* dimmed backdrop; tapping it closes the drawer (wired in app.js) */
   .sidebar-scrim {
-    display: block;
     position: fixed;
     inset: 0;
     z-index: 70;
+    display: block;
     background: var(--scrim);
     -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
@@ -1506,51 +1481,49 @@ body.modal-open { overflow: hidden; }
   /* the desktop collapse controls have no place in the drawer layout */
   .sidebar-collapse { display: none; }
   .sidebar-show { display: none !important; }
+  .site-title { padding-right: 0; }
 
   /* thumb-sized rows and controls inside the drawer */
-  .course-chip { padding: 0.55rem 0.6rem; }
-  .chip-title { font-size: 0.96rem; }
-  .chip-desc { font-size: 0.76rem; }
-  .toc-list a { padding: 0.6rem 0.6rem; font-size: 1rem; line-height: 1.35; }
-  .toc-num { font-size: 0.76rem; }
-  .toc-part { font-size: 0.7rem; margin-top: 1.4rem; }
-  .site-title a { font-size: 1.5rem; }
-  .search-open { min-height: 2.85rem; font-size: 0.95rem; }
-  .theme-btn { padding: 0.7rem 0; }
+  .course-chip { min-height: 2.25rem; padding: 0.3rem 0.7rem; font-size: 0.86rem; }
+  .toc-list a { padding-top: 0.55rem; padding-bottom: 0.55rem; font-size: 0.98rem; line-height: 1.35; }
+  .toc-num { font-size: 0.84rem; }
+  .toc-part { font-size: 0.9rem; margin-top: 1.3rem; }
+  .site-title a { font-size: 1.2rem; }
+  .search-open { min-height: 2.75rem; font-size: 0.95rem; }
+  .theme-btn { min-height: 2.4rem; font-size: 0.88rem; }
 
-  .article { padding-top: 2.4rem; padding-bottom: 1.5rem; }
+  .article { padding-top: 2.2rem; padding-bottom: 1.5rem; }
 
-  body { font-size: 16px; }
-  .article h1 { font-size: 1.75rem; }
-  .article h2 { font-size: 1.3rem; margin-top: 2.1rem; }
-  .article h3 { font-size: 1.08rem; }
+  .article h1 { font-size: 1.9rem; }
+  .article h2 { font-size: 1.32rem; margin-top: 2.3rem; }
+  .article h3 { font-size: 1.12rem; }
 }
 
-/* ---- iPad / tablet portrait: the priority — larger, calmer type ---- */
+/* ---- tablet portrait: larger, calmer type ---- */
 @media (min-width: 600.02px) and (max-width: 900px) {
-  body { font-size: 18px; line-height: 1.75; }
-  :root { --measure: 46rem; --gutter: 2.5rem; }
+  body { font-size: 1.09rem; }
+  :root { --gutter: 2.5rem; }
 
-  .article { padding-top: 3rem; padding-bottom: 2rem; }
-  .article h1 { font-size: 2rem; }
-  .article h2 { font-size: 1.45rem; margin-top: 2.6rem; }
-  .article h3 { font-size: 1.18rem; }
-  .article pre code { font-size: 0.86rem; }
-  .article table { font-size: 0.95rem; }
+  .article { padding-top: 2.8rem; padding-bottom: 2rem; }
+  .article h1 { font-size: 2.05rem; }
+  .article h2 { font-size: 1.42rem; margin-top: 2.6rem; }
+  .article h3 { font-size: 1.16rem; }
+  .article table { font-size: 0.94rem; }
 }
 
 /* ============================================================
    Phone (≤ 600px)
    ============================================================ */
 @media (max-width: 600px) {
-  body { font-size: 16px; line-height: 1.68; }
+  body { font-size: 1rem; line-height: 1.62; }
   :root { --gutter: 1.15rem; }
 
-  .article { padding-top: 1.85rem; padding-bottom: 1rem; }
-  .article h1 { font-size: 1.55rem; }
-  .article h1::after { width: 2rem; margin-top: 0.9rem; }
-  .article h2 { font-size: 1.22rem; margin-top: 1.9rem; }
-  .article h3 { font-size: 1.04rem; }
+  .article { padding-top: 1.7rem; padding-bottom: 1rem; }
+  .article h1 { font-size: 1.66rem; }
+  .article h2 { font-size: 1.26rem; margin-top: 2rem; }
+  .article h3 { font-size: 1.08rem; }
+
+  .article blockquote.goal-box > p.goal-question { font-size: 1.12rem; }
 
   .article pre { padding: 0.8rem 0.9rem; -webkit-overflow-scrolling: touch; }
   .article pre code { font-size: 0.8rem; }
@@ -1561,9 +1534,9 @@ body.modal-open { overflow: hidden; }
   .article code { overflow-wrap: anywhere; word-break: break-word; }
   .article a { overflow-wrap: anywhere; }
 
-  .article blockquote { margin: 1.1rem 0; padding-left: 0.9rem; }
+  .article blockquote { margin: 1.1rem 0; padding-left: 0.85rem; }
   .article blockquote.callout-simple,
-  .article blockquote.callout-nuance { padding: 0.8rem 0.9rem; }
+  .article blockquote.callout-nuance { padding: 0.75rem 0.9rem; }
 
   .article ul, .article ol { padding-left: 1.25rem; }
 
@@ -1575,16 +1548,15 @@ body.modal-open { overflow: hidden; }
     max-width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    font-size: 0.84rem;
+    font-size: 0.86rem;
   }
   /* inside the wrapper the wrapper does the scrolling — let the table be wide */
   .table-scroll table { display: table; max-width: none; overflow-x: visible; }
-  .article th, .article td { padding: 0.4rem 0.6rem; overflow-wrap: break-word; }
+  .article th, .article td { padding: 0.42rem 0.6rem; overflow-wrap: break-word; }
 
   .article details > *:not(summary) { padding: 0 0.8rem; }
   .article details summary { padding: 0.55rem 0.8rem; }
 
-  /* search modal: breathing room instead of edge-to-edge */
   .search-box {
     margin: 8vh max(0.9rem, env(safe-area-inset-right)) 0
             max(0.9rem, env(safe-area-inset-left));
@@ -1593,22 +1565,20 @@ body.modal-open { overflow: hidden; }
 
   .pager {
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.4rem;
     padding-top: 0.9rem;
     padding-bottom: 0;
   }
-  .pager a { max-width: 100%; padding: 0.55rem 0; }
-  .pager .next { text-align: left; margin-left: 0; }
+  .pager a { max-width: 100%; padding: 0.5rem 0; }
+  .pager .next { margin-left: 0; text-align: left; }
 
   .page-footer {
     padding-top: 1rem;
     padding-bottom: calc(2rem + env(safe-area-inset-bottom));
   }
 
-  .toc-part { font-size: 0.66rem; }
-
   /* the meta line wraps instead of forcing the button off the right edge */
-  .chapter-meta { gap: 0.35rem 0.8rem; }
+  .chapter-meta { gap: 0.3rem 0.8rem; }
   .meta-read-btn { margin-left: 0; }
 
   .article pre.mermaid { padding: 0.8rem 0.5rem; }
@@ -1619,28 +1589,29 @@ body.modal-open { overflow: hidden; }
    Small phone (≤ 420px)
    ============================================================ */
 @media (max-width: 420.98px) {
-  body { font-size: 15.5px; }
+  body { font-size: 0.98rem; }
   :root { --gutter: 1rem; }
-  .article h1 { font-size: 1.42rem; }
-  .article h2 { font-size: 1.12rem; }
-  .article h3 { font-size: 1rem; }
-  .article pre { padding: 0.7rem 0.7rem; }
+  .article h1 { font-size: 1.52rem; }
+  .article h2 { font-size: 1.18rem; }
+  .article h3 { font-size: 1.04rem; }
+  .article pre { padding: 0.7rem; }
   .article pre code { font-size: 0.76rem; }
-  .article table { font-size: 0.8rem; }
-  .article th, .article td { padding: 0.34rem 0.45rem; }
+  .article table { font-size: 0.82rem; }
+  .article th, .article td { padding: 0.36rem 0.45rem; }
 
   .article ul, .article ol { padding-left: 1.1rem; }
   .article blockquote { padding-left: 0.75rem; }
+  .article blockquote.goal-box { padding-left: 0.85rem; }
   .article blockquote.callout-simple,
   .article blockquote.callout-nuance { padding: 0.7rem 0.75rem; }
 
   .article details > *:not(summary) { padding: 0 0.65rem; }
-  .article details summary { padding: 0.55rem 0.65rem; font-size: 0.8rem; }
+  .article details summary { padding: 0.55rem 0.65rem; font-size: 0.88rem; }
 
   .search-box { margin: 6vh 0.6rem 0; }
-  #search-input { font-size: 1rem; padding: 0.85rem 0.9rem; }
+  #search-input { padding: 0.85rem 0.9rem; font-size: 1rem; }
   .search-result { padding: 0.5rem 0.55rem; }
-  .search-footer { padding: 0.5rem 0.9rem; font-size: 0.6rem; }
+  .search-footer { padding: 0.5rem 0.9rem; }
 
   /* the drawer must leave a visible sliver of page behind it */
   .sidebar { width: min(88vw, 320px); }

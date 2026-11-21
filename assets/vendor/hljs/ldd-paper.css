@@ -1,0 +1,20 @@
+/* highlight.js theme for this site — light (Paper) theme.
+   Written for this site (not vendored): built from the same palette as
+   assets/style.css so code reads as part of the page. Every token colour
+   clears 4.5:1 against the code ground (#f0f2f5); comments included.
+   Nothing is italic: comments in these courses carry explanation. */
+.hljs { color: #262b33; background: #f0f2f5; }
+.hljs-subst, .hljs-params, .hljs-punctuation, .hljs-operator { color: #262b33; }
+.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-section, .hljs-name { color: #7438b0; }
+.hljs-string, .hljs-regexp, .hljs-char.escape_, .hljs-template-tag { color: #17693a; }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet { color: #8d5400; }
+.hljs-comment, .hljs-quote { color: #5c6470; }
+.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-selector-id, .hljs-selector-class, .hljs-link { color: #2747c9; }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable, .hljs-selector-attr, .hljs-selector-pseudo, .hljs-tag { color: #0a6670; }
+.hljs-built_in, .hljs-type, .hljs-title.class_.inherited__, .hljs-variable.language_ { color: #ae2216; }
+.hljs-meta, .hljs-meta .hljs-keyword, .hljs-meta .hljs-string { color: #4f5763; }
+.hljs-addition { color: #17693a; background: color-mix(in srgb, #17693a 12%, transparent); }
+.hljs-deletion { color: #ae2216; background: color-mix(in srgb, #ae2216 12%, transparent); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong, .hljs-section { font-weight: 700; }
+.hljs-link { text-decoration: underline; }

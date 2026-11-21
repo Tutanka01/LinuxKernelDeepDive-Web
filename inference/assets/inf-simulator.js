@@ -16,13 +16,15 @@
    actually set serving performance: what the scheduler admits,
    where the KV blocks go, and how long a step takes.
 
-   The step-cost model is three terms and a knee, and every one of
-   them is derived from the reference numbers in the spec rather
-   than tuned to look nice. That matters: if the constants were
-   fudged, the "try this" lessons would be theatre. They are not —
-   the batch-size inversion for speculative decoding, in
-   particular, falls out of the arithmetic and is not special-cased
-   anywhere in this file.
+   The step-cost model is the course's one model — the same
+   formula, the same constants and the same ladder as the
+   "Derived numbers" in inference/research/case.md — so a number
+   the simulator shows is a number a chapter can quote. Nothing is
+   tuned to look nice. That matters: if the constants were fudged,
+   the "try this" lessons would be theatre. They are not — the
+   batch-size inversion for speculative decoding, in particular,
+   falls out of the arithmetic and is not special-cased anywhere
+   in this file.
    ============================================================ */
 
 (function () {
@@ -30,38 +32,63 @@
 
   /* ---------------- the physics ----------------
 
-     One replica = Llama-3-70B, BF16, tensor-parallel over four
-     H100s (spec §6: 990 TFLOP/s dense, 3.35 TB/s, 80 GB each).
+     One replica = Llama-3.3-70B, BF16, tensor-parallel over four
+     H100s (990 TFLOP/s dense BF16, 3.35 TB/s, 80 GB each). One step
+     costs, exactly as case.md prices it:
 
-     WEIGHTS. 140 GB of weights / 4 GPUs = 35 GB each. At ~80% of
-     peak HBM bandwidth that is 35e9 / 2.68e12 ≈ 13 ms to stream
-     the weights once, plus a couple of ms of all-reduce: call it
-     14 ms. This is paid *once per scheduler step* no matter how
-     many sequences ride on it, which is the entire reason batching
-     is free below the knee — and it is also the ITL floor, which
-     is why the meters read in the tens of ms as the arithmetic
-     chapter says decode should. */
-  const W_MS = 14;
+         step ≈ max(t_w, t_c) + t_kv
 
-  /* KV READS. Llama-3-70B is 328 KB of KV per token (spec §6);
-     split four ways that is 82 KB per token per GPU, and at
-     2.68 TB/s achieved that is ~30.6 ns per context token per
-     sequence. This term is per-sequence and proportional to
-     context length, so unlike the weight read it *never batches
-     away* — the arithmetic chapter's "attention doesn't batch
-     away" trap, as a line of code. */
-  const KV_MS_PER_TOK = 3.06e-5;
+     A hybrid step (a prefill chunk riding with decodes) is *not*
+     prefill time plus decode time: the same matrix multiplies read
+     the weights and do the arithmetic, so the two overlap.
 
-  /* COMPUTE. Rather than carry a TFLOP/s constant we use the
-     definition of the critical batch size directly: B_crit is the
-     token count at which a step's arithmetic takes exactly as long
-     as its weight read. So compute time = tokens × W_MS / B_crit,
-     exactly. That makes the B_crit slider mean what the chapter
-     says it means, and puts the knee where the reader put it.
-     (Sanity check at the default: 295 tokens × 14 ms / 295 = 14 ms,
-     i.e. 2.95 PFLOP/s effective across four GPUs = ~75% MFU on the
-     4×990 peak. Self-consistent, and 2.95e15 / (4 × 2.68e12) = 275
-     FLOP/byte — the H100 ridge, as it must be.) */
+     WEIGHTS, t_w. 140 GB / 4 GPUs = 35 GB per GPU, read once per
+     step. The decode-time ladder:
+       rung 1  physics floor      35 GB ÷ 3.35 TB/s          = 10.4 ms
+       rung 2  achievable BW      ÷ (~85% × 3.35 TB/s)       = 12.3 ms
+       rung 3  planning figure    + all-reduce and launches  ≈ 14 ms  ← W_MS
+       rung 4  ~20 seqs × 3K ctx  + KV reads (below)         ≈ 16 ms
+     t_w is paid *once per scheduler step* no matter how many
+     sequences ride on it, which is the entire reason batching is
+     nearly free below the knee — and it is the ITL floor. */
+  const W_FLOOR_MS = 35e9 / 3.35e12 * 1000;   /* rung 1: 10.45 ms */
+  const W_MS = 14;                            /* rung 3 */
+
+  /* KV READS, t_kv. 328 KB of KV per token; split four ways that
+     is 82 KB per context token per GPU, read at ~85% of 3.35 TB/s
+     (2.85 TB/s): ≈ 29 ns per context token per sequence. It is
+     added, not overlapped (case.md rung 4: 20 × 3,000 tokens ≈
+     1.7 ms on top of the 14). Per-sequence and proportional to
+     context, so unlike the weight read it *never batches away* —
+     "attention doesn't batch away", as a line of code. */
+  const KV_MS_PER_TOK = 82e3 / (0.85 * 3.35e12) * 1000;   /* 2.88e-5 ms */
+
+  /* COMPUTE, t_c. 2 × 70e9 FLOPs per token on 4 × 990 TFLOP/s,
+     at the *achieved* model-FLOPs utilisation (MFU, default 40%:
+     1.58e15 FLOP/s → 0.089 ms per token, so a 3,000-token prefill
+     is ~0.27 s and an unchunked 10,000-token one ~0.89 s).
+
+     It is expressed through the B_crit control so that slider keeps
+     meaning what the chapter says: the *nameplate* critical batch,
+     peak FLOP/s ÷ peak byte/s — the token count at which the
+     arithmetic at peak FLOPs takes as long as the weight read at
+     peak bandwidth (rung 1). 295 on an H100 in BF16. So
+
+         t_c per token = W_FLOOR_MS / (B_crit × MFU)
+
+     and the *effective knee*, where t_c catches up with the real
+     t_w of 14 ms, is
+
+         knee = W_MS / t_c per token = B_crit × MFU × W_MS / W_FLOOR_MS
+              = 295 × 0.40 × 1.34 ≈ 158 tokens per step.
+
+     "Nameplate ~295, effective ~160 on this node, measure it." (The
+     simulator used to price compute as tokens × W_MS / B_crit, which
+     silently assumed ~75% MFU and made every prefill half as long as
+     the chapters said.) */
+  const MFU_DEFAULT = 0.40;
+  function tokMs(cfg) { return W_FLOOR_MS / (cfg.bcrit * (cfg.mfu || MFU_DEFAULT)); }
+  function knee(cfg) { return W_MS / tokMs(cfg); }
 
   /* Memory and compute overlap, but not perfectly. A hard max()
      draws the roofline as a corner; a cubic soft-max rounds it by
@@ -74,7 +101,11 @@
   const DRAFT_FRAC = 0.07;
 
   const GPUS = 4;
-  const BLOCK = 16;                /* vLLM's default block_size */
+  /* vLLM's default --block-size: 64 tokens since v0.34.0 (16 before;
+     vllm/config/cache.py, DEFAULT_BLOCK_SIZE). Prefix caching shares
+     only *full* blocks, so the 800-token system prompt is cached as
+     12 blocks = 768 tokens and the last 32 are recomputed. */
+  const BLOCK = 64;
   const REQ_OVERHEAD_MS = 25;      /* tokenize + admission + wire; TTFT floor */
   const MAX_SLOTS = 64;            /* what fits legibly on the canvas */
 
@@ -84,13 +115,14 @@
   function stepCost(cfg, nDecode, prefillTok, kvTok, spec) {
     const g = spec ? cfg.gamma : 0;
     const draft = 1 + g * DRAFT_FRAC;
-    const tMem = W_MS * draft + kvTok * KV_MS_PER_TOK * draft;
+    const tW = W_MS * draft;
+    const tKv = kvTok * KV_MS_PER_TOK * draft;
     /* Speculation verifies γ+1 positions per sequence in one pass,
        and burns γ draft-model token-passes on top. Both land in the
        compute term — which is why they are free when memory-bound
        and pure waste when not. */
     const tokens = prefillTok + nDecode * (1 + g) + nDecode * g * DRAFT_FRAC;
-    return softmax3(tMem, tokens * W_MS / cfg.bcrit);
+    return softmax3(tW, tokens * tokMs(cfg)) + tKv;
   }
 
   /* Expected tokens per verify: (1 − α^(γ+1))/(1 − α). Computed
@@ -386,7 +418,14 @@
     for (let i = 0; i < this.running.length; i++) {
       const s = this.running[i];
       kvTok += s.ctx;
-      if (s.state === "decode") { nDecode++; continue; }
+      if (s.state === "decode") {
+        nDecode++;
+        /* The token it produced last step may have crossed into a new
+           block. Decode growth is the classic preemption trigger, so a
+           failure here queues it for step 4 like a starved prefill. */
+        if (!this.grow(s)) starved.push({ s: s, take: 0 });
+        continue;
+      }
       if (s.state !== "prefill") continue;              /* done/dead: padding only */
       if (prefillTok >= budget) continue;
       let take = Math.min(s.need - s.filled, budget - prefillTok);
@@ -410,6 +449,11 @@
           ones can grow. */
     for (let k = 0; k < starved.length; k++) {
       const s = starved[k].s, take = starved[k].take;
+      /* An earlier starved sequence may already have preempted this
+         one. Growing it now would hand blocks to a sequence nobody
+         runs — they were never freed, and the pool slowly filled with
+         orphans until nothing could be admitted at all. */
+      if (this.running.indexOf(s) < 0) continue;
       let guard = 0;
       while (guard++ < 8) {
         s.ctx += take;
@@ -426,12 +470,21 @@
     }
 
     /* 5. Price the step — both ways, so the reader can always see
-          what speculation would have cost or saved right now. */
+          what speculation would have cost or saved right now.
+
+          The comparison counts every token the step moves, prompt
+          and output alike. Counting output alone flattered
+          speculation at high load: a busy step always carries a
+          prefill chunk, the drafts' extra FLOPs look small next to
+          it, and the readout stayed at +100% while the tok/s meter
+          fell. Past the knee the drafts' FLOPs are taken from the
+          prefill that shares the step — that displacement is the
+          cost, and this is where it shows. */
     const E = accepted(c);
     const dt = stepCost(c, nDecode + dead, prefillTok, kvTok, c.spec);
     const other = stepCost(c, nDecode + dead, prefillTok, kvTok, !c.spec);
-    const tpsNow = (nDecode * (c.spec ? E : 1)) / dt;
-    const tpsAlt = (nDecode * (c.spec ? 1 : E)) / other;
+    const tpsNow = (prefillTok + nDecode * (c.spec ? E : 1)) / dt;
+    const tpsAlt = (prefillTok + nDecode * (c.spec ? 1 : E)) / other;
     if (nDecode > 0) {
       const gain = c.spec ? (tpsNow / tpsAlt - 1) : (tpsAlt / tpsNow - 1);
       this.specGain += (gain * 100 - this.specGain) * 0.05;
@@ -474,14 +527,15 @@
       this.itl.push(dt / got);
       this.itlEv.push([this.t, dt / got]);
       s.lastTok = this.t;
-      if (!this.grow(s)) { /* will be resolved by preemption next step */ }
+      /* a failed grow here is resolved at the top of the next step */
+      this.grow(s);
       if (s.produced >= s.req.out) { s.state = "done"; if (c.mode === "continuous") this.release(s); }
     }
 
     if (this.ttft.length > 200) this.ttft.splice(0, this.ttft.length - 200);
     if (this.itl.length > 600) this.itl.splice(0, this.itl.length - 600);
     /* The worst gap in the last two seconds of model time. A p50
-       or a mean hides a prefill stall — one 470 ms megastep among
+       or a mean hides a prefill stall — one 890 ms megastep among
        150 healthy ones barely moves either — and hiding it is
        exactly the wrong thing for lesson 2. */
     while (this.itlEv.length && this.itlEv[0][0] < this.t - 2000) this.itlEv.shift();
@@ -530,31 +584,34 @@
      The widget
      ============================================================ */
 
+  /* Pool sizes are in 64-token blocks: 1,500 blocks = 96K tokens of
+     context, about a quarter of the case node's real 132 GB pool
+     (~400K tokens), so the squeeze is reachable on a canvas this size. */
   const PRESETS = [
-    { name: "1 · Static batching",
-      cfg: { mode: "static", workload: "chat", arrival: 10, chunked: true, prefixCache: true,
-             pool: 6000, bcrit: 295, spec: false, giant: false, chunk: 512 },
+    { name: "1. Static batching",
+      cfg: { mode: "static", workload: "chat", arrival: 6, chunked: true, prefixCache: true,
+             pool: 1500, bcrit: 295, mfu: 0.40, spec: false, giant: false, chunk: 512 },
       note: "Static: a finished sequence goes grey and still holds its slot until the whole cohort drains, and the queue climbs behind the closed door. Flip Batching back to Continuous and watch both go away." },
-    { name: "2 · A 10K prompt, unchunked",
+    { name: "2. A 10K prompt, unchunked",
       cfg: { mode: "continuous", workload: "chat", arrival: 6, chunked: false, prefixCache: true,
-             pool: 4000, bcrit: 295, spec: false, giant: true, chunk: 512 },
-      note: "A 10,000-token prompt lands every 3 s with chunking off: one megastep, and every decoder's ITL detonates. Tick 'chunked prefill' — the spike flattens into a small standing tax." },
-    { name: "3 · Agent, no prefix cache",
+             pool: 1500, bcrit: 295, mfu: 0.40, spec: false, giant: true, chunk: 512 },
+      note: "A 10,000-token prompt lands every 3 s with chunking off: one ~0.9 s megastep (10,000 × 0.089 ms at 40% MFU), and every decoder's worst ITL jumps to match it. Tick 'chunked prefill' — the spike flattens into a standing tax of ~50 ms steps while the chunks go through." },
+    { name: "3. Agent, no prefix cache",
       cfg: { mode: "continuous", workload: "agent", arrival: 3, chunked: true, prefixCache: false,
-             pool: 5000, bcrit: 295, spec: false, giant: false, chunk: 512 },
+             pool: 1250, bcrit: 295, mfu: 0.40, spec: false, giant: false, chunk: 512 },
       note: "Agent traffic re-prefilling its whole growing context every iteration. Tick 'prefix caching' and watch TTFT fall by roughly an order of magnitude as the green shared blocks appear." },
-    { name: "4 · Squeeze the KV pool",
+    { name: "4. Squeeze the KV pool",
       cfg: { mode: "continuous", workload: "rag", arrival: 6, chunked: true, prefixCache: true,
-             pool: 700, bcrit: 295, spec: false, giant: false, chunk: 512 },
+             pool: 175, bcrit: 295, mfu: 0.40, spec: false, giant: false, chunk: 512 },
       note: "The pool is too small for the working set: allocation fails, the newest sequences flash rust and restart from their prompt, and the recompute shows up as lost tokens/s. Drag KV pool right until it stops." },
-    { name: "5 · Cross B_crit",
+    { name: "5. Cross the knee",
       cfg: { mode: "continuous", workload: "chat", arrival: 24, chunked: true, prefixCache: true,
-             pool: 6000, bcrit: 64, spec: false, giant: false, chunk: 64 },
-      note: "B_crit is pulled down to 64 here (FP8 weights on a smaller replica) so the knee is reachable at a concurrency this canvas can draw. Drag arrival rate from 2 to 24: ITL sits flat while the step carries under 64 tokens, then climbs once it passes B_crit." },
-    { name: "6 · Speculation past the knee",
+             pool: 1500, bcrit: 120, mfu: 0.40, spec: false, giant: false, chunk: 64 },
+      note: "B_crit is pulled down to 120 here — a what-if chip with less arithmetic per byte than an H100's 295 — so that at 40% MFU the effective knee sits at ~64 tokens per step, which this 64-slot canvas can reach. Drag arrival rate from 2 to 24: ITL sits near the 14 ms floor while the step carries well under the knee, then climbs once it passes it." },
+    { name: "6. Speculation past the knee",
       cfg: { mode: "continuous", workload: "chat", arrival: 24, chunked: true, prefixCache: true,
-             pool: 6000, bcrit: 64, spec: true, alpha: 0.8, gamma: 4, giant: false, chunk: 64 },
-      note: "Speculation on in a compute-bound regime: the spec-vs-no-spec line goes negative. Drop arrival rate to 2 and it swings strongly positive. Nothing special-cases this — the draft FLOPs simply come out of a budget that is already full." },
+             pool: 1500, bcrit: 120, mfu: 0.40, spec: true, alpha: 0.8, gamma: 4, giant: false, chunk: 64 },
+      note: "Speculation on past the knee (same what-if B_crit of 120 as scenario 5): the spec-vs-no-spec readout settles around −10%, because the drafts' FLOPs are taken from the prefill sharing each step. Drop arrival rate to 2 and it swings to about +150%. Nothing special-cases this — the draft FLOPs simply come out of a budget that is already full." },
   ];
 
   function button(parent, label, onClick) {
@@ -574,7 +631,7 @@
     const cfg = {
       seed: 20260726, mode: "continuous", workload: opts.workload || "chat",
       arrival: 6, chunked: true, chunk: 512, prefixCache: true,
-      bcrit: 295, pool: 5000, spec: false, alpha: 0.8, gamma: 4,
+      bcrit: 295, mfu: MFU_DEFAULT, pool: 1250, spec: false, alpha: 0.8, gamma: 4,
       giant: false, speed: 1,
       /* A reader who asked the OS for no motion should not land on a
          continuously animating canvas and have to find the Pause button.
@@ -643,8 +700,12 @@
     });
     const sArr = InfWidgets.slider(grid, { label: "arrival rate", min: 1, max: 40, step: 1, value: cfg.arrival, format: function (v) { return v + " req/s"; } });
     const sChunk = InfWidgets.slider(grid, { label: "prefill chunk", min: 64, max: 2048, step: 64, value: cfg.chunk, format: function (v) { return v + " tok"; } });
-    const sB = InfWidgets.slider(grid, { label: "B_crit", min: 24, max: 320, step: 8, value: cfg.bcrit, format: function (v) { return v + " tok/step"; } });
-    const sPool = InfWidgets.slider(grid, { label: "KV pool", min: 150, max: 6000, step: 50, value: cfg.pool, format: function (v) { return v + " blocks"; } });
+    const sB = InfWidgets.slider(grid, { label: "B_crit (nameplate)", min: 24, max: 320, step: 8, value: cfg.bcrit, format: function (v) { return v + " tok/step"; } });
+    /* The achieved fraction of peak FLOP/s. 40% is the case's planning
+       figure; the old simulator silently ran at ~75%. With B_crit it
+       sets the effective knee, which the verdict line reports. */
+    const sMfu = InfWidgets.slider(grid, { label: "achieved MFU", min: 20, max: 80, step: 5, value: Math.round(cfg.mfu * 100), format: function (v) { return v + "%"; } });
+    const sPool = InfWidgets.slider(grid, { label: "KV pool", min: 40, max: 1500, step: 10, value: cfg.pool, format: function (v) { return InfWidgets.fmt(v, 0) + " blocks · " + InfWidgets.fmt(v * BLOCK / 1000, 0) + "K tok"; } });
     const sAlpha = InfWidgets.slider(grid, { label: "acceptance α", min: 0.4, max: 0.95, step: 0.01, value: cfg.alpha, format: function (v) { return v.toFixed(2); } });
     const sGamma = InfWidgets.slider(grid, { label: "draft length γ", min: 1, max: 8, step: 1, value: cfg.gamma, format: function (v) { return String(v); } });
     const sSpeed = InfWidgets.slider(grid, { label: "speed", min: 0, max: 5, step: 1, value: 2, format: function (v) { return [0.1, 0.25, 1, 2, 4, 8][v] + "×"; } });
@@ -673,6 +734,7 @@
       cfg.arrival = Number(sArr.value);
       cfg.chunk = Number(sChunk.value);
       cfg.bcrit = Number(sB.value);
+      cfg.mfu = Number(sMfu.value) / 100;
       cfg.alpha = Number(sAlpha.value);
       cfg.gamma = Number(sGamma.value);
       cfg.chunked = tChunk.checked;
@@ -683,7 +745,7 @@
       const p = Number(sPool.value);
       if (p !== sim.pool.length) sim.resizePool(p);
     }
-    [wl, mode, sArr, sChunk, sB, sPool, sAlpha, sGamma, sSpeed, tChunk, tCache, tSpec, tGiant]
+    [wl, mode, sArr, sChunk, sB, sMfu, sPool, sAlpha, sGamma, sSpeed, tChunk, tCache, tSpec, tGiant]
       .forEach(function (c) { c.addEventListener("input", readControls); c.addEventListener("change", readControls); });
 
     PRESETS.forEach(function (p) {
@@ -691,10 +753,11 @@
         Object.keys(p.cfg).forEach(function (k) { cfg[k] = p.cfg[k]; });
         wl.value = cfg.workload; mode.value = cfg.mode;
         sArr.value = cfg.arrival; sChunk.value = cfg.chunk; sB.value = cfg.bcrit;
+        sMfu.value = Math.round((cfg.mfu || MFU_DEFAULT) * 100);
         sPool.value = cfg.pool; sAlpha.value = cfg.alpha; sGamma.value = cfg.gamma;
         tChunk.checked = cfg.chunked; tCache.checked = cfg.prefixCache;
         tSpec.checked = cfg.spec; tGiant.checked = cfg.giant;
-        [sArr, sChunk, sB, sPool, sAlpha, sGamma].forEach(function (s) {
+        [sArr, sChunk, sB, sMfu, sPool, sAlpha, sGamma].forEach(function (s) {
           s.dispatchEvent(new Event("input", { bubbles: true }));
         });
         caption.textContent = p.note;
@@ -711,10 +774,11 @@
 
     /* Six sequence colours per theme. Four hues would be the
        diagram rule, but a block pool needs enough to tell adjacent
-       owners apart; these stay inside the course's temperature. */
+       owners apart. None of them is the accent (a prefilling slot) or
+       the red (a giant prompt, a preemption), which carry meaning. */
     const SEQ = {
-      dark:  ["#d9a05b", "#7fb8c4", "#9fbf7f", "#d98a7a", "#b6a2d8", "#c7b46a"],
-      paper: ["#8f5d1a", "#2f6d7d", "#4f7d2c", "#a4462e", "#5b4a8f", "#7d6a1f"],
+      dark:  ["#c4a7ff", "#5fc6c4", "#7ccf98", "#e5b562", "#f0a6c8", "#b8c4d6"],
+      paper: ["#7438b0", "#0b6e75", "#1a7040", "#8d5400", "#a3346e", "#4f5d73"],
     };
 
     function draw() {
@@ -723,7 +787,7 @@
       const ctx = stage.ctx, w = stage.w, h = stage.h;
       const narrow = w < 460;
       ctx.fillStyle = P.panel; ctx.fillRect(0, 0, w, h);
-      ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.font = "500 12px " + P.sans;
       ctx.textBaseline = "alphabetic";
 
       const pad = narrow ? 8 : 14;
@@ -732,7 +796,7 @@
       /* --- arrivals queue --- */
       let y = pad + 12;
       ctx.fillStyle = P.dim;
-      ctx.fillText("QUEUE — " + m.queue + " waiting", pad, y);
+      ctx.fillText("Queue: " + m.queue + " waiting", pad, y);
       y += 6;
       const qh = narrow ? 12 : 16, qw = w - pad * 2;
       ctx.fillStyle = P.bg; ctx.fillRect(pad, y, qw, qh);
@@ -747,8 +811,9 @@
 
       /* --- batch slots --- */
       ctx.fillStyle = P.dim;
-      ctx.fillText("BATCH — " + m.running + "/" + MAX_SLOTS + " slots · " +
-        Math.round(m.tokens) + " tok/step vs B_crit " + cfg.bcrit, pad, y);
+      ctx.fillText("Batch: " + m.running + "/" + MAX_SLOTS + " slots, " +
+        Math.round(m.tokens) + " tok/step vs knee ~" + Math.round(knee(cfg)) +
+        (narrow ? "" : " (B_crit " + cfg.bcrit + " × " + Math.round(cfg.mfu * 100) + "% MFU)"), pad, y);
       y += 6;
       const cols = narrow ? 8 : 16, rows = Math.ceil(MAX_SLOTS / cols);
       const cw = (w - pad * 2) / cols, ch = narrow ? 9 : 13;
@@ -769,15 +834,15 @@
 
       /* --- KV block pool --- */
       ctx.fillStyle = P.dim;
-      ctx.fillText("KV BLOCK POOL — " + Math.round(m.util * 100) + "% of " + sim.pool.length +
-        " blocks · " + sim.cache.size + " cached prefixes · " + m.preempts + " preemptions", pad, y);
+      ctx.fillText("KV block pool: " + Math.round(m.util * 100) + "% of " + sim.pool.length +
+        " blocks, " + sim.cache.size + " cached prefixes, " + m.preempts + " preemptions", pad, y);
       y += 6;
       const ph = h - y - pad;
       const n = sim.pool.length;
       const pcols = Math.max(8, Math.round(Math.sqrt(n * (w - pad * 2) / Math.max(1, ph))));
       const cell = Math.max(1.5, Math.min((w - pad * 2) / pcols, ph / Math.ceil(n / pcols)));
       ctx.fillStyle = P.bg; ctx.fillRect(pad, y, w - pad * 2, ph);
-      /* Group by colour so a 6,000-cell pool is a handful of fills,
+      /* Group by colour so a 1,500-cell pool is a handful of fills,
          not six thousand. */
       const groups = new Map();
       for (let i = 0; i < n; i++) {
@@ -817,7 +882,7 @@
         series.forEach(function (ser, i) {
           const x0 = 4 + i * bw;
           s.fillStyle = P.faint;
-          s.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+          s.font = "500 11px " + P.sans;
           s.fillText(ser[0], x0 + 2, 12);
           const d = ser[1];
           if (d.length < 2) return;
@@ -846,15 +911,17 @@
       cells[3].className = "inf-result-value" + (m.itlMax > 90 ? " bad" : "");
       cells[6].className = "inf-result-value" + (m.util > 0.95 ? " bad" : "");
 
-      const memBound = m.tokens < cfg.bcrit;
+      const k = knee(cfg);
+      const memBound = m.tokens < k;
       verdict.innerHTML =
         "<strong>" + (memBound ? "Memory-bound" : "Compute-bound") + "</strong> — " +
-        Math.round(m.tokens) + " tokens this step against a B_crit of " + cfg.bcrit + ", so " +
+        Math.round(m.tokens) + " tokens this step against an effective knee of ~" + Math.round(k) +
+        " (nameplate B_crit " + cfg.bcrit + " at " + Math.round(cfg.mfu * 100) + "% MFU), so " +
         (memBound ? "another sequence rides along nearly free." : "every extra token now costs latency.") +
         " Step " + F(m.step, 1) + " ms. Speculation right now: <strong>" +
-        (sim.specGain >= 0 ? "+" : "") + F(sim.specGain, 0) + "% tokens/s</strong>" +
+        (sim.specGain >= 0 ? "+" : "") + F(sim.specGain, 0) + "% tokens moved/s</strong>" +
         (cfg.spec ? " (on)" : " (off — this is the counterfactual)") +
-        (m.recompute ? " · " + F(m.recompute / 1000, 1) + "K tokens recomputed after preemption." : "");
+        (m.recompute ? ". " + F(m.recompute / 1000, 1) + "K tokens recomputed after preemption." : "");
     }
 
     /* ---------------- loop & lifecycle ---------------- */
@@ -903,12 +970,16 @@
     raf = requestAnimationFrame(frame);
   }
 
-  if (window.InfWidgets) window.InfWidgets.define("engine-simulator", mount);
+  if (typeof window !== "undefined" && window.InfWidgets) window.InfWidgets.define("engine-simulator", mount);
 
   /* Headless hook: lets the physics above be exercised from node
      while developing. In a browser `module` is undefined and this
      line does nothing. */
   if (typeof module === "object" && module.exports) {
-    module.exports = { Sim: Sim, stepCost: stepCost, accepted: accepted, W_MS: W_MS, KV_MS_PER_TOK: KV_MS_PER_TOK };
+    module.exports = {
+      Sim: Sim, stepCost: stepCost, accepted: accepted, knee: knee, tokMs: tokMs,
+      W_MS: W_MS, W_FLOOR_MS: W_FLOOR_MS, KV_MS_PER_TOK: KV_MS_PER_TOK, BLOCK: BLOCK,
+      MFU_DEFAULT: MFU_DEFAULT, PRESETS: PRESETS,
+    };
   }
 })();

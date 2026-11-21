@@ -62,6 +62,7 @@ vLLM 2026 guidance: default FP8 KV, but skip sliding-window layers (`--kv-cache-
 
 **Perplexity is a near-useless quantization metric.** A quantized model can hold flat PPL and GSM8K while catastrophically failing hard reasoning:
 - MATH-500: **3-bit AWQ dropped 85.6% → 47.0%** while *inflating* CoT length **5.2K → 23.4K tokens (4.5×)** ([arXiv 2606.25519](https://arxiv.org/pdf/2606.25519)).
+  - **CORRECTION (2026-10-19):** checked against the paper — it reports neither perplexity nor MATH-500. Its actual figures (Qwen3-4B, INT3 AWQ): AIME25 76.7% → 20.0% with CoT +45%; average CoT token inflation +276% over six benchmarks. The figures above are not from this source; do not reuse them.
 - Degradation is task-scaled: GSM8K ~7% avg, MATH ~15%, **AIME frequently → total failure** ([arXiv 2505.11574](https://arxiv.org/pdf/2505.11574)).
 - **"Token inflation" is a hidden tax** [contested framing]: quantized reasoning models recover accuracy but generate longer chains that can cancel the per-token speedup ([arXiv 2606.00206](https://arxiv.org/pdf/2606.00206)).
 
